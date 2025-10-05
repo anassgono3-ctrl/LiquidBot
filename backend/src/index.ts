@@ -8,7 +8,7 @@ dotenv.config();
 const logger = createLogger({
   level: "info",
   format: format.combine(format.timestamp(), format.json()),
-  transports: [new transports.Console()]
+  transports: [new transports.Console()],
 });
 
 const app = express();
@@ -34,7 +34,7 @@ const shutdown = (signal: string) => {
   logger.info(`Received ${signal}, shutting down...`);
   process.exit(0);
 };
-["SIGINT", "SIGTERM"].forEach(sig => process.on(sig, () => shutdown(sig)));
+["SIGINT", "SIGTERM"].forEach((sig) => process.on(sig, () => shutdown(sig)));
 
 const port = Number(process.env.PORT) || 3000;
 app.listen(port, () => {

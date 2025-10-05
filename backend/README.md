@@ -5,9 +5,11 @@ This directory will contain the backend services for the LiquidBot liquidation p
 ## Planned Services
 
 ### API Service
+
 Express-based REST API for user interactions and data queries.
 
 **Features**:
+
 - User authentication (JWT + wallet signature)
 - Position enrollment and management
 - Intervention history queries
@@ -17,9 +19,11 @@ Express-based REST API for user interactions and data queries.
 **Status**: 🔜 Planned
 
 ### Position Monitor Worker
+
 Background worker that polls the Aave V3 subgraph and monitors positions.
 
 **Features**:
+
 - Batch subgraph queries (500-1000 positions per cycle)
 - Position data caching (Redis)
 - Health factor calculation
@@ -28,9 +32,11 @@ Background worker that polls the Aave V3 subgraph and monitors positions.
 **Status**: 🔜 Planned
 
 ### Risk Analyzer Worker
+
 Analyzes at-risk positions and determines optimal protection actions.
 
 **Features**:
+
 - Real-time health factor calculation
 - Risk assessment and prioritization
 - Action strategy selection
@@ -39,9 +45,11 @@ Analyzes at-risk positions and determines optimal protection actions.
 **Status**: 🔜 Planned
 
 ### Action Executor Worker
+
 Executes protection transactions on the Base network.
 
 **Features**:
+
 - Smart contract interaction
 - Transaction retry logic
 - Gas price optimization
@@ -91,12 +99,14 @@ backend/
 ## Development Setup (Future)
 
 ### Prerequisites
+
 - Node.js 18+
 - PostgreSQL 14+
 - Redis 7+
 - Docker & Docker Compose
 
 ### Installation
+
 ```bash
 # Install dependencies
 npm install
@@ -115,6 +125,7 @@ npm run dev
 ```
 
 ### Running Tests
+
 ```bash
 # Run all tests
 npm test
@@ -130,6 +141,7 @@ npm run test:watch
 ```
 
 ### Linting and Formatting
+
 ```bash
 # Check code style
 npm run lint
@@ -243,6 +255,7 @@ PROMETHEUS_PORT=9090
 ## Monitoring
 
 Key metrics to track:
+
 - API request rate and latency
 - Worker job processing rates
 - Database connection pool usage
@@ -254,6 +267,7 @@ Key metrics to track:
 ## Documentation
 
 For detailed architecture and implementation details, see:
+
 - [../docs/ARCHITECTURE.md](../docs/ARCHITECTURE.md)
 - [../docs/SPEC.md](../docs/SPEC.md)
 

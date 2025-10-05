@@ -2,7 +2,7 @@ import { Queue, Worker } from "bullmq";
 
 const connection = {
   host: process.env.REDIS_HOST || "127.0.0.1",
-  port: Number(process.env.REDIS_PORT) || 6379
+  port: Number(process.env.REDIS_PORT) || 6379,
 };
 
 // Queue for future position monitoring tasks
@@ -15,7 +15,7 @@ new Worker(
     // Placeholder logic:
     console.log("Processing job", job.id, job.data);
   },
-  { connection }
+  { connection },
 );
 
 console.log("Worker started for queue: position-monitor");
