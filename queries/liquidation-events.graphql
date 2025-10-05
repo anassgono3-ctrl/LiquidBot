@@ -1,0 +1,29 @@
+# Aave V3 Base - Liquidation Events Query
+# Retrieves recent liquidation events for analysis and pattern detection
+
+query GetLiquidationEvents($first: Int = 1000, $timestamp: Int = 1728043200) {
+  liquidationCalls(
+    first: $first
+    orderBy: timestamp
+    orderDirection: desc
+    where: { timestamp_gte: $timestamp }
+  ) {
+    id
+    timestamp
+    user {
+      id
+    }
+    collateralReserve {
+      symbol
+      decimals
+    }
+    collateralAmount
+    principalReserve {
+      symbol
+      decimals
+    }
+    principalAmount
+    liquidator
+    txHash
+  }
+}

@@ -1,0 +1,28 @@
+# Aave V3 Base - Active Users with Debt Query
+# Retrieves users with active borrowing positions for monitoring
+
+query GetActiveUsersWithDebt($first: Int = 500, $skip: Int = 0) {
+  users(
+    first: $first
+    skip: $skip
+    where: { borrowedReservesCount_gt: 0 }
+  ) {
+    id
+    borrowedReservesCount
+    reserves {
+      currentATokenBalance
+      currentVariableDebt
+      currentStableDebt
+      reserve {
+        symbol
+        decimals
+        reserveLiquidationThreshold
+        reserveLiquidationBonus
+        usageAsCollateralEnabled
+        price {
+          priceInEth
+        }
+      }
+    }
+  }
+}

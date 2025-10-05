@@ -1,0 +1,22 @@
+# Aave V3 Base - Reserve Information Query
+# Retrieves detailed information about available reserves (assets)
+
+query GetReserveInformation($first: Int = 50) {
+  reserves(
+    first: $first
+    where: { usageAsCollateralEnabled: true }
+  ) {
+    id
+    symbol
+    name
+    decimals
+    reserveLiquidationThreshold
+    reserveLiquidationBonus
+    totalLiquidity
+    availableLiquidity
+    price {
+      priceInEth
+    }
+    lastUpdateTimestamp
+  }
+}
