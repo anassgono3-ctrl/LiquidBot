@@ -1,0 +1,76 @@
+# Aave V3 Base - Complete Monitoring Dataset
+# Combines multiple queries for comprehensive position monitoring
+
+query GetCompleteMonitoringDataset(
+  $userFirst: Int = 500
+  $reserveFirst: Int = 50
+  $liquidationFirst: Int = 100
+  $timestamp: Int = 1725379200
+) {
+  # Active users with debt
+  users(
+    first: $userFirst
+    where: { borrowedReservesCount_gt: 0 }
+  ) {
+    id
+    borrowedReservesCount
+    reserves {
+      currentATokenBalance
+      currentVariableDebt
+      currentStableDebt
+      reserve {
+        symbol
+        decimals
+        reserveLiquidationThreshold
+        reserveLiquidationBonus
+        usageAsCollateralEnabled
+        price {
+          priceInEth
+        }
+      }
+    }
+  }
+  
+  # Reserve information
+  reserves(
+    first: $reserveFirst
+    where: { usageAsCollateralEnabled: true }
+  ) {
+    id
+    symbol
+    name
+    decimals
+    reserveLiquidationThreshold
+    reserveLiquidationBonus
+    totalLiquidity
+    availableLiquidity
+    price {
+      priceInEth
+    }
+    lastUpdateTimestamp
+  }
+  
+  # Recent liquidations
+  liquidationCalls(
+    first: $liquidationFirst
+    orderBy: timestamp
+    orderDirection: desc
+    where: { timestamp_gte: $timestamp }
+  ) {
+    id
+    timestamp
+    user {
+      id
+    }
+    collateralReserve {
+      symbol
+    }
+    collateralAmount
+    principalReserve {
+      symbol
+    }
+    principalAmount
+    liquidator
+    txHash
+  }
+}
