@@ -8,7 +8,7 @@ import { createLogger, format, transports } from "winston";
 import { config } from "./config/index.js";
 import { authenticate } from "./middleware/auth.js";
 import { rateLimiter } from "./middleware/rateLimit.js";
-import apiRoutes from "./api/routes.js";
+import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
 
 const logger = createLogger({
@@ -36,7 +36,7 @@ app.get("/metrics", async (_req, res) => {
 });
 
 // API routes with authentication
-app.use("/api/v1", authenticate, apiRoutes);
+app.use("/api/v1", authenticate, buildRoutes());
 
 // Initialize WebSocket server
 const { wss } = initWebSocketServer(httpServer);
@@ -55,4 +55,5 @@ const port = config.port;
 httpServer.listen(port, () => {
   logger.info(`LiquidBot backend listening on port ${port}`);
   logger.info(`WebSocket server available at ws://localhost:${port}/ws`);
+  logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl}`);
 });
