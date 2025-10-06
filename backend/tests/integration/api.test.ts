@@ -1,11 +1,14 @@
 // Integration tests for API routes
+// Force mock mode for this test file BEFORE importing config
+process.env.USE_MOCK_SUBGRAPH = 'true';
+
 import { describe, it, expect, beforeAll } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 
 import { config } from '../../src/config/index.js';
 import { authenticate } from '../../src/middleware/auth.js';
-import apiRoutes from '../../src/api/routes.js';
+import buildRoutes from '../../src/api/routes.js';
 
 describe('API Integration Tests', () => {
   let app: express.Application;
@@ -13,7 +16,7 @@ describe('API Integration Tests', () => {
   beforeAll(() => {
     app = express();
     app.use(express.json());
-    app.use('/api/v1', authenticate, apiRoutes);
+    app.use('/api/v1', authenticate, buildRoutes());
   });
 
   describe('GET /api/v1/health', () => {
