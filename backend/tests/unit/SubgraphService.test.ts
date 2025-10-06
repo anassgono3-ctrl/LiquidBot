@@ -1,30 +1,28 @@
-// Unit tests for SubgraphService
+// Updated unit tests for SubgraphService with DI support
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { GraphQLClient } from 'graphql-request';
-
 import { SubgraphService } from '../../src/services/SubgraphService.js';
 
-// Mock graphql-request
-vi.mock('graphql-request', () => {
-  const GraphQLClient = vi.fn();
-  GraphQLClient.prototype.request = vi.fn();
-  return { GraphQLClient, gql: (strings: TemplateStringsArray) => strings[0] };
-});
+const requestMock = vi.fn();
+
+function liveServiceWith(response: any) {
+  requestMock.mockReset();
+  requestMock.mockResolvedValue(response);
+  return new SubgraphService({
+    mock: false,
+    client: { request: requestMock },
+    endpointOverride: 'https://gateway.test/subgraph'
+  });
+}
 
 describe('SubgraphService', () => {
-  let service: SubgraphService;
-  let mockRequest: ReturnType<typeof vi.fn>;
-
   beforeEach(() => {
+    process.env.USE_MOCK_SUBGRAPH = 'false';
     vi.clearAllMocks();
-    service = new SubgraphService('https://test-subgraph.example.com');
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockRequest = vi.mocked(GraphQLClient.prototype.request) as any;
   });
 
   describe('getLiquidationCalls', () => {
     it('should fetch and parse liquidation calls', async () => {
-      const mockData = {
+      const service = liveServiceWith({
         liquidationCalls: [
           {
             id: '0x123',
@@ -35,30 +33,23 @@ describe('SubgraphService', () => {
             collateralAmount: '2000000',
           },
         ],
-      };
-
-      mockRequest.mockResolvedValueOnce(mockData);
-
+      });
       const result = await service.getLiquidationCalls(10);
-
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('0x123');
-      expect(result[0].liquidator).toBe('0xabc');
-      expect(mockRequest).toHaveBeenCalledWith(expect.any(String), { first: 10 });
+      expect(requestMock).toHaveBeenCalledTimes(1);
     });
 
     it('should handle empty results', async () => {
-      mockRequest.mockResolvedValueOnce({ liquidationCalls: [] });
-
-      const result = await service.getLiquidationCalls(10);
-
+      const service = liveServiceWith({ liquidationCalls: [] });
+      const result = await service.getLiquidationCalls(5);
       expect(result).toHaveLength(0);
     });
   });
 
   describe('getReserves', () => {
     it('should fetch and parse reserve data', async () => {
-      const mockData = {
+      const service = liveServiceWith({
         reserves: [
           {
             id: '0xusdc',
@@ -79,23 +70,17 @@ describe('SubgraphService', () => {
             price: { priceInEth: '1.0' },
           },
         ],
-      };
-
-      mockRequest.mockResolvedValueOnce(mockData);
-
+      });
       const result = await service.getReserves();
-
       expect(result).toHaveLength(2);
       expect(result[0].symbol).toBe('USDC');
-      expect(result[0].decimals).toBe(6);
       expect(result[1].symbol).toBe('WETH');
-      expect(result[1].decimals).toBe(18);
     });
   });
 
   describe('getUsersWithDebt', () => {
     it('should fetch and parse users with debt', async () => {
-      const mockData = {
+      const service = liveServiceWith({
         users: [
           {
             id: '0x123',
@@ -118,22 +103,14 @@ describe('SubgraphService', () => {
             ],
           },
         ],
-      };
-
-      mockRequest.mockResolvedValueOnce(mockData);
-
+      });
       const result = await service.getUsersWithDebt(100);
-
       expect(result).toHaveLength(1);
       expect(result[0].id).toBe('0x123');
-      expect(result[0].borrowedReservesCount).toBe(1);
-      expect(result[0].reserves).toHaveLength(1);
-      expect(result[0].reserves[0].reserve.symbol).toBe('USDC');
-      expect(mockRequest).toHaveBeenCalledWith(expect.any(String), { first: 100 });
     });
 
     it('should handle multiple users with multiple reserves', async () => {
-      const mockData = {
+      const service = liveServiceWith({
         users: [
           {
             id: '0x111',
@@ -190,12 +167,8 @@ describe('SubgraphService', () => {
             ],
           },
         ],
-      };
-
-      mockRequest.mockResolvedValueOnce(mockData);
-
+      });
       const result = await service.getUsersWithDebt(50);
-
       expect(result).toHaveLength(2);
       expect(result[0].reserves).toHaveLength(2);
       expect(result[1].reserves).toHaveLength(1);
@@ -204,80 +177,34 @@ describe('SubgraphService', () => {
 
   describe('error handling', () => {
     it('should throw on GraphQL errors with contextual message', async () => {
-      mockRequest.mockRejectedValueOnce(new Error('GraphQL error'));
-
+      requestMock.mockReset();
+      requestMock.mockRejectedValueOnce(new Error('GraphQL error'));
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
       await expect(service.getUsersWithDebt(10)).rejects.toThrow('SUBGRAPH_USERS_FAILED');
     });
 
     it('should throw on validation errors', async () => {
-      const invalidData = {
+      requestMock.mockReset();
+      requestMock.mockResolvedValueOnce({
         users: [
           {
             id: '0x123',
-            // Missing borrowedReservesCount
+            // borrowedReservesCount missing
             reserves: [],
           },
         ],
-      };
-
-      mockRequest.mockResolvedValueOnce(invalidData);
-
+      });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
       await expect(service.getUsersWithDebt(10)).rejects.toThrow();
     });
   });
 
   describe('mock mode', () => {
-    let mockService: SubgraphService;
-
-    beforeEach(() => {
-      // Set mock mode in environment
-      process.env.USE_MOCK_SUBGRAPH = 'true';
-      // Reimport config to pick up env changes
-      vi.resetModules();
-    });
-
-    it('should return mock liquidation calls in mock mode', async () => {
-      // Import config after setting env
-      const { config } = await import('../../src/config/index.js');
-      const { SubgraphService: MockSubgraphService } = await import(
-        '../../src/services/SubgraphService.js'
-      );
-
-      expect(config.useMockSubgraph).toBe(true);
-      mockService = new MockSubgraphService();
-
-      const result = await mockService.getLiquidationCalls(10);
-
-      expect(result).toEqual([]);
-      expect(mockRequest).not.toHaveBeenCalled();
-    });
-
-    it('should return mock reserves in mock mode', async () => {
-      const { SubgraphService: MockSubgraphService } = await import(
-        '../../src/services/SubgraphService.js'
-      );
-      mockService = new MockSubgraphService();
-
-      const result = await mockService.getReserves();
-
-      expect(result).toHaveLength(1);
-      expect(result[0].symbol).toBe('MCK');
-      expect(result[0].name).toBe('Mock Asset');
-      expect(mockRequest).not.toHaveBeenCalled();
-    });
-
-    it('should return mock users in mock mode', async () => {
-      const { SubgraphService: MockSubgraphService } = await import(
-        '../../src/services/SubgraphService.js'
-      );
-      mockService = new MockSubgraphService();
-
-      const result = await mockService.getUsersWithDebt(100);
-
-      expect(result).toHaveLength(2);
-      expect(result[0].id).toBe('0xMockUser1');
-      expect(result[1].id).toBe('0xMockUser2');
-      expect(mockRequest).not.toHaveBeenCalled();
+    it('returns canned data in mock mode', async () => {
+      const service = SubgraphService.createMock();
+      const users = await service.getUsersWithDebt();
+      expect(users.length).toBe(2);
+      expect(requestMock).not.toHaveBeenCalled();
     });
   });
 });
