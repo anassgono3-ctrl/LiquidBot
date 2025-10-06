@@ -1,76 +1,42 @@
-// Enhanced configuration management for LiquidBot backend
 import dotenv from 'dotenv';
+
+import { env } from './envSchema.js';
+
 dotenv.config();
 
-function optional(name: string, fallback?: string): string | undefined {
-  const v = process.env[name];
-  if (v === undefined || v.trim() === '') return fallback;
-  return v.trim();
-}
-
 export const config = {
-  // Server
-  get port() {
-    return Number(optional('PORT', '3000'));
-  },
-  get nodeEnv() {
-    return optional('NODE_ENV', 'development');
-  },
+  get port() { return env.port; },
+  get nodeEnv() { return env.nodeEnv; },
 
-  // Mock toggle
-  get useMockSubgraph() {
-    return (optional('USE_MOCK_SUBGRAPH', 'false') || '').toLowerCase() === 'true';
-  },
+  get useMockSubgraph() { return env.useMockSubgraph; },
+  get graphApiKey() { return env.graphApiKey; },
+  get subgraphDeploymentId() { return env.subgraphDeploymentId; },
 
-  // Subgraph Gateway (Aave V3 Base)
-  get graphApiKey() {
-    return optional('GRAPH_API_KEY');
-  },
-  get subgraphDeploymentId() {
-    return optional('SUBGRAPH_DEPLOYMENT_ID');
-  },
   get subgraphUrl() {
-    if (this.useMockSubgraph) {
-      return 'mock://subgraph';
-    }
-    if (!this.graphApiKey) {
-      throw new Error('GRAPH_API_KEY required when USE_MOCK_SUBGRAPH=false');
-    }
-    if (!this.subgraphDeploymentId) {
-      throw new Error('SUBGRAPH_DEPLOYMENT_ID required when USE_MOCK_SUBGRAPH=false');
-    }
-    // Construct gateway URL with key in path (do not log raw key in production logs)
+    if (this.useMockSubgraph) return 'mock://subgraph';
     return `https://gateway.thegraph.com/api/${this.graphApiKey}/subgraphs/id/${this.subgraphDeploymentId}`;
   },
 
-  // Aave
-  get aavePoolAddress() {
-    return optional('AAVE_POOL_ADDRESS', '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5');
-  },
+  get aavePoolAddress() { return env.aavePoolAddress; },
+
+  // Limits / retries
+  get subgraphFailureThreshold() { return env.subgraphFailureThreshold; },
+  get subgraphRetryAttempts() { return env.subgraphRetryAttempts; },
+  get subgraphRetryBaseMs() { return env.subgraphRetryBaseMs; },
+  get subgraphRateLimitCapacity() { return env.subgraphRateLimitCapacity; },
+  get subgraphRateLimitIntervalMs() { return env.subgraphRateLimitIntervalMs; },
+
+  // Auth
+  get apiKey() { return env.apiKey; },
+  get jwtSecret() { return env.jwtSecret; },
 
   // Database
-  get databaseUrl() {
-    return optional('DATABASE_URL', 'postgres://user:password@localhost:5432/liquidbot');
-  },
+  get databaseUrl() { return env.databaseUrl; },
 
   // Redis
-  get redisUrl() {
-    return optional('REDIS_URL');
-  },
-  get redisHost() {
-    return optional('REDIS_HOST', '127.0.0.1');
-  },
-  get redisPort() {
-    return Number(optional('REDIS_PORT', '6379'));
-  },
-
-  // Authentication
-  get jwtSecret() {
-    return optional('JWT_SECRET', 'dev-secret-change-in-production');
-  },
-  get apiKey() {
-    return optional('API_KEY', 'dev-api-key');
-  },
+  get redisUrl() { return env.redisUrl; },
+  get redisHost() { return env.redisHost; },
+  get redisPort() { return env.redisPort; },
 
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
@@ -80,7 +46,7 @@ export const config = {
   alertThreshold: 1.1,
   emergencyThreshold: 1.05,
 
-  // Fee constants (basis points)
-  refinancingFeeBps: 15, // 0.15%
-  emergencyFeeBps: 50, // 0.5%
+  // Fees
+  get refinancingFeeBps() { return env.refinancingFeeBps; },
+  get emergencyFeeBps() { return env.emergencyFeeBps; },
 };

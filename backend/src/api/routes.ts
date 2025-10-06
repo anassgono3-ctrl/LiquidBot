@@ -8,7 +8,7 @@ import { config } from '../config/index.js';
 
 export default function buildRoutes(subgraph?: SubgraphService) {
   const router = Router();
-  const subgraphService = subgraph || new SubgraphService(config.subgraphUrl);
+  const subgraphService = subgraph || new SubgraphService();
   const healthCalculator = new HealthCalculator();
 
   /**

@@ -1,8 +1,17 @@
 // SubgraphService: Fetch data from Aave V3 Base subgraph via The Graph Gateway
 import { GraphQLClient, gql } from 'graphql-request';
 import { z } from 'zod';
+
 import { config } from '../config/index.js';
 import type { LiquidationCall, Reserve, User } from '../types/index.js';
+import {
+  subgraphRequestsTotal,
+  subgraphRequestDuration,
+  subgraphConsecutiveFailures,
+  subgraphLastSuccessTs,
+  subgraphFallbackActivations,
+  subgraphRateLimitDropped
+} from '../metrics/index.js';
 
 const ReserveSchema = z.object({
   id: z.string(),
@@ -45,6 +54,14 @@ export interface SubgraphServiceOptions {
 export class SubgraphService {
   private client: Pick<GraphQLClient, 'request'> | null;
   private mock: boolean;
+  private consecutiveFailures = 0;
+  private degraded = false;
+
+  // Rate limiting
+  private tokens: number;
+  private readonly capacity: number;
+  private readonly refillIntervalMs: number;
+  private lastRefill: number;
 
   constructor(opts: SubgraphServiceOptions = {}) {
     this.mock = typeof opts.mock === 'boolean' ? opts.mock : config.useMockSubgraph;
@@ -65,74 +82,153 @@ export class SubgraphService {
         this.client = new GraphQLClient(endpoint);
       }
     }
+
+    this.capacity = config.subgraphRateLimitCapacity;
+    this.refillIntervalMs = config.subgraphRateLimitIntervalMs;
+    this.tokens = this.capacity;
+    this.lastRefill = Date.now();
   }
 
   static createMock(): SubgraphService {
     return new SubgraphService({ mock: true });
   }
 
+  isDegraded(): boolean {
+    return this.degraded;
+  }
+
   private ensureLive() {
-    if (this.mock) throw new Error('MOCK_MODE_ACTIVE');
+    if (this.mock || this.degraded) throw new Error('MOCK_OR_DEGRADED');
     if (!this.client) throw new Error('CLIENT_NOT_INITIALIZED');
   }
 
-  async getLiquidationCalls(first = 100): Promise<LiquidationCall[]> {
-    if (this.mock) return [];
-    this.ensureLive();
-    const query = gql`
-      query GetLiquidationCalls($first: Int!) {
-        liquidationCalls(first: $first, orderBy: timestamp, orderDirection: desc) {
-          id
-          timestamp
-          liquidator
-          user
-          principalAmount
-          collateralAmount
-        }
-      }
-    `;
+  private refillTokens() {
+    const now = Date.now();
+    if (now - this.lastRefill >= this.refillIntervalMs) {
+      this.tokens = this.capacity;
+      this.lastRefill = now;
+    }
+  }
+
+  private consumeTokenOrDrop(): boolean {
+    this.refillTokens();
+    if (this.tokens > 0) {
+      this.tokens -= 1;
+      return true;
+    }
+    subgraphRateLimitDropped.inc();
+    return false;
+  }
+
+  private async perform<T>(op: string, fn: () => Promise<T>): Promise<T> {
+    if (this.mock || this.degraded) {
+      // Return mock path immediately
+      subgraphRequestsTotal.inc({ status: 'fallback' });
+      return fn();
+    }
+
+    if (!this.consumeTokenOrDrop()) {
+      throw new Error('SUBGRAPH_RATE_LIMITED');
+    }
+
+    const endTimer = subgraphRequestDuration.startTimer({ operation: op });
     try {
+      const result = await this.retry(fn);
+      this.consecutiveFailures = 0;
+      subgraphConsecutiveFailures.set(0);
+      subgraphLastSuccessTs.set(Date.now() / 1000);
+      subgraphRequestsTotal.inc({ status: 'success' });
+      endTimer();
+      return result;
+    } catch (e) {
+      subgraphRequestsTotal.inc({ status: 'error' });
+      endTimer();
+      this.consecutiveFailures += 1;
+      subgraphConsecutiveFailures.set(this.consecutiveFailures);
+
+      if (this.consecutiveFailures >= config.subgraphFailureThreshold) {
+        this.degraded = true;
+        subgraphFallbackActivations.inc();
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[subgraph] Failure threshold reached (${this.consecutiveFailures}) – switching to degraded fallback mode`
+        );
+      }
+      throw e;
+    }
+  }
+
+  private async retry<T>(fn: () => Promise<T>): Promise<T> {
+    const attempts = config.subgraphRetryAttempts;
+    const base = config.subgraphRetryBaseMs;
+    let lastErr: unknown;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        lastErr = err;
+        const backoff = base * Math.pow(2, i) + Math.floor(Math.random() * 25);
+        await new Promise(r => setTimeout(r, backoff));
+      }
+    }
+    throw lastErr;
+  }
+
+  // Public degraded health snapshot
+  healthStatus() {
+    return {
+      mode: this.mock ? 'mock' : (this.degraded ? 'degraded' : 'live'),
+      consecutiveFailures: this.consecutiveFailures,
+      fallbackActivated: this.degraded,
+      tokensRemaining: this.tokens,
+      capacity: this.capacity,
+      refillIntervalMs: this.refillIntervalMs
+    };
+  }
+
+  async getLiquidationCalls(first = 100): Promise<LiquidationCall[]> {
+    if (this.mock || this.degraded) {
+      return []; // safe fallback
+    }
+    this.ensureLive();
+    return this.perform('liquidationCalls', async () => {
+      const query = gql`
+        query LiquidationCalls($first: Int!) {
+          liquidationCalls(first: $first, orderBy: timestamp, orderDirection: desc) {
+            id timestamp liquidator user principalAmount collateralAmount
+          }
+        }
+      `;
       const data = await this.client!.request<{ liquidationCalls: unknown[] }>(query, { first });
       return z.array(LiquidationCallSchema).parse(data.liquidationCalls);
-    } catch (e: any) {
-      throw new Error(`SUBGRAPH_LIQUIDATIONS_FAILED: ${e.message}`);
-    }
+    });
   }
 
   async getReserves(): Promise<Reserve[]> {
     if (this.mock) {
-      return [
-        {
-          id: 'mock-asset-1',
-            symbol: 'MCK',
-            name: 'Mock Asset',
-            decimals: 18,
-            reserveLiquidationThreshold: 8000,
-            usageAsCollateralEnabled: true,
-            price: { priceInEth: '1' },
-        },
-      ] as any;
+      return [{
+        id: 'mock-asset-1',
+        symbol: 'MCK',
+        name: 'Mock Asset',
+        decimals: 18,
+        reserveLiquidationThreshold: 8000,
+        usageAsCollateralEnabled: true,
+        price: { priceInEth: '1' }
+      }] as Reserve[];
     }
+    if (this.degraded) return []; // degrade to empty safely
     this.ensureLive();
-    const query = gql`
-      query GetReserves {
-        reserves(first: 100, where: { usageAsCollateralEnabled: true }) {
-          id
-          symbol
-          name
-          decimals
-          reserveLiquidationThreshold
-          usageAsCollateralEnabled
-          price { priceInEth }
+    return this.perform('reserves', async () => {
+      const query = gql`
+        query GetReserves {
+          reserves(first: 100, where: { usageAsCollateralEnabled: true }) {
+            id symbol name decimals reserveLiquidationThreshold usageAsCollateralEnabled price { priceInEth }
+          }
         }
-      }
-    `;
-    try {
+      `;
       const data = await this.client!.request<{ reserves: unknown[] }>(query);
       return z.array(ReserveSchema).parse(data.reserves);
-    } catch (e: any) {
-      throw new Error(`SUBGRAPH_RESERVES_FAILED: ${e.message}`);
-    }
+    });
   }
 
   async getUsersWithDebt(first = 100): Promise<User[]> {
@@ -140,36 +236,26 @@ export class SubgraphService {
       return [
         { id: '0xMockUser1', borrowedReservesCount: 2, reserves: [] },
         { id: '0xMockUser2', borrowedReservesCount: 1, reserves: [] },
-      ] as any;
+      ] as User[];
     }
+    if (this.degraded) return [];
     this.ensureLive();
-    const query = gql`
-      query GetUsersWithDebt($first: Int!) {
-        users(first: $first, where: { borrowedReservesCount_gt: 0 }) {
-          id
-          borrowedReservesCount
-          reserves {
-            currentATokenBalance
-            currentVariableDebt
-            currentStableDebt
-            reserve {
-              id
-              symbol
-              name
-              decimals
-              reserveLiquidationThreshold
-              usageAsCollateralEnabled
-              price { priceInEth }
+    return this.perform('usersWithDebt', async () => {
+      const query = gql`
+        query Users($first: Int!) {
+          users(first: $first, where: { borrowedReservesCount_gt: 0 }) {
+            id borrowedReservesCount
+            reserves {
+              currentATokenBalance currentVariableDebt currentStableDebt
+              reserve {
+                id symbol name decimals reserveLiquidationThreshold usageAsCollateralEnabled price { priceInEth }
+              }
             }
           }
         }
-      }
-    `;
-    try {
+      `;
       const data = await this.client!.request<{ users: unknown[] }>(query, { first });
       return z.array(UserSchema).parse(data.users);
-    } catch (e: any) {
-      throw new Error(`SUBGRAPH_USERS_FAILED: ${e.message}`);
-    }
+    });
   }
 }
