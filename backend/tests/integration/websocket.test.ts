@@ -76,17 +76,25 @@ describe('WebSocket Integration Tests', () => {
         expect(message.timestamp).toBeTruthy();
         
         messageReceived = true;
+        clearTimeout(timeoutId);
         client.close();
       });
 
       client.on('close', () => {
         if (messageReceived) {
           resolve();
+        } else {
+          reject(new Error('Connection closed before message received'));
         }
       });
 
+      client.on('error', (error) => {
+        clearTimeout(timeoutId);
+        reject(error);
+      });
+
       // Timeout after 5 seconds
-      setTimeout(() => {
+      const timeoutId = setTimeout(() => {
         if (!messageReceived) {
           client.close();
           reject(new Error('Timeout: No message received'));
