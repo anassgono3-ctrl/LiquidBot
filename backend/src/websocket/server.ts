@@ -21,6 +21,15 @@ export function initWebSocketServer(httpServer: Server) {
   wss.on('connection', (ws: WebSocket) => {
     console.log('WebSocket client connected');
 
+    // Send welcome message
+    ws.send(
+      JSON.stringify({
+        type: 'welcome',
+        message: 'Connected to LiquidBot real-time risk alerts',
+        timestamp: new Date().toISOString(),
+      })
+    );
+
     ws.on('message', (message: WebSocket.RawData) => {
       console.log('Received message:', message.toString());
     });

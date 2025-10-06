@@ -51,6 +51,32 @@ describe('WebSocket Integration Tests', () => {
     });
   });
 
+  it('should send welcome message on connection', async () => {
+    const client = new WebSocket(`ws://localhost:${testPort}/ws`);
+
+    await new Promise<void>((resolve, reject) => {
+      client.on('message', (data) => {
+        const message = JSON.parse(data.toString());
+        
+        expect(message.type).toBe('welcome');
+        expect(message.message).toContain('LiquidBot');
+        expect(message.timestamp).toBeTruthy();
+        
+        client.close();
+        resolve();
+      });
+
+      client.on('error', (error) => {
+        reject(error);
+      });
+
+      setTimeout(() => {
+        client.close();
+        reject(new Error('Timeout: No welcome message received'));
+      }, 2000);
+    });
+  });
+
   it('should broadcast risk events to connected clients', async () => {
     const client = new WebSocket(`ws://localhost:${testPort}/ws`);
 
@@ -58,18 +84,25 @@ describe('WebSocket Integration Tests', () => {
       let messageReceived = false;
 
       client.on('open', () => {
-        // Broadcast a test risk event
-        wss.broadcastRiskEvent({
-          type: 'risk',
-          user: '0x1234567890123456789012345678901234567890',
-          healthFactor: 1.08,
-          timestamp: new Date().toISOString(),
-        });
+        // Broadcast a test risk event after connection
+        setTimeout(() => {
+          wss.broadcastRiskEvent({
+            type: 'risk',
+            user: '0x1234567890123456789012345678901234567890',
+            healthFactor: 1.08,
+            timestamp: new Date().toISOString(),
+          });
+        }, 100);
       });
 
       client.on('message', (data) => {
         const message = JSON.parse(data.toString());
         
+        // Skip welcome message
+        if (message.type === 'welcome') {
+          return;
+        }
+
         expect(message.type).toBe('risk');
         expect(message.user).toBeTruthy();
         expect(message.healthFactor).toBeGreaterThan(0);
