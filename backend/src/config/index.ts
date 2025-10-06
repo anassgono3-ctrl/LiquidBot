@@ -1,53 +1,75 @@
-// Configuration management for LiquidBot backend
+// Enhanced configuration management for LiquidBot backend
 import dotenv from 'dotenv';
-
 dotenv.config();
+
+function optional(name: string, fallback?: string): string | undefined {
+  const v = process.env[name];
+  if (v === undefined || v.trim() === '') return fallback;
+  return v.trim();
+}
 
 export const config = {
   // Server
   get port() {
-    return Number(process.env.PORT) || 3000;
+    return Number(optional('PORT', '3000'));
   },
   get nodeEnv() {
-    return process.env.NODE_ENV || 'development';
+    return optional('NODE_ENV', 'development');
   },
 
-  // Aave V3 on Base
-  get aavePoolAddress() {
-    return process.env.AAVE_POOL_ADDRESS || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5';
+  // Mock toggle
+  get useMockSubgraph() {
+    return (optional('USE_MOCK_SUBGRAPH', 'false') || '').toLowerCase() === 'true';
+  },
+
+  // Subgraph Gateway (Aave V3 Base)
+  get graphApiKey() {
+    return optional('GRAPH_API_KEY');
+  },
+  get subgraphDeploymentId() {
+    return optional('SUBGRAPH_DEPLOYMENT_ID');
   },
   get subgraphUrl() {
-    return (
-      process.env.SUBGRAPH_URL ||
-      'https://api.thegraph.com/subgraphs/id/GQFbb95cE6d8mV989mL5figjaGaKCQB3xqYrr1bRyXqF'
-    );
+    if (this.useMockSubgraph) {
+      return 'mock://subgraph';
+    }
+    if (!this.graphApiKey) {
+      throw new Error('GRAPH_API_KEY required when USE_MOCK_SUBGRAPH=false');
+    }
+    if (!this.subgraphDeploymentId) {
+      throw new Error('SUBGRAPH_DEPLOYMENT_ID required when USE_MOCK_SUBGRAPH=false');
+    }
+    // Construct gateway URL with key in path (do not log raw key in production logs)
+    return `https://gateway.thegraph.com/api/${this.graphApiKey}/subgraphs/id/${this.subgraphDeploymentId}`;
   },
-  get useMockSubgraph() {
-    return (process.env.USE_MOCK_SUBGRAPH || '').toLowerCase() === 'true';
+
+  // Aave
+  get aavePoolAddress() {
+    return optional('AAVE_POOL_ADDRESS', '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5');
   },
 
   // Database
   get databaseUrl() {
-    return process.env.DATABASE_URL || 'postgres://user:password@localhost:5432/liquidbot';
+    return optional('DATABASE_URL', 'postgres://user:password@localhost:5432/liquidbot');
   },
 
   // Redis
   get redisUrl() {
-    return process.env.REDIS_URL;
+    return optional('REDIS_URL');
   },
   get redisHost() {
-    return process.env.REDIS_HOST || '127.0.0.1';
+    return optional('REDIS_HOST', '127.0.0.1');
   },
   get redisPort() {
-    return Number(process.env.REDIS_PORT) || 6379;
+    return Number(optional('REDIS_PORT', '6379'));
   },
 
   // Authentication
   get jwtSecret() {
-    return process.env.JWT_SECRET || 'dev-secret-change-in-production';
+    return optional('JWT_SECRET', 'dev-secret-change-in-production');
   },
   get apiKey() {
-    return process.env.API_KEY || 'dev-api-key';
+    return optional('API_KEY', 'dev-api-key');
   },
 
   // Rate limiting
