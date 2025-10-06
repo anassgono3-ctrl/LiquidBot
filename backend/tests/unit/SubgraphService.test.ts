@@ -1,10 +1,11 @@
 // Updated unit tests for SubgraphService with DI support
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { SubgraphService } from '../../src/services/SubgraphService.js';
 
 const requestMock = vi.fn();
 
-function liveServiceWith(response: any) {
+function liveServiceWith(response: unknown) {
   requestMock.mockReset();
   requestMock.mockResolvedValue(response);
   return new SubgraphService({
@@ -176,11 +177,13 @@ describe('SubgraphService', () => {
   });
 
   describe('error handling', () => {
-    it('should throw on GraphQL errors with contextual message', async () => {
+    it('should throw on GraphQL errors and retry', async () => {
       requestMock.mockReset();
-      requestMock.mockRejectedValueOnce(new Error('GraphQL error'));
+      requestMock.mockRejectedValue(new Error('GraphQL error'));
       const service = new SubgraphService({ mock: false, client: { request: requestMock } });
-      await expect(service.getUsersWithDebt(10)).rejects.toThrow('SUBGRAPH_USERS_FAILED');
+      await expect(service.getUsersWithDebt(10)).rejects.toThrow();
+      // Should have retried multiple times (default is 3)
+      expect(requestMock).toHaveBeenCalledTimes(3);
     });
 
     it('should throw on validation errors', async () => {

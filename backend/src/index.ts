@@ -10,6 +10,8 @@ import { authenticate } from "./middleware/auth.js";
 import { rateLimiter } from "./middleware/rateLimit.js";
 import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
+import { registry } from "./metrics/index.js";
+import { SubgraphService } from "./services/SubgraphService.js";
 
 const logger = createLogger({
   level: "info",
@@ -25,14 +27,28 @@ app.use(cors());
 app.use(express.json());
 app.use(rateLimiter);
 
-// Metrics registry
-const registry = new promClient.Registry();
+// Collect default metrics
 promClient.collectDefaultMetrics({ register: registry });
+
+// Instantiate service once to inspect health
+const subgraphService = new SubgraphService();
 
 // Prometheus metrics endpoint (no auth)
 app.get("/metrics", async (_req, res) => {
   res.setHeader("Content-Type", registry.contentType);
   res.send(await registry.metrics());
+});
+
+// Enhanced health endpoint
+app.get("/health", (_req, res) => {
+  res.json({
+    status: "ok",
+    app: {
+      uptimeSeconds: Math.floor(process.uptime()),
+      version: "0.1.0"
+    },
+    subgraph: subgraphService.healthStatus()
+  });
 });
 
 // API routes with authentication
