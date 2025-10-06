@@ -22,8 +22,10 @@
     "postinstall": "prisma generate",
     "prepare": "husky install",
     "migrate": "node scripts/migrate.js",
+    "seed": "node scripts/seed.js",
+    "risk:scan": "npm run build && node scripts/risk-scan.js",
     "worker": "tsx watch src/worker/index.ts",
-    "gen:types": "ts-node scripts/generate-types.ts"
+    "gen:types": "tsx scripts/generate-types.ts"
   },
   "dependencies": {
     "@apollo/client": "^3.10.0",
