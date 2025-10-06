@@ -1,4 +1,4 @@
-// SubgraphService: Fetch data from Aave V3 Base subgraph
+// SubgraphService: Fetch data from Aave V3 Base subgraph via The Graph Gateway
 import { GraphQLClient, gql } from 'graphql-request';
 import { z } from 'zod';
 
@@ -41,17 +41,34 @@ const LiquidationCallSchema = z.object({
 });
 
 export class SubgraphService {
-  private client: GraphQLClient;
+  private client: GraphQLClient | null;
+  private mock: boolean;
 
   constructor(subgraphUrl?: string) {
-    this.client = new GraphQLClient(subgraphUrl || config.subgraphUrl);
+    this.mock = config.useMockSubgraph;
+    if (this.mock) {
+      this.client = null;
+    } else {
+      const url = subgraphUrl || config.subgraphUrl; // may throw if invalid
+      const apiKey = config.graphApiKey;
+      const redacted = apiKey ? url.replace(apiKey, '****') : url;
+      // eslint-disable-next-line no-console
+      console.log(`[subgraph] Using gateway URL: ${redacted}`);
+      this.client = new GraphQLClient(url);
+    }
   }
 
-  /**
-   * Fetch recent liquidation calls
-   * @param first Number of liquidations to fetch
-   */
+  private ensureLive() {
+    if (this.mock) throw new Error('MOCK_MODE_ACTIVE');
+    if (!this.client) throw new Error('CLIENT_NOT_INITIALIZED');
+  }
+
+  // ---- Liquidations ----
   async getLiquidationCalls(first = 100): Promise<LiquidationCall[]> {
+    if (this.mock) {
+      return []; // Mock: return empty array
+    }
+    this.ensureLive();
     const query = gql`
       query GetLiquidationCalls($first: Int!) {
         liquidationCalls(first: $first, orderBy: timestamp, orderDirection: desc) {
@@ -64,40 +81,70 @@ export class SubgraphService {
         }
       }
     `;
-
-    const data = await this.client.request<{ liquidationCalls: unknown[] }>(query, { first });
-    return z.array(LiquidationCallSchema).parse(data.liquidationCalls);
+    try {
+      const data = await this.client!.request<{ liquidationCalls: unknown[] }>(query, { first });
+      return z.array(LiquidationCallSchema).parse(data.liquidationCalls);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`SUBGRAPH_LIQUIDATIONS_FAILED: ${message}`);
+    }
   }
 
-  /**
-   * Fetch reserves information
-   */
+  // ---- Reserves ----
   async getReserves(): Promise<Reserve[]> {
+    if (this.mock) {
+      return [
+        {
+          id: 'mock-asset-1',
+          symbol: 'MCK',
+          name: 'Mock Asset',
+          decimals: 18,
+          reserveLiquidationThreshold: 8000,
+          usageAsCollateralEnabled: true,
+          price: { priceInEth: '1' },
+        },
+      ] as Reserve[];
+    }
+    this.ensureLive();
     const query = gql`
       query GetReserves {
-        reserves(first: 100) {
+        reserves(first: 100, where: { usageAsCollateralEnabled: true }) {
           id
           symbol
           name
           decimals
           reserveLiquidationThreshold
           usageAsCollateralEnabled
-          price {
-            priceInEth
-          }
+          price { priceInEth }
         }
       }
     `;
-
-    const data = await this.client.request<{ reserves: unknown[] }>(query);
-    return z.array(ReserveSchema).parse(data.reserves);
+    try {
+      const data = await this.client!.request<{ reserves: unknown[] }>(query);
+      return z.array(ReserveSchema).parse(data.reserves);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`SUBGRAPH_RESERVES_FAILED: ${message}`);
+    }
   }
 
-  /**
-   * Fetch users with debt (for at-risk analysis)
-   * @param first Number of users to fetch
-   */
+  // ---- Users ----
   async getUsersWithDebt(first = 100): Promise<User[]> {
+    if (this.mock) {
+      return [
+        {
+          id: '0xMockUser1',
+          borrowedReservesCount: 2,
+          reserves: [],
+        },
+        {
+          id: '0xMockUser2',
+          borrowedReservesCount: 1,
+          reserves: [],
+        },
+      ] as User[];
+    }
+    this.ensureLive();
     const query = gql`
       query GetUsersWithDebt($first: Int!) {
         users(first: $first, where: { borrowedReservesCount_gt: 0 }) {
@@ -114,16 +161,18 @@ export class SubgraphService {
               decimals
               reserveLiquidationThreshold
               usageAsCollateralEnabled
-              price {
-                priceInEth
-              }
+              price { priceInEth }
             }
           }
         }
       }
     `;
-
-    const data = await this.client.request<{ users: unknown[] }>(query, { first });
-    return z.array(UserSchema).parse(data.users);
+    try {
+      const data = await this.client!.request<{ users: unknown[] }>(query, { first });
+      return z.array(UserSchema).parse(data.users);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      throw new Error(`SUBGRAPH_USERS_FAILED: ${message}`);
+    }
   }
 }
