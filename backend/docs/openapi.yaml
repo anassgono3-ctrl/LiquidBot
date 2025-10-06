@@ -1,0 +1,173 @@
+openapi: 3.0.0
+info:
+  title: LiquidBot API
+  description: Aave V3 Base Liquidation Protection Service API
+  version: 0.1.0
+  contact:
+    name: LiquidBot Team
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Development server
+  - url: https://api.liquidbot.example.com/api/v1
+    description: Production server
+
+security:
+  - ApiKeyAuth: []
+  - BearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Health check endpoint
+      description: Returns service health status
+      tags:
+        - System
+      responses:
+        '200':
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+                  service:
+                    type: string
+                    example: liquidbot-api
+
+  /positions:
+    get:
+      summary: Get monitored positions
+      description: Returns list of borrowers with their health factors
+      tags:
+        - Positions
+      responses:
+        '200':
+          description: List of positions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  positions:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Position'
+                  count:
+                    type: integer
+                  timestamp:
+                    type: string
+                    format: date-time
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /protect:
+    post:
+      summary: Request protection for a position
+      description: Queue a protection request for a user position
+      tags:
+        - Protection
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - userAddress
+              properties:
+                userAddress:
+                  type: string
+                  description: Ethereum address of the user
+                  example: '0x1234567890123456789012345678901234567890'
+                protectionType:
+                  type: string
+                  enum: [REFINANCE, EMERGENCY]
+                  default: REFINANCE
+      responses:
+        '200':
+          description: Protection request queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: queued
+                  requestId:
+                    type: string
+                  userAddress:
+                    type: string
+                  protectionType:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-api-key
+      description: API key authentication
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT bearer token authentication
+
+  schemas:
+    Position:
+      type: object
+      properties:
+        address:
+          type: string
+          description: User's wallet address
+        healthFactor:
+          type: string
+          description: Health factor (Infinity for no debt)
+        totalCollateralETH:
+          type: string
+          description: Total collateral value in ETH
+        totalDebtETH:
+          type: string
+          description: Total debt value in ETH
+        isAtRisk:
+          type: boolean
+          description: Whether position is at risk (HF < 1.1)
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error message
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

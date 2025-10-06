@@ -1,0 +1,57 @@
+# Docker Compose for local development
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+      - PORT=3000
+      - DATABASE_URL=postgres://liquidbot:liquidbot@postgres:5432/liquidbot
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AAVE_POOL_ADDRESS=0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
+      - SUBGRAPH_URL=https://api.thegraph.com/subgraphs/id/43Hwfi3dJSoGpyas9VwNoDAv55yjgGrPpNSmbQZArzMG
+      - JWT_SECRET=dev-secret-change-in-production
+      - API_KEY=dev-api-key
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./src:/app/src
+    networks:
+      - liquidbot
+
+  postgres:
+    image: postgres:14-alpine
+    environment:
+      - POSTGRES_USER=liquidbot
+      - POSTGRES_PASSWORD=liquidbot
+      - POSTGRES_DB=liquidbot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - liquidbot
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - liquidbot
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  liquidbot:
+    driver: bridge

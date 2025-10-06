@@ -1,0 +1,19 @@
+# Fetch reserves information
+query GetReserves {
+  reserves(first: 100) {
+    id
+    symbol
+    name
+    decimals
+    reserveLiquidationThreshold
+    usageAsCollateralEnabled
+    borrowingEnabled
+    isActive
+    price {
+      priceInEth
+    }
+    liquidityRate
+    variableBorrowRate
+    stableBorrowRate
+  }
+}

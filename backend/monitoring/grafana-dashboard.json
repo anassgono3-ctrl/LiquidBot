@@ -1,0 +1,89 @@
+{
+  "dashboard": {
+    "id": null,
+    "title": "LiquidBot Monitoring Dashboard",
+    "tags": ["liquidbot", "aave", "protection"],
+    "timezone": "browser",
+    "schemaVersion": 16,
+    "version": 0,
+    "refresh": "30s",
+    "panels": [
+      {
+        "id": 1,
+        "title": "Protection Events",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(protection_events_total[5m])",
+            "legendFormat": "{{type}}",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 0
+        }
+      },
+      {
+        "id": 2,
+        "title": "Risk Events Detected",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "rate(risk_events_total[5m])",
+            "legendFormat": "Risk Events",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 0
+        }
+      },
+      {
+        "id": 3,
+        "title": "Subgraph Query Latency",
+        "type": "graph",
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, rate(subgraph_poll_latency_ms_bucket[5m]))",
+            "legendFormat": "p95",
+            "refId": "A"
+          },
+          {
+            "expr": "histogram_quantile(0.50, rate(subgraph_poll_latency_ms_bucket[5m]))",
+            "legendFormat": "p50",
+            "refId": "B"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 8
+        }
+      },
+      {
+        "id": 4,
+        "title": "Active Subscriptions",
+        "type": "singlestat",
+        "targets": [
+          {
+            "expr": "subscription_active_total",
+            "refId": "A"
+          }
+        ],
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 8
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+# Fetch users with debt for health factor calculation
+query GetUsersWithDebt {
+  users(first: 100, where: { borrowedReservesCount_gt: 0 }) {
+    id
+    borrowedReservesCount
+    reserves {
+      currentATokenBalance
+      currentVariableDebt
+      currentStableDebt
+      reserve {
+        id
+        symbol
+        name
+        decimals
+        reserveLiquidationThreshold
+        usageAsCollateralEnabled
+        price {
+          priceInEth
+        }
+      }
+    }
+  }
+}
