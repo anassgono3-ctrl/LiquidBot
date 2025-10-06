@@ -116,6 +116,8 @@ npm test
 
 - [Project Specification](./docs/SPEC.md) - Comprehensive project specification
 - [Architecture](./docs/ARCHITECTURE.md) - Detailed architecture documentation
+- [Phase 2 Implementation](./docs/phase2-core-implementation.md) - MVP core features and requirements
+- [PR Breakdown](./docs/PR_BREAKDOWN.md) - Detailed PR sequencing and implementation plan
 - [Subgraph Queries](./docs/SUBGRAPH_QUERIES.md) - Aave V3 Base subgraph queries
 - [Security](./docs/SECURITY.md) - Security practices and risk mitigation
 

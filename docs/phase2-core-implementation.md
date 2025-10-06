@@ -101,15 +101,17 @@ A functional system able to:
 ---
 
 ## Initial PR Breakdown (Recommended Sequencing)
-| PR | Focus | Deliverables |
-|----|-------|--------------|
-| 1 | Contract Scaffolds | FlashLoanOrchestrator, PositionManager, FeeCollector, EmergencyPause (interfaces + basic logic) |
-| 2 | Subgraph & HF Engine | Poller service, HF calculator, risk threshold triggers |
-| 3 | Protection Prototype | Mock flash refinance flow, slippage guard, gas profiler |
-| 4 | Subscription + Fees | Tier model, fee computation, event logging |
-| 5 | API Layer (Phase 1) | Auth (JWT or API key), REST endpoints, WebSocket skeleton |
-| 6 | Testing Baseline | Unit + integration harness, coverage reports |
-| 7 | Documentation & Hardening | OpenAPI 3.0 draft, developer guide, security prep outline |
+
+For detailed PR breakdown with deliverables, dependencies, and timeline estimates, see [PR_BREAKDOWN.md](./PR_BREAKDOWN.md).
+
+**Quick Reference**:
+1. Contract Scaffolds
+2. Subgraph & HF Engine
+3. Protection Prototype
+4. Subscription + Fees
+5. API Layer (Phase 1)
+6. Testing Baseline
+7. Documentation & Hardening
 
 ---
 
