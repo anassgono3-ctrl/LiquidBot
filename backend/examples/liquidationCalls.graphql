@@ -1,0 +1,19 @@
+# Fetch recent liquidation calls
+query GetLiquidationCalls {
+  liquidationCalls(first: 100, orderBy: timestamp, orderDirection: desc) {
+    id
+    timestamp
+    liquidator
+    user
+    principalAmount
+    collateralAmount
+    reserve {
+      symbol
+      name
+    }
+    collateralReserve {
+      symbol
+      name
+    }
+  }
+}

@@ -1,0 +1,82 @@
+# Kubernetes deployment for LiquidBot backend
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: liquidbot-backend
+  labels:
+    app: liquidbot-backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: liquidbot-backend
+  template:
+    metadata:
+      labels:
+        app: liquidbot-backend
+    spec:
+      containers:
+      - name: backend
+        image: liquidbot-backend:latest
+        ports:
+        - containerPort: 3000
+        env:
+        - name: NODE_ENV
+          value: "production"
+        - name: PORT
+          value: "3000"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: liquidbot-secrets
+              key: database-url
+        - name: REDIS_HOST
+          value: "redis-service"
+        - name: REDIS_PORT
+          value: "6379"
+        - name: JWT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: liquidbot-secrets
+              key: jwt-secret
+        - name: API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: liquidbot-secrets
+              key: api-key
+        - name: AAVE_POOL_ADDRESS
+          value: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5"
+        - name: SUBGRAPH_URL
+          value: "https://api.thegraph.com/subgraphs/id/43Hwfi3dJSoGpyas9VwNoDAv55yjgGrPpNSmbQZArzMG"
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /metrics
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /metrics
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: liquidbot-backend-service
+spec:
+  type: ClusterIP
+  selector:
+    app: liquidbot-backend
+  ports:
+  - protocol: TCP
+    port: 3000
+    targetPort: 3000

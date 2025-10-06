@@ -1,0 +1,59 @@
+# CI workflow for LiquidBot
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  backend:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./backend
+        run: npm ci
+      
+      - name: Generate Prisma Client
+        working-directory: ./backend
+        run: npx prisma generate
+      
+      - name: Lint
+        working-directory: ./backend
+        run: npm run lint
+      
+      - name: Type check
+        working-directory: ./backend
+        run: npm run typecheck
+      
+      - name: Run tests with coverage
+        working-directory: ./backend
+        run: npm test -- --coverage
+      
+      - name: Build
+        working-directory: ./backend
+        run: npm run build
+      
+      - name: Upload coverage reports
+        if: matrix.node-version == '18.x'
+        uses: codecov/codecov-action@v3
+        with:
+          directory: ./backend/coverage
+          flags: backend

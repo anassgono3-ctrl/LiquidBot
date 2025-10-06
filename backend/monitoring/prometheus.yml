@@ -1,0 +1,27 @@
+# Prometheus scrape configuration for LiquidBot
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'liquidbot-prod'
+    replica: 'primary'
+
+scrape_configs:
+  - job_name: 'liquidbot-backend'
+    static_configs:
+      - targets: ['localhost:3000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    
+  - job_name: 'liquidbot-worker'
+    static_configs:
+      - targets: ['localhost:3001']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+# Planned custom metrics (to be instrumented):
+# - protection_events_total (counter)
+# - risk_events_total (counter)
+# - subgraph_poll_latency_ms (histogram)
+# - hf_calculation_duration_ms (histogram)
+# - subscription_active_total (gauge)
