@@ -21,7 +21,7 @@ export function initWebSocketServer(httpServer: Server) {
   wss.on('connection', (ws: WebSocket) => {
     console.log('WebSocket client connected');
 
-    ws.on('message', (message: string) => {
+    ws.on('message', (message: WebSocket.RawData) => {
       console.log('Received message:', message.toString());
     });
 
