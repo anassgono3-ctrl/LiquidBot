@@ -70,3 +70,28 @@ export enum ProtectionType {
   REFINANCE = 'REFINANCE',
   EMERGENCY = 'EMERGENCY',
 }
+
+export interface Opportunity {
+  id: string;                             // liquidationCall id
+  txHash: string | null;
+  user: string;
+  liquidator: string;
+  timestamp: number;
+  collateralAmountRaw: string;
+  principalAmountRaw: string;
+  collateralReserve: { symbol?: string|null; decimals?: number|null; id: string };
+  principalReserve: { symbol?: string|null; decimals?: number|null; id: string };
+  healthFactor?: number | null;          // from cached snapshot
+  collateralValueUsd?: number | null;    // estimated by price lookup
+  principalValueUsd?: number | null;
+  profitEstimateUsd?: number | null;     // (collateralValue - principalValue) * bonus - fees
+  bonusPct?: number | null;              // placeholder (if we expose liquidation bonus later)
+}
+
+export interface HealthSnapshot {
+  userId: string;
+  healthFactor: number;
+  totalCollateralETH: number;
+  totalDebtETH: number;
+  timestamp: number;
+}

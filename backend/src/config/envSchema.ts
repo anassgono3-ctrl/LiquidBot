@@ -41,7 +41,22 @@ export const rawEnvSchema = z.object({
   REDIS_PORT: z.string().optional(),
 
   REFINANCING_FEE_BPS: z.string().optional(),
-  EMERGENCY_FEE_BPS: z.string().optional()
+  EMERGENCY_FEE_BPS: z.string().optional(),
+
+  // Telegram notifications (optional)
+  TELEGRAM_BOT_TOKEN: z.string().optional(),
+  TELEGRAM_CHAT_ID: z.string().optional(),
+
+  // Health monitoring
+  HEALTH_ALERT_THRESHOLD: z.string().optional(),
+  HEALTH_EMERGENCY_THRESHOLD: z.string().optional(),
+
+  // Profit estimation
+  PROFIT_FEE_BPS: z.string().optional(),
+  PROFIT_MIN_USD: z.string().optional(),
+
+  // Price oracle
+  PRICE_ORACLE_MODE: z.string().optional()
 });
 
 export const env = (() => {
@@ -83,6 +98,21 @@ export const env = (() => {
     redisPort: Number(parsed.REDIS_PORT || 6379),
 
     refinancingFeeBps: Number(parsed.REFINANCING_FEE_BPS || 15),
-    emergencyFeeBps: Number(parsed.EMERGENCY_FEE_BPS || 50)
+    emergencyFeeBps: Number(parsed.EMERGENCY_FEE_BPS || 50),
+
+    // Telegram notifications
+    telegramBotToken: parsed.TELEGRAM_BOT_TOKEN,
+    telegramChatId: parsed.TELEGRAM_CHAT_ID,
+
+    // Health monitoring
+    healthAlertThreshold: Number(parsed.HEALTH_ALERT_THRESHOLD || 1.10),
+    healthEmergencyThreshold: Number(parsed.HEALTH_EMERGENCY_THRESHOLD || 1.05),
+
+    // Profit estimation
+    profitFeeBps: Number(parsed.PROFIT_FEE_BPS || 30),
+    profitMinUsd: Number(parsed.PROFIT_MIN_USD || 10),
+
+    // Price oracle
+    priceOracleMode: parsed.PRICE_ORACLE_MODE || 'coingecko'
   };
 })();

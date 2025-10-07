@@ -83,15 +83,30 @@ export const config = {
   get redisHost() { return env.redisHost; },
   get redisPort() { return env.redisPort; },
 
+  // Fees
+  get refinancingFeeBps() { return env.refinancingFeeBps; },
+  get emergencyFeeBps() { return env.emergencyFeeBps; },
+
+  // Telegram
+  get telegramBotToken() { return env.telegramBotToken; },
+  get telegramChatId() { return env.telegramChatId; },
+
+  // Health monitoring
+  get healthAlertThreshold() { return env.healthAlertThreshold; },
+  get healthEmergencyThreshold() { return env.healthEmergencyThreshold; },
+
+  // Profit estimation
+  get profitFeeBps() { return env.profitFeeBps; },
+  get profitMinUsd() { return env.profitMinUsd; },
+
+  // Price oracle
+  get priceOracleMode() { return env.priceOracleMode; },
+
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
   rateLimitMaxRequests: 120,
 
-  // Health factor thresholds
+  // Health factor thresholds (legacy, use healthAlertThreshold and healthEmergencyThreshold instead)
   alertThreshold: 1.1,
   emergencyThreshold: 1.05,
-
-  // Fees
-  get refinancingFeeBps() { return env.refinancingFeeBps; },
-  get emergencyFeeBps() { return env.emergencyFeeBps; },
 };

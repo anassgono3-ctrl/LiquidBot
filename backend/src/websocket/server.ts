@@ -23,6 +23,26 @@ export interface LiquidationEvent {
   timestamp: string;
 }
 
+export interface OpportunityEvent {
+  type: 'opportunity.new';
+  opportunities: Array<{
+    id: string;
+    user: string;
+    profitEstimateUsd: number | null;
+    healthFactor: number | null;
+    timestamp: number;
+  }>;
+  timestamp: string;
+}
+
+export interface HealthBreachEvent {
+  type: 'health.breach';
+  user: string;
+  healthFactor: number;
+  threshold: number;
+  timestamp: string;
+}
+
 /**
  * Initialize WebSocket server for real-time risk alerts
  */
@@ -73,6 +93,28 @@ export function initWebSocketServer(httpServer: Server) {
   }
 
   /**
+   * Broadcast opportunity event to all connected clients
+   */
+  function broadcastOpportunityEvent(event: OpportunityEvent) {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(event));
+      }
+    });
+  }
+
+  /**
+   * Broadcast health breach event to all connected clients
+   */
+  function broadcastHealthBreachEvent(event: HealthBreachEvent) {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(event));
+      }
+    });
+  }
+
+  /**
    * Stub: Simulate risk events for testing (broadcasts sample data)
    * In production, this would be triggered by the monitoring worker
    */
@@ -95,5 +137,11 @@ export function initWebSocketServer(httpServer: Server) {
     startMockRiskBroadcast();
   }
 
-  return { wss, broadcastRiskEvent, broadcastLiquidationEvent };
+  return { 
+    wss, 
+    broadcastRiskEvent, 
+    broadcastLiquidationEvent,
+    broadcastOpportunityEvent,
+    broadcastHealthBreachEvent
+  };
 }

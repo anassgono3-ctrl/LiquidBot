@@ -11,10 +11,13 @@ import { authenticate } from "./middleware/auth.js";
 import { rateLimiter } from "./middleware/rateLimit.js";
 import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
-import { registry } from "./metrics/index.js";
+import { registry, opportunitiesGeneratedTotal, opportunityProfitEstimate, healthBreachEventsTotal } from "./metrics/index.js";
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";
+import { OpportunityService } from "./services/OpportunityService.js";
+import { NotificationService } from "./services/NotificationService.js";
+import { HealthMonitor } from "./services/HealthMonitor.js";
 
 const logger = createLogger({
   level: "info",
@@ -35,6 +38,18 @@ promClient.collectDefaultMetrics({ register: registry });
 
 // Single service instance
 const subgraphService = new SubgraphService();
+
+// Initialize opportunity and notification services
+const opportunityService = new OpportunityService();
+const notificationService = new NotificationService();
+const healthMonitor = new HealthMonitor(subgraphService);
+
+// Track opportunity stats for health endpoint
+let opportunityStats = {
+  lastBatchSize: 0,
+  totalOpportunities: 0,
+  lastProfitSampleUsd: 0
+};
 
 // Warmup probe
 async function warmup() {
@@ -81,6 +96,17 @@ app.get("/health", (_req, res) => {
       healthData.liquidationTracker = trackerStats;
     }
   }
+
+  // Add opportunity stats
+  healthData.opportunity = opportunityStats;
+
+  // Add health monitoring stats
+  healthData.healthMonitoring = healthMonitor.getStats();
+
+  // Add notification status
+  healthData.notifications = {
+    telegramEnabled: notificationService.isEnabled()
+  };
   
   res.json(healthData);
 });
@@ -89,12 +115,15 @@ app.get("/health", (_req, res) => {
 app.use("/api/v1", authenticate, buildRoutes(subgraphService));
 
 // Initialize WebSocket server
-const { wss, broadcastLiquidationEvent } = initWebSocketServer(httpServer);
+const { wss, broadcastLiquidationEvent, broadcastOpportunityEvent, broadcastHealthBreachEvent } = initWebSocketServer(httpServer);
 
 let subgraphPoller: SubgraphPollerHandle | null = null;
+let healthMonitorInterval: NodeJS.Timeout | null = null;
+
 if (!config.useMockSubgraph) {
   const resolved = config.resolveSubgraphEndpoint();
   logger.info(`Subgraph resolved endpoint authMode=${resolved.mode} header=${resolved.needsHeader} url=${config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
+  
   subgraphPoller = startSubgraphPoller({
     service: subgraphService,
     intervalMs: config.subgraphPollIntervalMs || 15000,
@@ -104,7 +133,7 @@ if (!config.useMockSubgraph) {
     onLiquidations: () => {
       // placeholder for raw snapshot callback
     },
-    onNewLiquidations: (newEvents) => {
+    onNewLiquidations: async (newEvents) => {
       // Broadcast new liquidation events via WebSocket
       if (newEvents.length > 0 && wss.clients.size > 0) {
         broadcastLiquidationEvent({
@@ -118,14 +147,108 @@ if (!config.useMockSubgraph) {
           timestamp: new Date().toISOString()
         });
       }
+
+      // Build opportunities from new liquidations
+      try {
+        // Get health snapshot for context
+        const healthSnapshots = await healthMonitor.getHealthSnapshotMap();
+        
+        // Build opportunities
+        const opportunities = await opportunityService.buildOpportunities(newEvents, healthSnapshots);
+        
+        // Update stats
+        opportunityStats.lastBatchSize = opportunities.length;
+        opportunityStats.totalOpportunities += opportunities.length;
+        if (opportunities.length > 0 && opportunities[0].profitEstimateUsd !== null && opportunities[0].profitEstimateUsd !== undefined) {
+          opportunityStats.lastProfitSampleUsd = opportunities[0].profitEstimateUsd;
+        }
+
+        // Update metrics
+        opportunitiesGeneratedTotal.inc(opportunities.length);
+        for (const op of opportunities) {
+          if (op.profitEstimateUsd !== null && op.profitEstimateUsd !== undefined && op.profitEstimateUsd > 0) {
+            opportunityProfitEstimate.observe(op.profitEstimateUsd);
+          }
+        }
+
+        // Broadcast opportunity events via WebSocket
+        if (opportunities.length > 0 && wss.clients.size > 0) {
+          broadcastOpportunityEvent({
+            type: 'opportunity.new',
+            opportunities: opportunities.map(op => ({
+              id: op.id,
+              user: op.user,
+              profitEstimateUsd: op.profitEstimateUsd ?? null,
+              healthFactor: op.healthFactor ?? null,
+              timestamp: op.timestamp
+            })),
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        // Send Telegram notifications for profitable opportunities
+        const profitableOps = opportunityService.filterProfitableOpportunities(opportunities);
+        for (const op of profitableOps) {
+          await notificationService.notifyOpportunity(op);
+        }
+        
+        if (profitableOps.length > 0) {
+          logger.info(`[opportunity] Found ${profitableOps.length} profitable opportunities (profit >= $${config.profitMinUsd})`);
+        }
+      } catch (err) {
+        logger.error('[opportunity] Failed to process opportunities:', err);
+      }
     }
   });
+
+  // Start health monitoring (check every 2 poll intervals)
+  const healthCheckInterval = (config.subgraphPollIntervalMs || 15000) * 2;
+  healthMonitorInterval = setInterval(async () => {
+    try {
+      const breaches = await healthMonitor.updateAndDetectBreaches();
+      
+      if (breaches.length > 0) {
+        logger.info(`[health-monitor] Detected ${breaches.length} health factor breaches`);
+        
+        // Update metrics
+        healthBreachEventsTotal.inc(breaches.length);
+        
+        // Broadcast each breach via WebSocket
+        for (const breach of breaches) {
+          if (wss.clients.size > 0) {
+            broadcastHealthBreachEvent({
+              type: 'health.breach',
+              user: breach.user,
+              healthFactor: breach.healthFactor,
+              threshold: breach.threshold,
+              timestamp: new Date(breach.timestamp * 1000).toISOString()
+            });
+          }
+          
+          // Send Telegram notification
+          await notificationService.notifyHealthBreach({
+            user: breach.user,
+            healthFactor: breach.healthFactor,
+            threshold: breach.threshold,
+            timestamp: breach.timestamp
+          });
+        }
+      }
+    } catch (err) {
+      logger.error('[health-monitor] Health check failed:', err);
+    }
+  }, healthCheckInterval);
+  
+  logger.info(`[health-monitor] Started health monitoring (interval=${healthCheckInterval}ms, threshold=${config.healthAlertThreshold})`);
 }
 
 // Graceful shutdown handling
 const shutdown = (signal: string) => {
   logger.info(`Received ${signal}, shutting down...`);
   subgraphPoller?.stop();
+  if (healthMonitorInterval) {
+    clearInterval(healthMonitorInterval);
+  }
   wss.close(() => {
     logger.info("WebSocket server closed");
     process.exit(0);
