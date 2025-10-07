@@ -41,12 +41,15 @@ const UserSchema = z.object({
 const LiquidationReserveSchema = z.object({
   id: z.string(),
   symbol: z.string().optional(),
-  decimals: z.union([z.number(), z.string().transform(v => Number(v))]).optional()
+  decimals: z.union([
+    z.number(),
+    z.string().regex(/^\d+$/).transform(v => Number(v))
+  ]).optional()
 });
 
 const LiquidationCallRawSchema = z.object({
   id: z.string(),
-  timestamp: z.string(),
+  timestamp: z.union([z.number(), z.string().regex(/^\d+$/)]),
   user: z.union([z.string(), z.object({ id: z.string() })]),
   liquidator: z.string(),
   collateralReserve: LiquidationReserveSchema.optional(),
@@ -56,29 +59,36 @@ const LiquidationCallRawSchema = z.object({
   txHash: z.string().optional()
 });
 
-const LiquidationCallSchema = LiquidationCallRawSchema.transform(raw => ({
-  id: raw.id,
-  timestamp: Number(raw.timestamp),
-  user: typeof raw.user === 'string' ? raw.user : raw.user.id,
-  liquidator: raw.liquidator,
-  principalAmount: raw.principalAmount,
-  collateralAmount: raw.collateralAmount,
-  txHash: raw.txHash || null,
-  principalReserve: raw.principalReserve ? {
-    id: raw.principalReserve.id,
-    symbol: raw.principalReserve.symbol || null,
-    decimals: typeof raw.principalReserve.decimals === 'number'
-      ? raw.principalReserve.decimals
-      : (raw.principalReserve.decimals !== undefined ? Number(raw.principalReserve.decimals) : null)
-  } : null,
-  collateralReserve: raw.collateralReserve ? {
-    id: raw.collateralReserve.id,
-    symbol: raw.collateralReserve.symbol || null,
-    decimals: typeof raw.collateralReserve.decimals === 'number'
-      ? raw.collateralReserve.decimals
-      : (raw.collateralReserve.decimals !== undefined ? Number(raw.collateralReserve.decimals) : null)
-  } : null
-}));
+const LiquidationCallSchema = LiquidationCallRawSchema.transform(raw => {
+  const tsNum = typeof raw.timestamp === 'number' ? raw.timestamp : Number(raw.timestamp);
+  return {
+    id: raw.id,
+    timestamp: tsNum,
+    user: typeof raw.user === 'string' ? raw.user : raw.user.id,
+    liquidator: raw.liquidator,
+    principalAmount: raw.principalAmount,
+    collateralAmount: raw.collateralAmount,
+    txHash: raw.txHash || null,
+    principalReserve: raw.principalReserve ? {
+      id: raw.principalReserve.id,
+      symbol: raw.principalReserve.symbol || null,
+      decimals: raw.principalReserve.decimals !== undefined
+        ? (typeof raw.principalReserve.decimals === 'number'
+            ? raw.principalReserve.decimals
+            : Number(raw.principalReserve.decimals))
+        : null
+    } : null,
+    collateralReserve: raw.collateralReserve ? {
+      id: raw.collateralReserve.id,
+      symbol: raw.collateralReserve.symbol || null,
+      decimals: raw.collateralReserve.decimals !== undefined
+        ? (typeof raw.collateralReserve.decimals === 'number'
+            ? raw.collateralReserve.decimals
+            : Number(raw.collateralReserve.decimals))
+        : null
+    } : null
+  };
+});
 
 export interface SubgraphServiceOptions {
   mock?: boolean;
@@ -163,7 +173,8 @@ export class SubgraphService {
   }
 
   private isParseError(err: unknown): boolean {
-    return !!(err && typeof err === 'object' && 'name' in err && err.name === 'ZodError');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return !!(err && typeof err === 'object' && (err as any).name === 'ZodError');
   }
 
   private async perform<T>(op: string, fn: () => Promise<T>): Promise<T> {
@@ -201,13 +212,20 @@ export class SubgraphService {
           );
         }
       }
-      const errMsg = e instanceof Error ? e.message : String(e);
-      const wrapped = new Error(`${op} failed: ${errMsg}`);
-      (wrapped as Error & { original: unknown }).original = e;
       if (config.subgraphDebugErrors) {
         // eslint-disable-next-line no-console
         console.error('[subgraph][debug] op failure original error:', e);
+        try {
+          // eslint-disable-next-line no-console
+          console.error('[subgraph][debug] serialized:', JSON.stringify(e, Object.getOwnPropertyNames(e), 2));
+        // eslint-disable-next-line no-empty
+        } catch {}
       }
+
+      const msg = e instanceof Error ? e.message : String(e);
+      const wrapped = new Error(`${op} failed: ${msg}`);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (wrapped as any).original = e;
       throw wrapped;
     }
   }
