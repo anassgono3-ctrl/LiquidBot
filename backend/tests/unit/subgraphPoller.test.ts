@@ -145,4 +145,116 @@ describe('subgraphPoller', () => {
 
     poller.stop();
   });
+
+  it('attaches health factors to new liquidation events when resolver provided', async () => {
+    const mockEvents = [
+      { id: 'l1', user: '0xuser1', timestamp: 1000 },
+      { id: 'l2', user: '0xuser2', timestamp: 2000 }
+    ];
+
+    getLiquidationCalls.mockResolvedValue(mockEvents);
+
+    const mockResolver = {
+      getHealthFactorsForUsers: vi.fn().mockResolvedValue(
+        new Map([
+          ['0xuser1', 1.5],
+          ['0xuser2', 2.3]
+        ])
+      ),
+      getCacheStats: vi.fn(),
+      clearCache: vi.fn()
+    };
+
+    const onNewLiquidations = vi.fn();
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 3000,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      healthFactorResolver: mockResolver as any,
+      onNewLiquidations
+    });
+
+    // Wait for first tick
+    await vi.waitFor(() => {
+      expect(onNewLiquidations).toHaveBeenCalledTimes(1);
+    }, { timeout: 1000 });
+
+    // Verify resolver was called with unique user IDs
+    expect(mockResolver.getHealthFactorsForUsers).toHaveBeenCalledWith(['0xuser1', '0xuser2']);
+
+    // Verify health factors were attached to events
+    const calledEvents = onNewLiquidations.mock.calls[0][0];
+    expect(calledEvents[0].healthFactor).toBe(1.5);
+    expect(calledEvents[1].healthFactor).toBe(2.3);
+
+    poller.stop();
+  });
+
+  it('handles resolver errors gracefully without blocking liquidation processing', async () => {
+    const mockEvents = [
+      { id: 'l1', user: '0xuser1', timestamp: 1000 }
+    ];
+
+    getLiquidationCalls.mockResolvedValue(mockEvents);
+
+    const mockResolver = {
+      getHealthFactorsForUsers: vi.fn().mockRejectedValue(new Error('Resolver failed')),
+      getCacheStats: vi.fn(),
+      clearCache: vi.fn()
+    };
+
+    const onNewLiquidations = vi.fn();
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 3000,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      healthFactorResolver: mockResolver as any,
+      onNewLiquidations,
+      logger
+    });
+
+    // Wait for first tick
+    await vi.waitFor(() => {
+      expect(onNewLiquidations).toHaveBeenCalledTimes(1);
+    }, { timeout: 1000 });
+
+    // Verify onNewLiquidations was still called despite resolver error
+    expect(onNewLiquidations).toHaveBeenCalledWith(mockEvents);
+    
+    // Verify error was logged
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('health factor resolution error')
+    );
+
+    poller.stop();
+  });
+
+  it('does not resolve health factors when resolver not provided', async () => {
+    const mockEvents = [
+      { id: 'l1', user: '0xuser1', timestamp: 1000 }
+    ];
+
+    getLiquidationCalls.mockResolvedValue(mockEvents);
+
+    const onNewLiquidations = vi.fn();
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 3000,
+      onNewLiquidations
+    });
+
+    // Wait for first tick
+    await vi.waitFor(() => {
+      expect(onNewLiquidations).toHaveBeenCalledTimes(1);
+    }, { timeout: 1000 });
+
+    // Verify events were passed through without HF
+    const calledEvents = onNewLiquidations.mock.calls[0][0];
+    expect(calledEvents[0].healthFactor).toBeUndefined();
+
+    poller.stop();
+  });
 });
