@@ -97,6 +97,8 @@ export interface SubgraphServiceOptions {
 }
 
 export class SubgraphService {
+  private static _instanceCount = 0;
+
   private client: Pick<GraphQLClient, 'request'> | null;
   private mock: boolean;
   private consecutiveFailures = 0;
@@ -109,6 +111,18 @@ export class SubgraphService {
   private lastRefill: number;
 
   constructor(opts: SubgraphServiceOptions = {}) {
+    // Increment instance counter
+    SubgraphService._instanceCount += 1;
+
+    // Hard guard: throw in non-development/test if more than one instance
+    const allowMultiple = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+    if (!allowMultiple && SubgraphService._instanceCount > 1) {
+      throw new Error(
+        `[subgraph] FATAL: Multiple SubgraphService instances detected (count=${SubgraphService._instanceCount}). ` +
+        `This indicates stale dist artifacts or duplicate imports. Clean build required.`
+      );
+    }
+
     this.mock = typeof opts.mock === 'boolean' ? opts.mock : config.useMockSubgraph;
 
     if (this.mock) {
@@ -126,11 +140,23 @@ export class SubgraphService {
             headers = { Authorization: `Bearer ${config.graphApiKey}` };
           }
         }
+
+        // Check for dual auth configuration
+        if (needsHeader && config.graphApiKey && endpoint.includes(`/${config.graphApiKey}/subgraphs/`)) {
+          console.warn(
+            '[subgraph] WARNING: dual auth configuration (path+header). ' +
+            'Remove key from SUBGRAPH_URL when using header mode.'
+          );
+        }
+
         const redacted = config.graphApiKey
           ? endpoint.replaceAll(config.graphApiKey, '****')
           : endpoint;
         // eslint-disable-next-line no-console
-        console.log(`[subgraph] Using gateway URL: ${redacted} (auth-mode=${mode}${needsHeader ? '+auth-header' : ''})`);
+        console.log(
+          `[subgraph] Using gateway URL: ${redacted} ` +
+          `(auth-mode=${mode}, header=${needsHeader ? 'yes' : 'no'}, instance=${SubgraphService._instanceCount})`
+        );
         this.client = new GraphQLClient(endpoint, { headers });
       }
     }
@@ -254,7 +280,8 @@ export class SubgraphService {
       fallbackActivated: this.degraded,
       tokensRemaining: this.tokens,
       capacity: this.capacity,
-      refillIntervalMs: this.refillIntervalMs
+      refillIntervalMs: this.refillIntervalMs,
+      instanceCount: SubgraphService._instanceCount
     };
   }
 
