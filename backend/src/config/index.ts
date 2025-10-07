@@ -102,6 +102,11 @@ export const config = {
   // Price oracle
   get priceOracleMode() { return env.priceOracleMode; },
 
+  // Health factor resolver
+  get healthUserCacheTtlMs() { return env.healthUserCacheTtlMs; },
+  get healthMaxBatch() { return env.healthMaxBatch; },
+  get healthQueryMode() { return env.healthQueryMode; },
+
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
   rateLimitMaxRequests: 120,

@@ -56,7 +56,12 @@ export const rawEnvSchema = z.object({
   PROFIT_MIN_USD: z.string().optional(),
 
   // Price oracle
-  PRICE_ORACLE_MODE: z.string().optional()
+  PRICE_ORACLE_MODE: z.string().optional(),
+
+  // Health factor resolver
+  HEALTH_USER_CACHE_TTL_MS: z.string().optional(),
+  HEALTH_MAX_BATCH: z.string().optional(),
+  HEALTH_QUERY_MODE: z.string().optional()
 });
 
 export const env = (() => {
@@ -113,6 +118,11 @@ export const env = (() => {
     profitMinUsd: Number(parsed.PROFIT_MIN_USD || 10),
 
     // Price oracle
-    priceOracleMode: parsed.PRICE_ORACLE_MODE || 'coingecko'
+    priceOracleMode: parsed.PRICE_ORACLE_MODE || 'coingecko',
+
+    // Health factor resolver
+    healthUserCacheTtlMs: Number(parsed.HEALTH_USER_CACHE_TTL_MS || 60000),
+    healthMaxBatch: Number(parsed.HEALTH_MAX_BATCH || 25),
+    healthQueryMode: parsed.HEALTH_QUERY_MODE || 'on_demand'
   };
 })();

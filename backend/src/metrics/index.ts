@@ -83,3 +83,22 @@ export const healthBreachEventsTotal = new Counter({
   help: 'Total number of health factor breach events detected',
   registers: [registry]
 });
+
+export const userHealthQueriesTotal = new Counter({
+  name: 'liquidbot_user_health_queries_total',
+  help: 'Total user health factor queries',
+  labelNames: ['mode', 'result'],
+  registers: [registry]
+});
+
+export const userHealthCacheHitsTotal = new Counter({
+  name: 'liquidbot_user_health_cache_hits_total',
+  help: 'Total user health factor cache hits',
+  registers: [registry]
+});
+
+export const userHealthCacheMissesTotal = new Counter({
+  name: 'liquidbot_user_health_cache_misses_total',
+  help: 'Total user health factor cache misses',
+  registers: [registry]
+});
