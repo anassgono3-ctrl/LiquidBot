@@ -22,14 +22,41 @@ describe('SubgraphService', () => {
   });
 
   describe('getLiquidationCalls', () => {
-    it('should fetch and parse liquidation calls', async () => {
+    it('should fetch and parse liquidation calls with nested user object', async () => {
       const service = liveServiceWith({
         liquidationCalls: [
           {
             id: '0x123',
             timestamp: '1234567890',
             liquidator: '0xabc',
-            user: '0xdef',
+            user: { id: '0xdef' },
+            principalAmount: '1000000',
+            collateralAmount: '2000000',
+            txHash: '0xtxhash123',
+            principalReserve: { id: '0xusdc', symbol: 'USDC', decimals: 6 },
+            collateralReserve: { id: '0xweth', symbol: 'WETH', decimals: 18 },
+          },
+        ],
+      });
+      const result = await service.getLiquidationCalls(10);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('0x123');
+      expect(result[0].timestamp).toBe(1234567890);
+      expect(result[0].user).toBe('0xdef');
+      expect(result[0].txHash).toBe('0xtxhash123');
+      expect(result[0].principalReserve).toEqual({ id: '0xusdc', symbol: 'USDC', decimals: 6 });
+      expect(result[0].collateralReserve).toEqual({ id: '0xweth', symbol: 'WETH', decimals: 18 });
+      expect(requestMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle liquidation calls without reserve metadata', async () => {
+      const service = liveServiceWith({
+        liquidationCalls: [
+          {
+            id: '0x456',
+            timestamp: '1234567891',
+            liquidator: '0xabc',
+            user: { id: '0xdef' },
             principalAmount: '1000000',
             collateralAmount: '2000000',
           },
@@ -37,8 +64,11 @@ describe('SubgraphService', () => {
       });
       const result = await service.getLiquidationCalls(10);
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('0x123');
-      expect(requestMock).toHaveBeenCalledTimes(1);
+      expect(result[0].id).toBe('0x456');
+      expect(result[0].timestamp).toBe(1234567891);
+      expect(result[0].txHash).toBeNull();
+      expect(result[0].principalReserve).toBeNull();
+      expect(result[0].collateralReserve).toBeNull();
     });
 
     it('should handle empty results', async () => {
