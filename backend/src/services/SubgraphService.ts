@@ -114,8 +114,9 @@ export class SubgraphService {
     // Increment instance counter
     SubgraphService._instanceCount += 1;
 
-    // Hard guard: throw in non-development if more than one instance
-    if (process.env.NODE_ENV !== 'development' && SubgraphService._instanceCount > 1) {
+    // Hard guard: throw in non-development/test if more than one instance
+    const allowMultiple = process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test';
+    if (!allowMultiple && SubgraphService._instanceCount > 1) {
       throw new Error(
         `[subgraph] FATAL: Multiple SubgraphService instances detected (count=${SubgraphService._instanceCount}). ` +
         `This indicates stale dist artifacts or duplicate imports. Clean build required.`
