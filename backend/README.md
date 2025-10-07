@@ -92,6 +92,17 @@ npm run typecheck
 npm run build
 ```
 
+### Test Environment Defaults
+
+During `npm test`:
+- `API_KEY` & `JWT_SECRET` auto-populate with test-safe placeholders if absent.
+- `USE_MOCK_SUBGRAPH` defaults to `true` (no external calls).
+- To exercise live subgraph behavior in a specific test, set:
+  ```bash
+  USE_MOCK_SUBGRAPH=false GRAPH_API_KEY=your_key SUBGRAPH_DEPLOYMENT_ID=your_deployment npm test
+  ```
+- Production (non-test) mode still fails fast if secrets are missing.
+
 ### Coverage Thresholds
 
 The project enforces minimum coverage thresholds in CI:

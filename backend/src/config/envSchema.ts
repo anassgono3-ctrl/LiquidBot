@@ -1,6 +1,14 @@
 import { z } from 'zod';
 
 const booleanString = z.enum(['true', 'false']).transform(v => v === 'true');
+const isTest = (process.env.NODE_ENV || '').toLowerCase() === 'test';
+
+// Inject test defaults BEFORE schema parsing so Zod doesn't throw for test runs.
+if (isTest) {
+  if (!process.env.API_KEY) process.env.API_KEY = 'test-api-key';
+  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-jwt-secret';
+  if (!process.env.USE_MOCK_SUBGRAPH) process.env.USE_MOCK_SUBGRAPH = 'true';
+}
 
 export const rawEnvSchema = z.object({
   PORT: z.string().optional(),
@@ -34,7 +42,8 @@ export const env = (() => {
   const parsed = rawEnvSchema.parse(process.env);
   const useMock = booleanString.parse(parsed.USE_MOCK_SUBGRAPH || 'false');
 
-  if (!useMock) {
+  // Only enforce gateway secrets when not mocking AND not in test mode
+  if (!useMock && !isTest) {
     if (!parsed.GRAPH_API_KEY) throw new Error('GRAPH_API_KEY required when USE_MOCK_SUBGRAPH=false');
     if (!parsed.SUBGRAPH_DEPLOYMENT_ID) throw new Error('SUBGRAPH_DEPLOYMENT_ID required when USE_MOCK_SUBGRAPH=false');
   }
