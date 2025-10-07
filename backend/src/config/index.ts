@@ -12,6 +12,7 @@ export const config = {
   get graphApiKey() { return env.graphApiKey; },
   get subgraphDeploymentId() { return env.subgraphDeploymentId; },
   get subgraphPollIntervalMs() { return env.subgraphPollIntervalMs; },
+  get subgraphDebugErrors() { return env.subgraphDebugErrors; },
 
   get subgraphUrl() {
     if (this.useMockSubgraph) return 'mock://subgraph';

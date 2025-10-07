@@ -52,20 +52,22 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// API routes with authentication
-app.use("/api/v1", authenticate, buildRoutes());
+// API routes with authentication (inject the singleton service)
+app.use("/api/v1", authenticate, buildRoutes(subgraphService));
 
 // Initialize WebSocket server
 const { wss } = initWebSocketServer(httpServer);
 
-// Start poller in live mode
+// Live polling (only if not mock)
 let subgraphPoller: SubgraphPollerHandle | null = null;
 if (!config.useMockSubgraph) {
   subgraphPoller = startSubgraphPoller({
     service: subgraphService,
-    intervalMs: config.subgraphPollIntervalMs,
-    logger
-    // onLiquidations: (liqs) => { ... } // Future: broadcast or queue tasks
+    intervalMs: config.subgraphPollIntervalMs || 15000,
+    logger,
+    onLiquidations: () => {
+      // Placeholder: broadcast or enqueue tasks later.
+    }
   });
 }
 

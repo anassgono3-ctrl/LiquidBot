@@ -22,6 +22,7 @@ export const rawEnvSchema = z.object({
   SUBGRAPH_DEPLOYMENT_ID: z.string().optional(),
 
   SUBGRAPH_POLL_INTERVAL_MS: z.string().optional(),
+  SUBGRAPH_DEBUG_ERRORS: z.string().optional(),
 
   SUBGRAPH_FAILURE_THRESHOLD: z.string().optional(),
   SUBGRAPH_RETRY_ATTEMPTS: z.string().optional(),
@@ -60,6 +61,7 @@ export const env = (() => {
     graphApiKey: parsed.GRAPH_API_KEY,
     subgraphDeploymentId: parsed.SUBGRAPH_DEPLOYMENT_ID,
     subgraphPollIntervalMs: Number(parsed.SUBGRAPH_POLL_INTERVAL_MS || 15000),
+    subgraphDebugErrors: (parsed.SUBGRAPH_DEBUG_ERRORS || '').toLowerCase() === 'true',
 
     subgraphFailureThreshold: Number(parsed.SUBGRAPH_FAILURE_THRESHOLD || 5),
     subgraphRetryAttempts: Number(parsed.SUBGRAPH_RETRY_ATTEMPTS || 3),

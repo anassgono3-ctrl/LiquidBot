@@ -36,14 +36,24 @@ const UserSchema = z.object({
   reserves: z.array(UserReserveSchema),
 });
 
-const LiquidationCallSchema = z.object({
+// Liquidation call fields may differ between gateway variants (string vs nested object).
+const LiquidationCallRawSchema = z.object({
   id: z.string(),
   timestamp: z.string(),
-  liquidator: z.string(),
-  user: z.string(),
+  liquidator: z.union([z.string(), z.object({ id: z.string() })]),
+  user: z.union([z.string(), z.object({ id: z.string() })]),
   principalAmount: z.string(),
   collateralAmount: z.string(),
 });
+
+const LiquidationCallSchema = LiquidationCallRawSchema.transform(raw => ({
+  id: raw.id,
+  timestamp: raw.timestamp,
+  liquidator: typeof raw.liquidator === 'string' ? raw.liquidator : raw.liquidator.id,
+  user: typeof raw.user === 'string' ? raw.user : raw.user.id,
+  principalAmount: raw.principalAmount,
+  collateralAmount: raw.collateralAmount
+}));
 
 export interface SubgraphServiceOptions {
   mock?: boolean;
@@ -120,9 +130,12 @@ export class SubgraphService {
     return false;
   }
 
+  private isParseError(err: unknown): boolean {
+    return !!(err && typeof err === 'object' && 'name' in err && err.name === 'ZodError');
+  }
+
   private async perform<T>(op: string, fn: () => Promise<T>): Promise<T> {
     if (this.mock || this.degraded) {
-      // Return mock path immediately
       subgraphRequestsTotal.inc({ status: 'fallback' });
       return fn();
     }
@@ -143,18 +156,27 @@ export class SubgraphService {
     } catch (e) {
       subgraphRequestsTotal.inc({ status: 'error' });
       endTimer();
-      this.consecutiveFailures += 1;
-      subgraphConsecutiveFailures.set(this.consecutiveFailures);
-
-      if (this.consecutiveFailures >= config.subgraphFailureThreshold) {
-        this.degraded = true;
-        subgraphFallbackActivations.inc();
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[subgraph] Failure threshold reached (${this.consecutiveFailures}) – switching to degraded fallback mode`
-        );
+      // Only network / logical failures (not parse) affect degradation
+      if (!this.isParseError(e)) {
+        this.consecutiveFailures += 1;
+        subgraphConsecutiveFailures.set(this.consecutiveFailures);
+        if (this.consecutiveFailures >= config.subgraphFailureThreshold) {
+          this.degraded = true;
+          subgraphFallbackActivations.inc();
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[subgraph] Failure threshold reached (${this.consecutiveFailures}) – switching to degraded fallback mode`
+          );
+        }
       }
-      throw e;
+      const errMsg = e instanceof Error ? e.message : String(e);
+      const wrapped = new Error(`${op} failed: ${errMsg}`);
+      (wrapped as Error & { original: unknown }).original = e;
+      if (config.subgraphDebugErrors) {
+        // eslint-disable-next-line no-console
+        console.error('[subgraph][debug] op failure original error:', e);
+      }
+      throw wrapped;
     }
   }
 
@@ -188,19 +210,25 @@ export class SubgraphService {
 
   async getLiquidationCalls(first = 100): Promise<LiquidationCall[]> {
     if (this.mock || this.degraded) {
-      return []; // safe fallback
+      return [];
     }
     this.ensureLive();
     return this.perform('liquidationCalls', async () => {
       const query = gql`
         query LiquidationCalls($first: Int!) {
           liquidationCalls(first: $first, orderBy: timestamp, orderDirection: desc) {
-            id timestamp liquidator user principalAmount collateralAmount
+            id
+            timestamp
+            liquidator
+            user
+            principalAmount
+            collateralAmount
           }
         }
       `;
       const data = await this.client!.request<{ liquidationCalls: unknown[] }>(query, { first });
-      return z.array(LiquidationCallSchema).parse(data.liquidationCalls);
+      // Transform & normalize
+      return z.array(LiquidationCallSchema).parse(data.liquidationCalls) as unknown as LiquidationCall[];
     });
   }
 
