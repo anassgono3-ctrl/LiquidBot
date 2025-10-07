@@ -14,6 +14,7 @@ import { initWebSocketServer } from "./websocket/server.js";
 import { registry } from "./metrics/index.js";
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
+import { buildInfo } from "./buildInfo.js";
 
 const logger = createLogger({
   level: "info",
@@ -69,6 +70,7 @@ app.get("/health", (_req, res) => {
       uptimeSeconds: Math.floor(process.uptime()),
       version: "0.1.0"
     },
+    build: buildInfo,
     subgraph: subgraphService.healthStatus()
   });
 });
@@ -108,5 +110,6 @@ const port = config.port;
 httpServer.listen(port, () => {
   logger.info(`LiquidBot backend listening on port ${port}`);
   logger.info(`WebSocket server available at ws://localhost:${port}/ws`);
+  logger.info(`Build info: commit=${buildInfo.commit} node=${buildInfo.node} started=${buildInfo.startedAt}`);
   logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
 });

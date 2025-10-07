@@ -13,6 +13,8 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "start": "node -r dotenv/config dist/src/index.js",
+    "clean": "rimraf dist",
+    "prebuild": "npm run clean",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --ext .ts",
@@ -23,7 +25,7 @@
     "prepare": "husky install",
     "migrate": "node scripts/migrate.js",
     "seed": "node scripts/seed.js",
-    "risk:scan": "npm run build && node scripts/risk-scan.js",
+    "risk:scan": "tsx scripts/risk-scan.ts",
     "worker": "tsx watch src/worker/index.ts",
     "gen:types": "tsx scripts/generate-types.ts"
   },
@@ -70,6 +72,7 @@
     "lint-staged": "^15.2.9",
     "prettier": "^3.3.3",
     "prisma": "^6.16.3",
+    "rimraf": "^6.0.1",
     "supertest": "^7.1.4",
     "ts-node": "^10.9.2",
     "ts-node-dev": "^2.0.0",
