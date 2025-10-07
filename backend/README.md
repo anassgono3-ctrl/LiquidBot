@@ -157,6 +157,26 @@ SUBGRAPH_RATE_LIMIT_CAPACITY=30
 SUBGRAPH_RATE_LIMIT_INTERVAL_MS=10000
 ```
 
+## Subgraph Polling
+
+The backend now performs live polling of the Aave V3 Base subgraph for liquidation calls when `USE_MOCK_SUBGRAPH=false`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| SUBGRAPH_POLL_INTERVAL_MS | 15000 | Interval between liquidation poll cycles (ms) |
+
+In live mode you should see logs:
+```
+[subgraph] starting poller (interval=15000ms)
+[subgraph] poll start
+[subgraph] retrieved 0 liquidation calls
+```
+
+To disable network calls during development/testing:
+```
+USE_MOCK_SUBGRAPH=true
+```
+
 ## Observability & Metrics
 
 The service exposes Prometheus metrics at `GET /metrics`.
