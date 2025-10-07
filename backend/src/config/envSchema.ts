@@ -24,6 +24,9 @@ export const rawEnvSchema = z.object({
   SUBGRAPH_POLL_INTERVAL_MS: z.string().optional(),
   SUBGRAPH_DEBUG_ERRORS: z.string().optional(),
 
+  LIQUIDATION_POLL_LIMIT: z.string().optional(),
+  LIQUIDATION_TRACK_MAX: z.string().optional(),
+
   SUBGRAPH_FAILURE_THRESHOLD: z.string().optional(),
   SUBGRAPH_RETRY_ATTEMPTS: z.string().optional(),
   SUBGRAPH_RETRY_BASE_MS: z.string().optional(),
@@ -62,6 +65,9 @@ export const env = (() => {
     subgraphDeploymentId: parsed.SUBGRAPH_DEPLOYMENT_ID,
     subgraphPollIntervalMs: Number(parsed.SUBGRAPH_POLL_INTERVAL_MS || 15000),
     subgraphDebugErrors: (parsed.SUBGRAPH_DEBUG_ERRORS || '').toLowerCase() === 'true',
+
+    liquidationPollLimit: Number(parsed.LIQUIDATION_POLL_LIMIT || 50),
+    liquidationTrackMax: Number(parsed.LIQUIDATION_TRACK_MAX || 5000),
 
     subgraphFailureThreshold: Number(parsed.SUBGRAPH_FAILURE_THRESHOLD || 5),
     subgraphRetryAttempts: Number(parsed.SUBGRAPH_RETRY_ATTEMPTS || 3),

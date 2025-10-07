@@ -1,16 +1,27 @@
 import type { SubgraphService } from '../services/SubgraphService.js';
 import type { LiquidationCall } from '../types/index.js';
+import {
+  liquidationNewEventsTotal,
+  liquidationSnapshotSize,
+  liquidationSeenTotal
+} from '../metrics/index.js';
+
+import { createLiquidationTracker, type LiquidationTracker } from './liquidationTracker.js';
 
 export interface SubgraphPollerOptions {
   service: SubgraphService;
   intervalMs: number;
   logger?: { info: (...args: unknown[]) => void; error: (...args: unknown[]) => void };
   onLiquidations?: (events: LiquidationCall[]) => void;
+  onNewLiquidations?: (events: LiquidationCall[]) => void;
+  pollLimit?: number;
+  trackMax?: number;
 }
 
 export interface SubgraphPollerHandle {
   stop(): void;
   isRunning(): boolean;
+  getTrackerStats(): { seenTotal: number; pollLimit: number } | null;
 }
 
 function formatError(err: unknown): string {
@@ -21,10 +32,20 @@ function formatError(err: unknown): string {
 }
 
 export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPollerHandle {
-  const { service, intervalMs, logger = console, onLiquidations } = opts;
+  const {
+    service,
+    intervalMs,
+    logger = console,
+    onLiquidations,
+    onNewLiquidations,
+    pollLimit = 50,
+    trackMax = 5000
+  } = opts;
 
   let active = true;
-  logger.info(`[subgraph] starting poller (interval=${intervalMs}ms)`);
+  const tracker: LiquidationTracker = createLiquidationTracker({ max: trackMax });
+  
+  logger.info(`[subgraph] starting poller (interval=${intervalMs}ms, pollLimit=${pollLimit}, trackMax=${trackMax})`);
 
   const tick = async () => {
     if (!active) return;
@@ -36,14 +57,35 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
     }
 
     try {
-      const liqs = await service.getLiquidationCalls(50);
-      if (liqs.length > 0) {
-        const sample = liqs.slice(0, 3).map(l => l.id.substring(0, 12)).join(', ');
-        logger.info(`[subgraph] retrieved ${liqs.length} liquidation calls (sample ids: ${sample}...)`);
-      } else {
-        logger.info('[subgraph] retrieved 0 liquidation calls');
+      const liqs = await service.getLiquidationCalls(pollLimit);
+      
+      // Use tracker to determine new events
+      const { newEvents, snapshotLen, seenSize } = tracker.diff(liqs);
+      
+      // Update metrics
+      liquidationSnapshotSize.set(snapshotLen);
+      liquidationSeenTotal.set(seenSize);
+      if (newEvents.length > 0) {
+        liquidationNewEventsTotal.inc(newEvents.length);
       }
+      
+      // Log with new format
+      logger.info(
+        `[subgraph] liquidation snapshot size=${snapshotLen} new=${newEvents.length} totalSeen=${seenSize}`
+      );
+      
+      // Log sample of new IDs if any
+      if (newEvents.length > 0) {
+        const sampleIds = newEvents.slice(0, 3).map(l => l.id.substring(0, 12)).join(', ');
+        const truncated = newEvents.length > 3 ? '...' : '';
+        logger.info(`[subgraph] new liquidation IDs: ${sampleIds}${truncated}`);
+      }
+      
+      // Call callbacks
       onLiquidations?.(liqs);
+      if (newEvents.length > 0) {
+        onNewLiquidations?.(newEvents);
+      }
     } catch (err: unknown) {
       const msg = formatError(err);
       let details = '';
@@ -79,6 +121,13 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
     },
     isRunning() {
       return active;
+    },
+    getTrackerStats() {
+      const stats = tracker.getStats();
+      return {
+        seenTotal: stats.seenTotal,
+        pollLimit
+      };
     }
   };
 }

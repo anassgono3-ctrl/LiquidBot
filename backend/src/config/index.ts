@@ -13,6 +13,8 @@ export const config = {
   get subgraphDeploymentId() { return env.subgraphDeploymentId; },
   get subgraphPollIntervalMs() { return env.subgraphPollIntervalMs; },
   get subgraphDebugErrors() { return env.subgraphDebugErrors; },
+  get liquidationPollLimit() { return env.liquidationPollLimit; },
+  get liquidationTrackMax() { return env.liquidationTrackMax; },
 
   // Optional raw override (header mode or custom proxy)
   get rawSubgraphUrl() { return process.env.SUBGRAPH_URL; },

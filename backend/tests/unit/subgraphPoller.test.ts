@@ -78,4 +78,71 @@ describe('subgraphPoller', () => {
 
     poller.stop();
   });
+
+  it('calls onNewLiquidations only for new events', async () => {
+    const mockEvents = [
+      { id: 'l1', timestamp: 1000 },
+      { id: 'l2', timestamp: 2000 },
+      { id: 'l3', timestamp: 3000 }
+    ];
+
+    getLiquidationCalls
+      .mockResolvedValueOnce([mockEvents[0], mockEvents[1]])     // first poll: 2 new
+      .mockResolvedValueOnce([mockEvents[0], mockEvents[1]])     // second poll: 0 new (overlap)
+      .mockResolvedValueOnce([mockEvents[1], mockEvents[2]]);    // third poll: 1 new
+
+    const onNewLiquidations = vi.fn();
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 2000,
+      onNewLiquidations
+    });
+
+    // Wait for first tick to complete
+    await vi.waitFor(() => {
+      expect(onNewLiquidations).toHaveBeenCalledTimes(1);
+    });
+    expect(onNewLiquidations).toHaveBeenCalledWith([mockEvents[0], mockEvents[1]]);
+
+    // Second tick - no new events (callback should not be called)
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(onNewLiquidations).toHaveBeenCalledTimes(1); // still 1
+
+    // Third tick - 1 new event
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.waitFor(() => {
+      expect(onNewLiquidations).toHaveBeenCalledTimes(2);
+    });
+    expect(onNewLiquidations).toHaveBeenNthCalledWith(2, [mockEvents[2]]);
+
+    poller.stop();
+  });
+
+  it('exposes tracker stats via getTrackerStats', async () => {
+    getLiquidationCalls.mockResolvedValue([
+      { id: 'l1' },
+      { id: 'l2' }
+    ]);
+
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 5000,
+      pollLimit: 100,
+      trackMax: 5000
+    });
+
+    // Wait for first tick to complete and tracker to be updated
+    await vi.waitFor(() => {
+      const stats = poller.getTrackerStats();
+      expect(stats?.seenTotal).toBe(2);
+    }, { timeout: 1000 });
+
+    const stats = poller.getTrackerStats();
+    expect(stats).not.toBeNull();
+    expect(stats?.pollLimit).toBe(100);
+
+    poller.stop();
+  });
 });
