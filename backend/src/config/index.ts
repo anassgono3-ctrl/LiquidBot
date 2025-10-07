@@ -14,9 +14,50 @@ export const config = {
   get subgraphPollIntervalMs() { return env.subgraphPollIntervalMs; },
   get subgraphDebugErrors() { return env.subgraphDebugErrors; },
 
+  // Optional raw override (header mode or custom proxy)
+  get rawSubgraphUrl() { return process.env.SUBGRAPH_URL; },
+
+  /**
+   * Determine effective endpoint + auth needs.
+   */
+  resolveSubgraphEndpoint() {
+    if (this.useMockSubgraph) {
+      return { endpoint: 'mock://subgraph', mode: 'mock' as const, needsHeader: false };
+    }
+
+    const key = this.graphApiKey;
+    const dep = this.subgraphDeploymentId;
+
+    let endpoint = this.rawSubgraphUrl;
+    let mode: 'path' | 'header' | 'raw' = 'raw';
+    let needsHeader = false;
+
+    if (!endpoint) {
+      // Default path-embedded mode
+      endpoint = `https://gateway.thegraph.com/api/${key}/subgraphs/id/${dep}`;
+      mode = 'path';
+      needsHeader = false;
+    } else {
+      const hasEmbedded = key && endpoint.includes(`/${key}/subgraphs/`);
+      const matchesHeaderPattern = /https:\/\/gateway\.thegraph\.com\/api\/subgraphs\/id\//.test(endpoint);
+
+      if (hasEmbedded) {
+        mode = 'path';
+        needsHeader = false;
+      } else if (matchesHeaderPattern) {
+        mode = 'header';
+        needsHeader = true;
+      } else {
+        mode = 'raw';
+        needsHeader = !!key; // opportunistic header if key present
+      }
+    }
+
+    return { endpoint: endpoint!, mode, needsHeader };
+  },
+
   get subgraphUrl() {
-    if (this.useMockSubgraph) return 'mock://subgraph';
-    return `https://gateway.thegraph.com/api/${this.graphApiKey}/subgraphs/id/${this.subgraphDeploymentId}`;
+    return this.resolveSubgraphEndpoint().endpoint;
   },
 
   get aavePoolAddress() { return env.aavePoolAddress; },

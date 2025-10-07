@@ -9,6 +9,7 @@ import request from 'supertest';
 import { config } from '../../src/config/index.js';
 import { authenticate } from '../../src/middleware/auth.js';
 import buildRoutes from '../../src/api/routes.js';
+import { SubgraphService } from '../../src/services/SubgraphService.js';
 
 describe('API Integration Tests', () => {
   let app: express.Application;
@@ -16,7 +17,8 @@ describe('API Integration Tests', () => {
   beforeAll(() => {
     app = express();
     app.use(express.json());
-    app.use('/api/v1', authenticate, buildRoutes());
+    const subgraphService = SubgraphService.createMock();
+    app.use('/api/v1', authenticate, buildRoutes(subgraphService));
   });
 
   describe('GET /api/v1/health', () => {

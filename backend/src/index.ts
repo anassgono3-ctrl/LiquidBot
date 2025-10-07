@@ -4,6 +4,7 @@ import express from "express";
 import cors from "cors";
 import promClient from "prom-client";
 import { createLogger, format, transports } from "winston";
+import { gql } from 'graphql-request';
 
 import { config } from "./config/index.js";
 import { authenticate } from "./middleware/auth.js";
@@ -31,8 +32,28 @@ app.use(rateLimiter);
 // Collect default metrics
 promClient.collectDefaultMetrics({ register: registry });
 
-// Instantiate service once
+// Single service instance
 const subgraphService = new SubgraphService();
+
+// Warmup probe
+async function warmup() {
+  if (config.useMockSubgraph) return;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const client = (subgraphService as any).client;
+    if (client) {
+      const meta = await client.request(gql`query { _meta { block { number } } }`);
+      logger.info(`[subgraph] warmup ok block=${meta?._meta?.block?.number ?? 'n/a'}`);
+    }
+  } catch (e: unknown) {
+    const errorMessage = e instanceof Error ? e.message : String(e);
+    logger.error(`[subgraph] warmup failed: ${errorMessage}`);
+    if (config.subgraphDebugErrors) {
+      console.error('[subgraph][warmup debug]', e);
+    }
+  }
+}
+void warmup();
 
 // Prometheus metrics endpoint (no auth)
 app.get("/metrics", async (_req, res) => {
@@ -52,21 +73,22 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// API routes with authentication (inject the singleton service)
+// Inject the singleton service
 app.use("/api/v1", authenticate, buildRoutes(subgraphService));
 
 // Initialize WebSocket server
 const { wss } = initWebSocketServer(httpServer);
 
-// Live polling (only if not mock)
 let subgraphPoller: SubgraphPollerHandle | null = null;
 if (!config.useMockSubgraph) {
+  const resolved = config.resolveSubgraphEndpoint();
+  logger.info(`Subgraph resolved endpoint authMode=${resolved.mode} header=${resolved.needsHeader} url=${config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
   subgraphPoller = startSubgraphPoller({
     service: subgraphService,
     intervalMs: config.subgraphPollIntervalMs || 15000,
     logger,
     onLiquidations: () => {
-      // Placeholder: broadcast or enqueue tasks later.
+      // placeholder for future broadcasting
     }
   });
 }
@@ -86,5 +108,5 @@ const port = config.port;
 httpServer.listen(port, () => {
   logger.info(`LiquidBot backend listening on port ${port}`);
   logger.info(`WebSocket server available at ws://localhost:${port}/ws`);
-  logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl}`);
+  logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
 });

@@ -107,14 +107,21 @@ export class SubgraphService {
       if (opts.client) {
         this.client = opts.client;
       } else {
-        const endpoint = opts.endpointOverride || config.subgraphUrl;
-        const redacted =
-          config.graphApiKey && endpoint.includes(config.graphApiKey)
-            ? endpoint.replace(config.graphApiKey, '****')
-            : endpoint;
+        const { endpoint, mode, needsHeader } = config.resolveSubgraphEndpoint();
+        let headers: Record<string, string> | undefined;
+        if (needsHeader) {
+          if (!config.graphApiKey) {
+            console.warn('[subgraph] WARNING: header auth required but GRAPH_API_KEY missing.');
+          } else {
+            headers = { Authorization: `Bearer ${config.graphApiKey}` };
+          }
+        }
+        const redacted = config.graphApiKey
+          ? endpoint.replaceAll(config.graphApiKey, '****')
+          : endpoint;
         // eslint-disable-next-line no-console
-        console.log(`[subgraph] Using gateway URL: ${redacted}`);
-        this.client = new GraphQLClient(endpoint);
+        console.log(`[subgraph] Using gateway URL: ${redacted} (auth-mode=${mode}${needsHeader ? '+auth-header' : ''})`);
+        this.client = new GraphQLClient(endpoint, { headers });
       }
     }
 

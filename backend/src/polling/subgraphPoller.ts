@@ -46,16 +46,21 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
       onLiquidations?.(liqs);
     } catch (err: unknown) {
       const msg = formatError(err);
-      logger.error(`[subgraph] poll error: ${msg}`);
-      if (err && typeof err === 'object' && 'response' in err) {
-        const errObj = err as { response?: { errors?: unknown } };
-        if (errObj.response?.errors) {
-          logger.error('[subgraph] poll error (graphql errors): ' + JSON.stringify(errObj.response.errors));
+      let details = '';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const errObj = err as any;
+      if (errObj?.response) {
+        const status = errObj.response.status;
+        details += ` status=${status}`;
+        if (errObj.response.errors) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          details += ` graphqlErrors=${JSON.stringify(errObj.response.errors.map((e: any) => e.message))}`;
         }
       }
+      logger.error(`[subgraph] poll error: ${msg}${details}`);
       if (process.env.SUBGRAPH_DEBUG_ERRORS === 'true') {
         // eslint-disable-next-line no-console
-        console.error('[subgraph][debug] raw error object:', err);
+        console.error('[subgraph][debug] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
       }
     }
   };
