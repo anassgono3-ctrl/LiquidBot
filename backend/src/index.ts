@@ -12,6 +12,7 @@ import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
 import { registry } from "./metrics/index.js";
 import { SubgraphService } from "./services/SubgraphService.js";
+import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 
 const logger = createLogger({
   level: "info",
@@ -30,7 +31,7 @@ app.use(rateLimiter);
 // Collect default metrics
 promClient.collectDefaultMetrics({ register: registry });
 
-// Instantiate service once to inspect health
+// Instantiate service once
 const subgraphService = new SubgraphService();
 
 // Prometheus metrics endpoint (no auth)
@@ -57,9 +58,21 @@ app.use("/api/v1", authenticate, buildRoutes());
 // Initialize WebSocket server
 const { wss } = initWebSocketServer(httpServer);
 
+// Start poller in live mode
+let subgraphPoller: SubgraphPollerHandle | null = null;
+if (!config.useMockSubgraph) {
+  subgraphPoller = startSubgraphPoller({
+    service: subgraphService,
+    intervalMs: config.subgraphPollIntervalMs,
+    logger
+    // onLiquidations: (liqs) => { ... } // Future: broadcast or queue tasks
+  });
+}
+
 // Graceful shutdown handling
 const shutdown = (signal: string) => {
   logger.info(`Received ${signal}, shutting down...`);
+  subgraphPoller?.stop();
   wss.close(() => {
     logger.info("WebSocket server closed");
     process.exit(0);
