@@ -22,7 +22,7 @@ describe('SubgraphService', () => {
   });
 
   describe('getLiquidationCalls', () => {
-    it('should fetch and parse liquidation calls with nested user object', async () => {
+    it('should fetch and parse liquidation calls with nested user object and string timestamp', async () => {
       const service = liveServiceWith({
         liquidationCalls: [
           {
@@ -49,11 +49,62 @@ describe('SubgraphService', () => {
       expect(requestMock).toHaveBeenCalledTimes(1);
     });
 
-    it('should handle liquidation calls without reserve metadata', async () => {
+    it('should fetch and parse liquidation calls with numeric timestamp', async () => {
+      const service = liveServiceWith({
+        liquidationCalls: [
+          {
+            id: '0x789',
+            timestamp: 1234567890,
+            liquidator: '0xabc',
+            user: { id: '0xdef' },
+            principalAmount: '1000000',
+            collateralAmount: '2000000',
+            txHash: '0xtxhash789',
+            principalReserve: { id: '0xusdc', symbol: 'USDC', decimals: 6 },
+            collateralReserve: { id: '0xweth', symbol: 'WETH', decimals: 18 },
+          },
+        ],
+      });
+      const result = await service.getLiquidationCalls(10);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('0x789');
+      expect(result[0].timestamp).toBe(1234567890);
+      expect(typeof result[0].timestamp).toBe('number');
+      expect(result[0].user).toBe('0xdef');
+      expect(result[0].txHash).toBe('0xtxhash789');
+      expect(requestMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('should handle liquidation calls with string decimals in reserves', async () => {
       const service = liveServiceWith({
         liquidationCalls: [
           {
             id: '0x456',
+            timestamp: 1234567891,
+            liquidator: '0xabc',
+            user: { id: '0xdef' },
+            principalAmount: '1000000',
+            collateralAmount: '2000000',
+            principalReserve: { id: '0xusdc', symbol: 'USDC', decimals: '6' },
+            collateralReserve: { id: '0xweth', symbol: 'WETH', decimals: '18' },
+          },
+        ],
+      });
+      const result = await service.getLiquidationCalls(10);
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('0x456');
+      expect(result[0].timestamp).toBe(1234567891);
+      expect(result[0].principalReserve?.decimals).toBe(6);
+      expect(result[0].collateralReserve?.decimals).toBe(18);
+      expect(typeof result[0].principalReserve?.decimals).toBe('number');
+      expect(typeof result[0].collateralReserve?.decimals).toBe('number');
+    });
+
+    it('should handle liquidation calls without reserve metadata', async () => {
+      const service = liveServiceWith({
+        liquidationCalls: [
+          {
+            id: '0x999',
             timestamp: '1234567891',
             liquidator: '0xabc',
             user: { id: '0xdef' },
@@ -64,7 +115,7 @@ describe('SubgraphService', () => {
       });
       const result = await service.getLiquidationCalls(10);
       expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('0x456');
+      expect(result[0].id).toBe('0x999');
       expect(result[0].timestamp).toBe(1234567891);
       expect(result[0].txHash).toBeNull();
       expect(result[0].principalReserve).toBeNull();
