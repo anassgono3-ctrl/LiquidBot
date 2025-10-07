@@ -7,8 +7,12 @@ import { HealthCalculator } from '../services/HealthCalculator.js';
 import { config } from '../config/index.js';
 
 export default function buildRoutes(subgraph?: SubgraphService) {
+  if (!subgraph) {
+    throw new Error('SubgraphService must be injected from index.ts to prevent duplicate instantiation');
+  }
+
   const router = Router();
-  const subgraphService = subgraph || new SubgraphService();
+  const subgraphService = subgraph;
   const healthCalculator = new HealthCalculator();
 
   /**
