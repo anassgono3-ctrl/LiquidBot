@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { GraphQLClient } from 'graphql-request';
+
 import { HealthFactorResolver } from '../../src/services/HealthFactorResolver.js';
 
 describe('HealthFactorResolver', () => {
@@ -8,7 +9,8 @@ describe('HealthFactorResolver', () => {
 
   beforeEach(() => {
     mockClient = {
-      request: vi.fn()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      request: vi.fn() as any
     };
   });
 

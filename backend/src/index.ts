@@ -4,7 +4,7 @@ import express from "express";
 import cors from "cors";
 import promClient from "prom-client";
 import { createLogger, format, transports } from "winston";
-import { gql } from 'graphql-request';
+import { gql, GraphQLClient } from 'graphql-request';
 
 import { config } from "./config/index.js";
 import { authenticate } from "./middleware/auth.js";
@@ -12,7 +12,6 @@ import { rateLimiter } from "./middleware/rateLimit.js";
 import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
 import { registry, opportunitiesGeneratedTotal, opportunityProfitEstimate, healthBreachEventsTotal } from "./metrics/index.js";
-import { GraphQLClient } from 'graphql-request';
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";

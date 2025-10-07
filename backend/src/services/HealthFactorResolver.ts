@@ -2,13 +2,14 @@
 import { GraphQLClient, gql } from 'graphql-request';
 import { z } from 'zod';
 
-import type { User } from '../types/index.js';
-import { HealthCalculator } from './HealthCalculator.js';
 import {
   userHealthQueriesTotal,
   userHealthCacheHitsTotal,
   userHealthCacheMissesTotal
 } from '../metrics/index.js';
+import type { User } from '../types/index.js';
+
+import { HealthCalculator } from './HealthCalculator.js';
 
 const SINGLE_USER_HF_QUERY = gql`
   query SingleUserHealthFactor($id: ID!) {
