@@ -45,7 +45,7 @@ const notificationService = new NotificationService();
 const healthMonitor = new HealthMonitor(subgraphService);
 
 // Track opportunity stats for health endpoint
-let opportunityStats = {
+const opportunityStats = {
   lastBatchSize: 0,
   totalOpportunities: 0,
   lastProfitSampleUsd: 0

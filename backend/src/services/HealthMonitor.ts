@@ -1,6 +1,7 @@
 // HealthMonitor: Track user health factors and detect threshold breaches
 import { config } from '../config/index.js';
-import type { User, HealthSnapshot } from '../types/index.js';
+import type { HealthSnapshot } from '../types/index.js';
+
 import { HealthCalculator } from './HealthCalculator.js';
 import { SubgraphService } from './SubgraphService.js';
 

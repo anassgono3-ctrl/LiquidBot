@@ -1,6 +1,7 @@
 // OpportunityService: Detect and evaluate liquidation opportunities
 import { config } from '../config/index.js';
 import type { LiquidationCall, Opportunity, HealthSnapshot } from '../types/index.js';
+
 import { PriceService } from './PriceService.js';
 
 export interface OpportunityServiceOptions {

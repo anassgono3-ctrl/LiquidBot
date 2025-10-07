@@ -7,10 +7,14 @@ Backend services for the Aave V3 Base liquidation protection service.
 The LiquidBot backend provides:
 - Real-time position monitoring via Aave V3 Base subgraph
 - Health factor calculation and risk detection
+- **Liquidation opportunity detection with profit estimation**
+- **Health factor breach monitoring and alerts**
+- **Telegram notifications for opportunities and breaches**
 - Flash loan orchestration for position protection
 - Subscription management and protection logging
-- WebSocket alerts for at-risk positions
+- WebSocket alerts for at-risk positions and opportunities
 - RESTful API with authentication
+- Prometheus metrics for monitoring
 
 ## Quick Start
 
@@ -58,7 +62,12 @@ Get list of monitored positions with health factors.
 Queue a protection request for a user.
 
 ### WebSocket: `ws://localhost:3000/ws`
-Real-time risk alerts for HF < 1.1.
+Real-time alerts for:
+- **Liquidation opportunities** (`opportunity.new`)
+- **Health factor breaches** (`health.breach`)
+- **Risk alerts** (HF < 1.1)
+
+See [docs/ALERTS.md](./docs/ALERTS.md) for detailed event formats.
 
 ## Health Factor Formula
 
@@ -116,6 +125,10 @@ Coverage reports are generated in `./coverage` directory.
 
 - **SubgraphService**: Fetch Aave V3 data from The Graph with retry logic and rate limiting
 - **HealthCalculator**: Calculate health factors
+- **HealthMonitor**: Track health factor changes and detect threshold breaches
+- **OpportunityService**: Detect and evaluate liquidation opportunities with profit estimation
+- **PriceService**: USD price lookups (stub, ready for oracle integration)
+- **NotificationService**: Telegram bot notifications for opportunities and breaches
 - **FlashLoanService**: Plan and execute refinancing (stub)
 - **SubscriptionService**: Manage user subscriptions
 
@@ -211,10 +224,16 @@ All metrics are prefixed with `liquidbot_`:
 | `liquidbot_subgraph_fallback_activated_total` | Counter | none | Times fallback to mock activated |
 | `liquidbot_rate_limit_subgraph_dropped_total` | Counter | none | Requests denied by rate limiter |
 | `liquidbot_ws_clients` | Gauge | none | Active WebSocket clients |
+| `liquidbot_liquidation_new_events_total` | Counter | none | New liquidation events detected |
+| `liquidbot_liquidation_snapshot_size` | Gauge | none | Most recent liquidation snapshot size |
+| `liquidbot_liquidation_seen_total` | Gauge | none | Unique liquidation IDs tracked |
+| **`liquidbot_opportunities_generated_total`** | Counter | none | **Liquidation opportunities generated** |
+| **`liquidbot_opportunity_profit_estimate`** | Histogram | none | **Estimated profit in USD (buckets: 1-1000)** |
+| **`liquidbot_health_breach_events_total`** | Counter | none | **Health factor breach events detected** |
 
 ### Enhanced Health Endpoint
 
-The `/health` endpoint now includes subgraph status:
+The `/health` endpoint now includes comprehensive monitoring status:
 
 ```json
 {
@@ -233,6 +252,22 @@ The `/health` endpoint now includes subgraph status:
       "tokensRemaining": 27,
       "refillIntervalMs": 10000
     }
+  },
+  "liquidationTracker": {
+    "seenTotal": 150,
+    "pollLimit": 50
+  },
+  "opportunity": {
+    "lastBatchSize": 3,
+    "totalOpportunities": 45,
+    "lastProfitSampleUsd": 25.50
+  },
+  "healthMonitoring": {
+    "trackedUsers": 128,
+    "lastSnapshotTs": 1736892345678
+  },
+  "notifications": {
+    "telegramEnabled": true
   }
 }
 ```
@@ -271,6 +306,8 @@ Lower values = faster failover, higher values = more retry attempts before degra
 
 ## Documentation
 
+- **[Health Monitoring & Alerts](docs/ALERTS.md)** - Opportunity detection, profit simulation, Telegram notifications
+- [Liquidation Tracking](docs/LIQUIDATION_TRACKING.md) - Incremental liquidation detection
 - [OpenAPI Spec](docs/openapi.yaml)
 - [GraphQL Examples](examples/)
 - [Monitoring Setup](monitoring/)
