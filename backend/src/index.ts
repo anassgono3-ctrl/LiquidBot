@@ -64,7 +64,7 @@ app.get("/metrics", async (_req, res) => {
 
 // Enhanced health endpoint
 app.get("/health", (_req, res) => {
-  res.json({
+  const healthData: Record<string, unknown> = {
     status: "ok",
     app: {
       uptimeSeconds: Math.floor(process.uptime()),
@@ -72,14 +72,24 @@ app.get("/health", (_req, res) => {
     },
     build: buildInfo,
     subgraph: subgraphService.healthStatus()
-  });
+  };
+  
+  // Add liquidation tracker stats if poller is active
+  if (subgraphPoller) {
+    const trackerStats = subgraphPoller.getTrackerStats();
+    if (trackerStats) {
+      healthData.liquidationTracker = trackerStats;
+    }
+  }
+  
+  res.json(healthData);
 });
 
 // Inject the singleton service
 app.use("/api/v1", authenticate, buildRoutes(subgraphService));
 
 // Initialize WebSocket server
-const { wss } = initWebSocketServer(httpServer);
+const { wss, broadcastLiquidationEvent } = initWebSocketServer(httpServer);
 
 let subgraphPoller: SubgraphPollerHandle | null = null;
 if (!config.useMockSubgraph) {
@@ -89,8 +99,25 @@ if (!config.useMockSubgraph) {
     service: subgraphService,
     intervalMs: config.subgraphPollIntervalMs || 15000,
     logger,
+    pollLimit: config.liquidationPollLimit,
+    trackMax: config.liquidationTrackMax,
     onLiquidations: () => {
-      // placeholder for future broadcasting
+      // placeholder for raw snapshot callback
+    },
+    onNewLiquidations: (newEvents) => {
+      // Broadcast new liquidation events via WebSocket
+      if (newEvents.length > 0 && wss.clients.size > 0) {
+        broadcastLiquidationEvent({
+          type: 'liquidation.new',
+          liquidations: newEvents.map(e => ({
+            id: e.id,
+            timestamp: e.timestamp,
+            user: e.user,
+            liquidator: e.liquidator
+          })),
+          timestamp: new Date().toISOString()
+        });
+      }
     }
   });
 }

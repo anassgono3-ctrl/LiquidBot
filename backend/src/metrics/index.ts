@@ -46,3 +46,21 @@ export const wsClients = new Gauge({
   help: 'Active WebSocket clients',
   registers: [registry]
 });
+
+export const liquidationNewEventsTotal = new Counter({
+  name: 'liquidbot_liquidation_new_events_total',
+  help: 'Total number of new liquidation events detected',
+  registers: [registry]
+});
+
+export const liquidationSnapshotSize = new Gauge({
+  name: 'liquidbot_liquidation_snapshot_size',
+  help: 'Size of the most recent liquidation snapshot',
+  registers: [registry]
+});
+
+export const liquidationSeenTotal = new Gauge({
+  name: 'liquidbot_liquidation_seen_total',
+  help: 'Total number of unique liquidation IDs tracked',
+  registers: [registry]
+});

@@ -12,6 +12,17 @@ export interface RiskEvent {
   timestamp: string;
 }
 
+export interface LiquidationEvent {
+  type: 'liquidation.new';
+  liquidations: Array<{
+    id: string;
+    timestamp: number;
+    user: string;
+    liquidator: string;
+  }>;
+  timestamp: string;
+}
+
 /**
  * Initialize WebSocket server for real-time risk alerts
  */
@@ -51,6 +62,17 @@ export function initWebSocketServer(httpServer: Server) {
   }
 
   /**
+   * Broadcast liquidation event to all connected clients
+   */
+  function broadcastLiquidationEvent(event: LiquidationEvent) {
+    wss.clients.forEach((client) => {
+      if (client.readyState === WebSocket.OPEN) {
+        client.send(JSON.stringify(event));
+      }
+    });
+  }
+
+  /**
    * Stub: Simulate risk events for testing (broadcasts sample data)
    * In production, this would be triggered by the monitoring worker
    */
@@ -73,5 +95,5 @@ export function initWebSocketServer(httpServer: Server) {
     startMockRiskBroadcast();
   }
 
-  return { wss, broadcastRiskEvent };
+  return { wss, broadcastRiskEvent, broadcastLiquidationEvent };
 }
