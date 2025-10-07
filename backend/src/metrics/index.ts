@@ -64,3 +64,22 @@ export const liquidationSeenTotal = new Gauge({
   help: 'Total number of unique liquidation IDs tracked',
   registers: [registry]
 });
+
+export const opportunitiesGeneratedTotal = new Counter({
+  name: 'liquidbot_opportunities_generated_total',
+  help: 'Total number of liquidation opportunities generated',
+  registers: [registry]
+});
+
+export const opportunityProfitEstimate = new Histogram({
+  name: 'liquidbot_opportunity_profit_estimate',
+  help: 'Estimated profit in USD for liquidation opportunities',
+  buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000],
+  registers: [registry]
+});
+
+export const healthBreachEventsTotal = new Counter({
+  name: 'liquidbot_health_breach_events_total',
+  help: 'Total number of health factor breach events detected',
+  registers: [registry]
+});

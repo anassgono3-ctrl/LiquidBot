@@ -369,4 +369,15 @@ export class SubgraphService {
       return z.array(UserSchema).parse(data.users);
     });
   }
+
+  /**
+   * Get health snapshot for users with debt.
+   * Returns a lightweight snapshot with pre-calculated health factors.
+   * @param limit Maximum number of users to fetch
+   * @returns Array of users with debt
+   */
+  async getUserHealthSnapshot(limit = 500): Promise<User[]> {
+    // Reuse existing getUsersWithDebt method
+    return this.getUsersWithDebt(limit);
+  }
 }
