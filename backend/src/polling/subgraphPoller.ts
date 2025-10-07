@@ -13,6 +13,13 @@ export interface SubgraphPollerHandle {
   isRunning(): boolean;
 }
 
+function formatError(err: unknown): string {
+  if (!err) return 'Unknown error';
+  if (typeof err === 'string') return err;
+  if (err instanceof Error) return err.message || err.toString();
+  try { return JSON.stringify(err); } catch { return String(err); }
+}
+
 export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPollerHandle {
   const { service, intervalMs, logger = console, onLiquidations } = opts;
 
@@ -21,16 +28,35 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
 
   const tick = async () => {
     if (!active) return;
-    logger.info('[subgraph] poll start');
+
+    if ('isDegraded' in service && typeof service.isDegraded === 'function' && service.isDegraded()) {
+      logger.info('[subgraph] poll start (degraded mode) – returning empty snapshot');
+    } else {
+      logger.info('[subgraph] poll start');
+    }
+
     try {
-      const liqs = await service.getLiquidationCalls(100);
-      logger.info(`[subgraph] retrieved ${liqs.length} liquidation calls`);
-      if (onLiquidations) {
-        onLiquidations(liqs);
+      const liqs = await service.getLiquidationCalls(50);
+      if (liqs.length > 0) {
+        const sample = liqs.slice(0, 3).map(l => l.id.substring(0, 12)).join(', ');
+        logger.info(`[subgraph] retrieved ${liqs.length} liquidation calls (sample ids: ${sample}...)`);
+      } else {
+        logger.info('[subgraph] retrieved 0 liquidation calls');
       }
+      onLiquidations?.(liqs);
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : String(err);
-      logger.error('[subgraph] poll error:', message);
+      const msg = formatError(err);
+      logger.error(`[subgraph] poll error: ${msg}`);
+      if (err && typeof err === 'object' && 'response' in err) {
+        const errObj = err as { response?: { errors?: unknown } };
+        if (errObj.response?.errors) {
+          logger.error('[subgraph] poll error (graphql errors): ' + JSON.stringify(errObj.response.errors));
+        }
+      }
+      if (process.env.SUBGRAPH_DEBUG_ERRORS === 'true') {
+        // eslint-disable-next-line no-console
+        console.error('[subgraph][debug] raw error object:', err);
+      }
     }
   };
 

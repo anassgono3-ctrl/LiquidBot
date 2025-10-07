@@ -177,6 +177,23 @@ To disable network calls during development/testing:
 USE_MOCK_SUBGRAPH=true
 ```
 
+### Subgraph Polling Diagnostics
+
+Set `SUBGRAPH_DEBUG_ERRORS=true` to emit raw error objects (use only in development).
+
+Degradation mode triggers only on operational/network failures, not on schema parse (Zod) errors. Parse mismatches are surfaced in logs without counting toward failure thresholds.
+
+Example live poll cycle:
+```
+[subgraph] poll start
+[subgraph] retrieved 3 liquidation calls (sample ids: 0xabc123..., 0xdef456..., 0x7890ab...)
+```
+
+Example degraded cycle:
+```
+[subgraph] poll start (degraded mode) – returning empty snapshot
+```
+
 ## Observability & Metrics
 
 The service exposes Prometheus metrics at `GET /metrics`.
