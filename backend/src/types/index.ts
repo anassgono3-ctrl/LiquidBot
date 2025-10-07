@@ -27,11 +27,22 @@ export interface User {
 
 export interface LiquidationCall {
   id: string;
-  timestamp: string;
+  timestamp: number;             // normalized from string
   liquidator: string;
   user: string;
   principalAmount: string;
   collateralAmount: string;
+  txHash: string | null;
+  principalReserve: {
+    id: string;
+    symbol: string | null;
+    decimals: number | null;
+  } | null;
+  collateralReserve: {
+    id: string;
+    symbol: string | null;
+    decimals: number | null;
+  } | null;
 }
 
 export interface HealthFactorResult {

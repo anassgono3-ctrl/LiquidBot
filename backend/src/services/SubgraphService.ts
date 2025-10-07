@@ -36,23 +36,48 @@ const UserSchema = z.object({
   reserves: z.array(UserReserveSchema),
 });
 
-// Liquidation call fields may differ between gateway variants (string vs nested object).
+// --- Updated liquidation schemas ---
+
+const LiquidationReserveSchema = z.object({
+  id: z.string(),
+  symbol: z.string().optional(),
+  decimals: z.union([z.number(), z.string().transform(v => Number(v))]).optional()
+});
+
 const LiquidationCallRawSchema = z.object({
   id: z.string(),
   timestamp: z.string(),
-  liquidator: z.union([z.string(), z.object({ id: z.string() })]),
   user: z.union([z.string(), z.object({ id: z.string() })]),
-  principalAmount: z.string(),
+  liquidator: z.string(),
+  collateralReserve: LiquidationReserveSchema.optional(),
+  principalReserve: LiquidationReserveSchema.optional(),
   collateralAmount: z.string(),
+  principalAmount: z.string(),
+  txHash: z.string().optional()
 });
 
 const LiquidationCallSchema = LiquidationCallRawSchema.transform(raw => ({
   id: raw.id,
-  timestamp: raw.timestamp,
-  liquidator: typeof raw.liquidator === 'string' ? raw.liquidator : raw.liquidator.id,
+  timestamp: Number(raw.timestamp),
   user: typeof raw.user === 'string' ? raw.user : raw.user.id,
+  liquidator: raw.liquidator,
   principalAmount: raw.principalAmount,
-  collateralAmount: raw.collateralAmount
+  collateralAmount: raw.collateralAmount,
+  txHash: raw.txHash || null,
+  principalReserve: raw.principalReserve ? {
+    id: raw.principalReserve.id,
+    symbol: raw.principalReserve.symbol || null,
+    decimals: typeof raw.principalReserve.decimals === 'number'
+      ? raw.principalReserve.decimals
+      : (raw.principalReserve.decimals !== undefined ? Number(raw.principalReserve.decimals) : null)
+  } : null,
+  collateralReserve: raw.collateralReserve ? {
+    id: raw.collateralReserve.id,
+    symbol: raw.collateralReserve.symbol || null,
+    decimals: typeof raw.collateralReserve.decimals === 'number'
+      ? raw.collateralReserve.decimals
+      : (raw.collateralReserve.decimals !== undefined ? Number(raw.collateralReserve.decimals) : null)
+  } : null
 }));
 
 export interface SubgraphServiceOptions {
@@ -216,18 +241,24 @@ export class SubgraphService {
     return this.perform('liquidationCalls', async () => {
       const query = gql`
         query LiquidationCalls($first: Int!) {
-          liquidationCalls(first: $first, orderBy: timestamp, orderDirection: desc) {
+          liquidationCalls(
+            first: $first,
+            orderBy: timestamp,
+            orderDirection: desc
+          ) {
             id
             timestamp
+            user { id }
             liquidator
-            user
-            principalAmount
+            collateralReserve { id symbol decimals }
+            principalReserve { id symbol decimals }
             collateralAmount
+            principalAmount
+            txHash
           }
         }
       `;
       const data = await this.client!.request<{ liquidationCalls: unknown[] }>(query, { first });
-      // Transform & normalize
       return z.array(LiquidationCallSchema).parse(data.liquidationCalls) as unknown as LiquidationCall[];
     });
   }
