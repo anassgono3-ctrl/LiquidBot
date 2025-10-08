@@ -1,5 +1,28 @@
 #!/usr/bin/env tsx
 // verify-data.ts: Standalone verification script for data integrity and calculations
+//
+// This script validates the correctness and internal consistency of data pulled from
+// the subgraph and the bot's calculations (health factor, pricing, profit estimation).
+//
+// Usage:
+//   1. Verify last 10 liquidation calls (default):
+//      node -r dotenv/config dist/scripts/verify-data.js --recent=10
+//
+//   2. Verify a specific user:
+//      node -r dotenv/config dist/scripts/verify-data.js --user=0xabc... --verbose
+//
+//   3. Output JSON report file:
+//      node -r dotenv/config dist/scripts/verify-data.js --recent=25 --out=verify-report.json
+//
+// Features / Checks:
+// - Schema validation of liquidation fields (id, user, amounts, reserve symbols, decimals)
+// - Fetch single-user reserves (getSingleUserWithDebt) and verify:
+//   * borrowedReservesCount equals number of reserves with non-zero debt
+//   * Each reserve with usageAsCollateralEnabled has reserveLiquidationThreshold > 0
+//   * No negative balances or debts
+// - Health Factor:
+//   * Compute with existing HealthCalculator
+//   * Independently recompute inline (manual loop) and compare absolute difference
 
 import { writeFileSync } from 'fs';
 
@@ -51,15 +74,19 @@ function parseArgs(): {
   user?: string;
   verbose: boolean;
   out?: string;
+  help: boolean;
 } {
   const args = process.argv.slice(2);
   let recent: number | undefined;
   let user: string | undefined;
   let verbose = false;
   let out: string | undefined;
+  let help = false;
 
   for (const arg of args) {
-    if (arg.startsWith('--recent=')) {
+    if (arg === '--help' || arg === '-h') {
+      help = true;
+    } else if (arg.startsWith('--recent=')) {
       recent = parseInt(arg.split('=')[1], 10);
     } else if (arg.startsWith('--user=')) {
       user = arg.split('=')[1];
@@ -71,11 +98,46 @@ function parseArgs(): {
   }
 
   // Default to 10 recent liquidations if neither recent nor user specified
-  if (recent === undefined && user === undefined) {
+  if (recent === undefined && user === undefined && !help) {
     recent = 10;
   }
 
-  return { recent, user, verbose, out };
+  return { recent, user, verbose, out, help };
+}
+
+function printHelp(): void {
+  console.log(`
+verify-data: Data Verification Script for LiquidBot
+
+Usage:
+  node -r dotenv/config dist/scripts/verify-data.js [options]
+
+Options:
+  --recent=<N>      Verify last N liquidation calls (default: 10)
+  --user=<address>  Verify a specific user by address
+  --verbose         Enable verbose output with detailed checks
+  --out=<file>      Output JSON report to file
+  --help, -h        Show this help message
+
+Examples:
+  # Verify last 10 liquidations (default)
+  node -r dotenv/config dist/scripts/verify-data.js
+
+  # Verify last 25 liquidations
+  node -r dotenv/config dist/scripts/verify-data.js --recent=25
+
+  # Verify specific user with verbose output
+  node -r dotenv/config dist/scripts/verify-data.js --user=0xabc... --verbose
+
+  # Generate JSON report
+  node -r dotenv/config dist/scripts/verify-data.js --recent=25 --out=report.json
+
+Checks Performed:
+  - Liquidation call schema validation
+  - User reserve data consistency (borrowedReservesCount, collateral thresholds)
+  - Health factor calculation verification (independent recomputation)
+  - Negative balance/debt detection
+`);
 }
 
 // Validate liquidation call schema
@@ -297,7 +359,12 @@ function verifyHealthFactor(user: User, healthCalculator: HealthCalculator): Ver
 }
 
 async function main() {
-  const { recent, user, verbose, out } = parseArgs();
+  const { recent, user, verbose, out, help } = parseArgs();
+
+  if (help) {
+    printHelp();
+    process.exit(0);
+  }
 
   console.log('[verify-data] Starting data verification...');
   if (recent) {
