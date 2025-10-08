@@ -1,6 +1,6 @@
 import type { SubgraphService } from '../services/SubgraphService.js';
 import type { LiquidationCall } from '../types/index.js';
-import type { HealthFactorResolver } from '../services/HealthFactorResolver.js';
+import type { OnDemandHealthFactor } from '../services/OnDemandHealthFactor.js';
 import {
   liquidationNewEventsTotal,
   liquidationSnapshotSize,
@@ -17,7 +17,7 @@ export interface SubgraphPollerOptions {
   onNewLiquidations?: (events: LiquidationCall[]) => void;
   pollLimit?: number;
   trackMax?: number;
-  healthFactorResolver?: HealthFactorResolver;
+  onDemandHealthFactor?: OnDemandHealthFactor;
 }
 
 export interface SubgraphPollerHandle {
@@ -42,7 +42,7 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
     onNewLiquidations,
     pollLimit = 50,
     trackMax = 5000,
-    healthFactorResolver
+    onDemandHealthFactor
   } = opts;
 
   let active = true;
@@ -72,22 +72,28 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
         liquidationNewEventsTotal.inc(newEvents.length);
       }
       
-      // Resolve health factors for new events (on-demand)
+      // Resolve health factors for new events (on-demand, one at a time)
       let hfResolved = 0;
-      if (healthFactorResolver && newEvents.length > 0) {
+      if (onDemandHealthFactor && newEvents.length > 0) {
         try {
           // Gather unique user IDs from new events
           const uniqueUserIds = [...new Set(newEvents.map(e => e.user.toLowerCase()))];
           
-          // Resolve health factors
-          const healthFactors = await healthFactorResolver.getHealthFactorsForUsers(uniqueUserIds);
-          
-          // Attach HF to each new event
-          for (const event of newEvents) {
-            const hf = healthFactors.get(event.user.toLowerCase());
-            if (hf !== undefined) {
-              event.healthFactor = hf;
-              if (hf !== null) hfResolved++;
+          // Fetch health factor individually for each unique user (no batching)
+          for (const userId of uniqueUserIds) {
+            try {
+              const hf = await onDemandHealthFactor.getHealthFactor(userId);
+              
+              // Attach HF to all events for this user
+              for (const event of newEvents) {
+                if (event.user.toLowerCase() === userId) {
+                  event.healthFactor = hf;
+                  if (hf !== null) hfResolved++;
+                }
+              }
+            } catch (err: unknown) {
+              const msg = formatError(err);
+              logger.error(`[subgraph] health factor resolution error for ${userId}: ${msg}`);
             }
           }
         } catch (err: unknown) {

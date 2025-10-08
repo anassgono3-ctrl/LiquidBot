@@ -5,16 +5,17 @@ Backend services for the Aave V3 Base liquidation protection service.
 ## Overview
 
 The LiquidBot backend provides:
-- Real-time position monitoring via Aave V3 Base subgraph
-- Health factor calculation and risk detection
+- Real-time liquidation event monitoring via Aave V3 Base subgraph
+- **On-demand health factor resolution** (per liquidation, no bulk snapshots)
 - **Liquidation opportunity detection with profit estimation**
-- **Health factor breach monitoring and alerts**
-- **Telegram notifications for opportunities and breaches**
+- **Telegram notifications for profitable opportunities**
 - Flash loan orchestration for position protection
 - Subscription management and protection logging
-- WebSocket alerts for at-risk positions and opportunities
+- WebSocket alerts for liquidation opportunities
 - RESTful API with authentication
 - Prometheus metrics for monitoring
+
+**Note**: Bulk health monitoring has been disabled. Health factors are now computed on-demand only when new liquidation events are detected, reducing API quota consumption by >95%.
 
 ## Quick Start
 
@@ -125,41 +126,47 @@ Coverage reports are generated in `./coverage` directory.
 
 - **SubgraphService**: Fetch Aave V3 data from The Graph with retry logic and rate limiting
 - **HealthCalculator**: Calculate health factors
-- **HealthFactorResolver**: On-demand health factor resolution with smart caching (NEW)
-- **HealthMonitor**: Track health factor changes and detect threshold breaches
+- **OnDemandHealthFactor**: Per-user health factor resolution (no caching, no batching)
+- **HealthMonitor**: DISABLED - Bulk health monitoring removed in favor of on-demand resolution
 - **OpportunityService**: Detect and evaluate liquidation opportunities with profit estimation
 - **PriceService**: USD price lookups (stub, ready for oracle integration)
 - **NotificationService**: Telegram bot notifications for opportunities and breaches
 - **FlashLoanService**: Plan and execute refinancing (stub)
 - **SubscriptionService**: Manage user subscriptions
 
-### HealthFactorResolver
+### On-Demand Health Factor Resolution
 
-**Purpose**: Efficiently resolve health factors for users appearing in new liquidation events, reducing subgraph API quota usage.
+**Design Philosophy**: Health factors are computed **only** when a new liquidation event is detected, strictly on a per-user basis. This eliminates bulk snapshot queries (previously 500 users every poll) and massive Zod parsing overhead.
 
-**Features**:
-- **On-Demand Queries**: Only fetches health factors for users in newly detected liquidations
-- **Smart Caching**: TTL-based cache (default 60s) to avoid repeated queries for the same user
-- **Batch Optimization**: Combines multiple user queries into single GraphQL requests (default: max 25 per batch)
-- **Graceful Degradation**: Returns null on errors or for users with zero debt
-- **Observable**: Exposes Prometheus metrics for cache hits/misses and query stats
+**Key Changes**:
+- **Bulk monitoring DISABLED**: `HealthMonitor` is now a no-op stub
+- **No scheduled snapshots**: Health factor updates removed from polling loop
+- **Single-user queries only**: Each unique user in new liquidations triggers one individual query
+- **No batching**: Sequential per-user resolution (simpler, more predictable)
+- **No caching**: Direct query each time (can be added later if needed)
+
+**How It Works**:
+1. Poller detects new liquidation events (delta from tracker)
+2. For each unique user address in new events:
+   - `OnDemandHealthFactor.getHealthFactor(userId)` is called
+   - Single GraphQL query: `query SingleUser($id: ID!) { user(id: $id) { ... } }`
+   - Health factor calculated and attached to liquidation event
+3. Opportunities are built from liquidations with attached health factors
+
+**Benefits**:
+- **Reduced API quota**: No more 500-user bulk queries
+- **No Zod spam**: Single-user schemas are simple and parse cleanly
+- **Event-driven**: Health factors resolved only when liquidations occur
+- **Predictable**: One query per unique user, no complex batching logic
 
 **Configuration**:
 ```env
-HEALTH_USER_CACHE_TTL_MS=60000   # Cache TTL (default: 60 seconds)
-HEALTH_MAX_BATCH=25               # Max users per batch query (default: 25)
-HEALTH_QUERY_MODE=on_demand       # Query mode (default: on_demand)
+HEALTH_QUERY_MODE=on_demand       # Query mode (always on_demand now)
 ```
 
-**Metrics**:
-- `liquidbot_user_health_queries_total{mode,result}`: Total queries (mode: single/batch, result: success/error)
-- `liquidbot_user_health_cache_hits_total`: Cache hits
-- `liquidbot_user_health_cache_misses_total`: Cache misses
-
 **Efficiency**:
-- With **no new liquidations**: Zero queries
-- With **N unique users**: At most `ceil(N / HEALTH_MAX_BATCH)` queries
-- Cache hit rate typically >70% in steady state with liquidation clustering
+- With **no new liquidations**: Zero health factor queries
+- With **N unique users** in new liquidations: Exactly **N queries** (one per user)
 
 ## Environment Validation
 
@@ -258,7 +265,6 @@ All metrics are prefixed with `liquidbot_`:
 | `liquidbot_liquidation_seen_total` | Gauge | none | Unique liquidation IDs tracked |
 | **`liquidbot_opportunities_generated_total`** | Counter | none | **Liquidation opportunities generated** |
 | **`liquidbot_opportunity_profit_estimate`** | Histogram | none | **Estimated profit in USD (buckets: 1-1000)** |
-| **`liquidbot_health_breach_events_total`** | Counter | none | **Health factor breach events detected** |
 
 ### Enhanced Health Endpoint
 
@@ -292,9 +298,10 @@ The `/health` endpoint now includes comprehensive monitoring status:
     "lastProfitSampleUsd": 25.50
   },
   "healthMonitoring": {
-    "trackedUsers": 128,
-    "lastSnapshotTs": 1736892345678
+    "mode": "disabled",
+    "message": "Bulk health monitoring disabled - using on-demand resolution"
   },
+  "onDemandHealthFactor": true,
   "notifications": {
     "telegramEnabled": true
   }

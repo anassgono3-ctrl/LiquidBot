@@ -160,100 +160,85 @@ describe('SubgraphService', () => {
     });
   });
 
-  describe('getUsersWithDebt', () => {
-    it('should fetch and parse users with debt', async () => {
-      const service = liveServiceWith({
-        users: [
-          {
-            id: '0x123',
-            borrowedReservesCount: 1,
-            reserves: [
-              {
-                currentATokenBalance: '1000000000',
-                currentVariableDebt: '500000000',
-                currentStableDebt: '0',
-                reserve: {
-                  id: '0xusdc',
-                  symbol: 'USDC',
-                  name: 'USD Coin',
-                  decimals: 6,
-                  reserveLiquidationThreshold: 8500,
-                  usageAsCollateralEnabled: true,
-                  price: { priceInEth: '0.0005' },
-                },
+  describe('getSingleUserWithDebt', () => {
+    it('should fetch and parse a single user with debt', async () => {
+      requestMock.mockResolvedValue({
+        user: {
+          id: '0x123',
+          borrowedReservesCount: 1,
+          reserves: [
+            {
+              currentATokenBalance: '1000000000',
+              currentVariableDebt: '500000000',
+              currentStableDebt: '0',
+              reserve: {
+                id: '0xusdc',
+                symbol: 'USDC',
+                name: 'USD Coin',
+                decimals: 6,
+                reserveLiquidationThreshold: 8500,
+                usageAsCollateralEnabled: true,
+                price: { priceInEth: '0.0005' },
               },
-            ],
-          },
-        ],
+            },
+          ],
+        },
       });
-      const result = await service.getUsersWithDebt(100);
-      expect(result).toHaveLength(1);
-      expect(result[0].id).toBe('0x123');
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      const result = await service.getSingleUserWithDebt('0x123');
+      expect(result).not.toBeNull();
+      expect(result?.id).toBe('0x123');
+      expect(result?.borrowedReservesCount).toBe(1);
     });
 
-    it('should handle multiple users with multiple reserves', async () => {
-      const service = liveServiceWith({
-        users: [
-          {
-            id: '0x111',
-            borrowedReservesCount: 2,
-            reserves: [
-              {
-                currentATokenBalance: '2000000000',
-                currentVariableDebt: '1000000000',
-                currentStableDebt: '0',
-                reserve: {
-                  id: '0xusdc',
-                  symbol: 'USDC',
-                  name: 'USD Coin',
-                  decimals: 6,
-                  reserveLiquidationThreshold: 8500,
-                  usageAsCollateralEnabled: true,
-                  price: { priceInEth: '0.0005' },
-                },
+    it('should return null for non-existent user', async () => {
+      requestMock.mockResolvedValue({ user: null });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      const result = await service.getSingleUserWithDebt('0xnonexistent');
+      expect(result).toBeNull();
+    });
+
+    it('should handle user with multiple reserves', async () => {
+      requestMock.mockResolvedValue({
+        user: {
+          id: '0x111',
+          borrowedReservesCount: 2,
+          reserves: [
+            {
+              currentATokenBalance: '2000000000',
+              currentVariableDebt: '1000000000',
+              currentStableDebt: '0',
+              reserve: {
+                id: '0xusdc',
+                symbol: 'USDC',
+                name: 'USD Coin',
+                decimals: 6,
+                reserveLiquidationThreshold: 8500,
+                usageAsCollateralEnabled: true,
+                price: { priceInEth: '0.0005' },
               },
-              {
-                currentATokenBalance: '0',
-                currentVariableDebt: '500000000000000000',
-                currentStableDebt: '0',
-                reserve: {
-                  id: '0xweth',
-                  symbol: 'WETH',
-                  name: 'Wrapped Ether',
-                  decimals: 18,
-                  reserveLiquidationThreshold: 8250,
-                  usageAsCollateralEnabled: true,
-                  price: { priceInEth: '1.0' },
-                },
+            },
+            {
+              currentATokenBalance: '0',
+              currentVariableDebt: '500000000000000000',
+              currentStableDebt: '0',
+              reserve: {
+                id: '0xweth',
+                symbol: 'WETH',
+                name: 'Wrapped Ether',
+                decimals: 18,
+                reserveLiquidationThreshold: 8250,
+                usageAsCollateralEnabled: true,
+                price: { priceInEth: '1.0' },
               },
-            ],
-          },
-          {
-            id: '0x222',
-            borrowedReservesCount: 1,
-            reserves: [
-              {
-                currentATokenBalance: '1000000000',
-                currentVariableDebt: '500000000',
-                currentStableDebt: '0',
-                reserve: {
-                  id: '0xusdc',
-                  symbol: 'USDC',
-                  name: 'USD Coin',
-                  decimals: 6,
-                  reserveLiquidationThreshold: 8500,
-                  usageAsCollateralEnabled: true,
-                  price: { priceInEth: '0.0005' },
-                },
-              },
-            ],
-          },
-        ],
+            },
+          ],
+        },
       });
-      const result = await service.getUsersWithDebt(50);
-      expect(result).toHaveLength(2);
-      expect(result[0].reserves).toHaveLength(2);
-      expect(result[1].reserves).toHaveLength(1);
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      const result = await service.getSingleUserWithDebt('0x111');
+      expect(result).not.toBeNull();
+      expect(result?.reserves).toHaveLength(2);
     });
   });
 
@@ -262,7 +247,7 @@ describe('SubgraphService', () => {
       requestMock.mockReset();
       requestMock.mockRejectedValue(new Error('GraphQL error'));
       const service = new SubgraphService({ mock: false, client: { request: requestMock } });
-      await expect(service.getUsersWithDebt(10)).rejects.toThrow();
+      await expect(service.getSingleUserWithDebt('0x123')).rejects.toThrow();
       // Should have retried multiple times (default is 3)
       expect(requestMock).toHaveBeenCalledTimes(3);
     });
@@ -270,24 +255,23 @@ describe('SubgraphService', () => {
     it('should throw on validation errors', async () => {
       requestMock.mockReset();
       requestMock.mockResolvedValueOnce({
-        users: [
-          {
-            id: '0x123',
-            // borrowedReservesCount missing
-            reserves: [],
-          },
-        ],
+        user: {
+          id: '0x123',
+          // borrowedReservesCount missing
+          reserves: [],
+        },
       });
       const service = new SubgraphService({ mock: false, client: { request: requestMock } });
-      await expect(service.getUsersWithDebt(10)).rejects.toThrow();
+      await expect(service.getSingleUserWithDebt('0x123')).rejects.toThrow();
     });
   });
 
   describe('mock mode', () => {
-    it('returns canned data in mock mode', async () => {
+    it('returns canned data in mock mode for single user', async () => {
       const service = SubgraphService.createMock();
-      const users = await service.getUsersWithDebt();
-      expect(users.length).toBe(2);
+      const user = await service.getSingleUserWithDebt('0x123');
+      expect(user).not.toBeNull();
+      expect(user?.id).toBe('0x123');
       expect(requestMock).not.toHaveBeenCalled();
     });
   });

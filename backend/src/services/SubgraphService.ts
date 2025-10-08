@@ -13,12 +13,15 @@ import {
   subgraphRateLimitDropped
 } from '../metrics/index.js';
 
+// Helper for numeric fields that may come as strings
+const numericString = z.string().regex(/^\d+$/).transform(v => Number(v));
+
 const ReserveSchema = z.object({
   id: z.string(),
   symbol: z.string(),
   name: z.string(),
-  decimals: z.number(),
-  reserveLiquidationThreshold: z.number(),
+  decimals: z.union([z.number(), numericString]).transform(v => typeof v === 'number' ? v : Number(v)),
+  reserveLiquidationThreshold: z.union([z.number(), numericString]).transform(v => typeof v === 'number' ? v : Number(v)),
   usageAsCollateralEnabled: z.boolean(),
   price: z.object({ priceInEth: z.string() }),
 });
@@ -32,7 +35,7 @@ const UserReserveSchema = z.object({
 
 const UserSchema = z.object({
   id: z.string(),
-  borrowedReservesCount: z.number(),
+  borrowedReservesCount: z.union([z.number(), numericString]).transform(v => typeof v === 'number' ? v : Number(v)),
   reserves: z.array(UserReserveSchema),
 });
 
@@ -342,42 +345,60 @@ export class SubgraphService {
     });
   }
 
-  async getUsersWithDebt(first = 100): Promise<User[]> {
+  /**
+   * @deprecated DISABLED - Bulk user queries are no longer supported.
+   * Use getSingleUserWithDebt(userId) for on-demand single-user queries only.
+   */
+  async getUsersWithDebt(_first = 100): Promise<User[]> {
+    throw new Error('getUsersWithDebt is DISABLED - use getSingleUserWithDebt(userId) for on-demand queries');
+  }
+
+  /**
+   * @deprecated DISABLED - Bulk health snapshots are no longer supported.
+   * Use OnDemandHealthFactor service for per-user health factor queries.
+   */
+  async getUserHealthSnapshot(_limit = 500): Promise<User[]> {
+    throw new Error('getUserHealthSnapshot is DISABLED - use OnDemandHealthFactor service for on-demand queries');
+  }
+
+  /**
+   * Get a single user with debt information for health factor calculation.
+   * This is the ONLY supported method for user health queries (on-demand, per liquidation).
+   * @param userId The user address to query
+   * @returns User data or null if not found
+   */
+  async getSingleUserWithDebt(userId: string): Promise<User | null> {
     if (this.mock) {
-      return [
-        { id: '0xMockUser1', borrowedReservesCount: 2, reserves: [] },
-        { id: '0xMockUser2', borrowedReservesCount: 1, reserves: [] },
-      ] as User[];
+      return { id: userId, borrowedReservesCount: 1, reserves: [] } as User;
     }
-    if (this.degraded) return [];
+    if (this.degraded) return null;
     this.ensureLive();
-    return this.perform('usersWithDebt', async () => {
+    return this.perform('singleUserWithDebt', async () => {
       const query = gql`
-        query Users($first: Int!) {
-          users(first: $first, where: { borrowedReservesCount_gt: 0 }) {
-            id borrowedReservesCount
+        query SingleUser($id: ID!) {
+          user(id: $id) {
+            id
+            borrowedReservesCount
             reserves {
-              currentATokenBalance currentVariableDebt currentStableDebt
+              currentATokenBalance
+              currentVariableDebt
+              currentStableDebt
               reserve {
-                id symbol name decimals reserveLiquidationThreshold usageAsCollateralEnabled price { priceInEth }
+                id
+                symbol
+                name
+                decimals
+                reserveLiquidationThreshold
+                usageAsCollateralEnabled
+                price { priceInEth }
               }
             }
           }
         }
       `;
-      const data = await this.client!.request<{ users: unknown[] }>(query, { first });
-      return z.array(UserSchema).parse(data.users);
+      const data = await this.client!.request<{ user: unknown }>(query, { id: userId });
+      if (!data.user) return null;
+      return UserSchema.parse(data.user);
     });
-  }
-
-  /**
-   * Get health snapshot for users with debt.
-   * Returns a lightweight snapshot with pre-calculated health factors.
-   * @param limit Maximum number of users to fetch
-   * @returns Array of users with debt
-   */
-  async getUserHealthSnapshot(limit = 500): Promise<User[]> {
-    // Reuse existing getUsersWithDebt method
-    return this.getUsersWithDebt(limit);
   }
 }
