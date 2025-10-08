@@ -435,6 +435,7 @@ export class SubgraphService {
               reserve {
                 id
                 symbol
+                name
                 decimals
                 reserveLiquidationThreshold
                 usageAsCollateralEnabled
@@ -445,6 +446,38 @@ export class SubgraphService {
         }
       `;
       const data = await this.client!.request<{ users: unknown[] }>(query, { first: clampedLimit });
+      
+      // Defensive validation: check for missing reserve fields before parsing
+      if (Array.isArray(data.users)) {
+        for (const user of data.users) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          if (typeof user === 'object' && user !== null && 'reserves' in user && Array.isArray((user as any).reserves)) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            for (const ur of (user as any).reserves) {
+              const reserve = ur?.reserve;
+              if (reserve && typeof reserve === 'object') {
+                const missingFields: string[] = [];
+                if (!reserve.id) missingFields.push('id');
+                if (!reserve.symbol) missingFields.push('symbol');
+                if (!reserve.name) missingFields.push('name');
+                if (reserve.decimals === undefined) missingFields.push('decimals');
+                if (reserve.reserveLiquidationThreshold === undefined) missingFields.push('reserveLiquidationThreshold');
+                if (reserve.usageAsCollateralEnabled === undefined) missingFields.push('usageAsCollateralEnabled');
+                if (!reserve.price?.priceInEth) missingFields.push('price.priceInEth');
+                
+                if (missingFields.length > 0) {
+                  // eslint-disable-next-line no-console
+                  console.warn(
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    `[subgraph] getUsersPage: missing reserve fields for user ${(user as any).id}, reserve ${reserve.id || 'unknown'}: ${missingFields.join(', ')}`
+                  );
+                }
+              }
+            }
+          }
+        }
+      }
+      
       return z.array(UserSchema).parse(data.users);
     });
   }
