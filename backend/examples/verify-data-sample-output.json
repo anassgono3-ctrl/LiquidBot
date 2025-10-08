@@ -1,0 +1,76 @@
+{
+  "timestamp": "2024-01-15T10:30:00.000Z",
+  "totalLiquidations": 3,
+  "verifiedCount": 3,
+  "errorCount": 0,
+  "warningCount": 1,
+  "liquidations": [
+    {
+      "liquidationId": "liq-0x123abc",
+      "user": "0x1234567890abcdef",
+      "timestamp": 1705315800,
+      "schemaValid": true,
+      "userDataFetched": true,
+      "issues": [],
+      "healthFactorCheck": {
+        "calculatorHF": 0.9523,
+        "independentHF": 0.9523,
+        "diff": 0.0,
+        "isConsistent": true
+      },
+      "borrowedReservesCheck": {
+        "reported": 2,
+        "actual": 2,
+        "matches": true
+      }
+    },
+    {
+      "liquidationId": "liq-0x456def",
+      "user": "0xabcdef1234567890",
+      "timestamp": 1705315700,
+      "schemaValid": true,
+      "userDataFetched": true,
+      "issues": [
+        {
+          "type": "borrowedReservesCount",
+          "severity": "warning",
+          "message": "borrowedReservesCount mismatch: reported=3, actual=2",
+          "details": {
+            "mismatchList": ["USDC", "ETH"]
+          }
+        }
+      ],
+      "healthFactorCheck": {
+        "calculatorHF": 1.0854,
+        "independentHF": 1.0854,
+        "diff": 0.0,
+        "isConsistent": true
+      },
+      "borrowedReservesCheck": {
+        "reported": 3,
+        "actual": 2,
+        "matches": false,
+        "mismatchList": ["USDC", "ETH"]
+      }
+    },
+    {
+      "liquidationId": "liq-0x789ghi",
+      "user": "0xfedcba0987654321",
+      "timestamp": 1705315600,
+      "schemaValid": true,
+      "userDataFetched": true,
+      "issues": [],
+      "healthFactorCheck": {
+        "calculatorHF": 0.8765,
+        "independentHF": 0.8765,
+        "diff": 0.0,
+        "isConsistent": true
+      },
+      "borrowedReservesCheck": {
+        "reported": 1,
+        "actual": 1,
+        "matches": true
+      }
+    }
+  ]
+}
