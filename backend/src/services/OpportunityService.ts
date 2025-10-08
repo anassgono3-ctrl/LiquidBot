@@ -3,9 +3,11 @@ import { config } from '../config/index.js';
 import type { LiquidationCall, Opportunity, HealthSnapshot } from '../types/index.js';
 
 import { PriceService } from './PriceService.js';
+import { ProfitCalculator } from './ProfitCalculator.js';
 
 export interface OpportunityServiceOptions {
   priceService?: PriceService;
+  profitCalculator?: ProfitCalculator;
 }
 
 /**
@@ -14,9 +16,11 @@ export interface OpportunityServiceOptions {
  */
 export class OpportunityService {
   private priceService: PriceService;
+  private profitCalculator: ProfitCalculator;
 
   constructor(opts: OpportunityServiceOptions = {}) {
     this.priceService = opts.priceService || new PriceService();
+    this.profitCalculator = opts.profitCalculator || new ProfitCalculator();
   }
 
   /**
@@ -79,14 +83,14 @@ export class OpportunityService {
     const collateralValueUsd = collateralAmount * collateralPrice;
     const principalValueUsd = principalAmount * principalPrice;
 
-    // Estimate profit
-    const profitEstimateUsd = this.calculateProfit(
+    // Calculate profit using ProfitCalculator
+    const profitBreakdown = this.profitCalculator.calculateProfit(
       collateralValueUsd,
       principalValueUsd
     );
 
-    // Placeholder bonus percentage (5% - typical liquidation bonus)
-    const bonusPct = 0.05;
+    // Get bonus percentage from calculator
+    const bonusPct = this.profitCalculator.getBonusPct();
 
     return {
       id: liq.id,
@@ -101,41 +105,12 @@ export class OpportunityService {
       healthFactor,
       collateralValueUsd,
       principalValueUsd,
-      profitEstimateUsd,
+      profitEstimateUsd: profitBreakdown.net,
       bonusPct
     };
   }
 
-  /**
-   * Calculate estimated profit from a liquidation
-   * Formula: (collateralValue - principalValue) + (collateralValue * bonus) - fees
-   * 
-   * @param collateralValueUsd Collateral value in USD
-   * @param principalValueUsd Principal (debt) value in USD
-   * @returns Estimated profit in USD
-   */
-  private calculateProfit(collateralValueUsd: number, principalValueUsd: number): number {
-    // Placeholder bonus (5%)
-    const bonusPct = 0.05;
-    
-    // Raw spread
-    const rawSpread = collateralValueUsd - principalValueUsd;
-    
-    // Bonus value on collateral
-    const bonusValue = collateralValueUsd * bonusPct;
-    
-    // Gross profit
-    const gross = rawSpread + bonusValue;
-    
-    // Apply fees (execution + gas overhead)
-    const feeBps = config.profitFeeBps;
-    const fees = gross * (feeBps / 10000);
-    
-    // Net profit
-    const profit = gross - fees;
-    
-    return profit;
-  }
+
 
   /**
    * Filter opportunities by minimum profit threshold

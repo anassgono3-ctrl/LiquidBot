@@ -40,12 +40,13 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
     logger = console,
     onLiquidations,
     onNewLiquidations,
-    pollLimit = 50,
+    pollLimit = 5,
     trackMax = 5000,
     onDemandHealthFactor
   } = opts;
 
   let active = true;
+  let isFirstPoll = true;
   const tracker: LiquidationTracker = createLiquidationTracker({ max: trackMax });
   
   logger.info(`[subgraph] starting poller (interval=${intervalMs}ms, pollLimit=${pollLimit}, trackMax=${trackMax})`);
@@ -114,6 +115,19 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
         const truncated = newEvents.length > 3 ? '...' : '';
         logger.info(`[subgraph] new liquidation IDs: ${sampleIds}${truncated}`);
       }
+      
+      // Check if this is the first poll and bootstrap suppression is enabled
+      const shouldIgnoreBootstrap = isFirstPoll && (process.env.IGNORE_BOOTSTRAP_BATCH || 'true').toLowerCase() === 'true';
+      
+      if (shouldIgnoreBootstrap && newEvents.length > 0) {
+        logger.info(`[subgraph] bootstrap batch ignored (${newEvents.length} events suppressed)`);
+        isFirstPoll = false;
+        // Call onLiquidations for full snapshot but skip onNewLiquidations
+        onLiquidations?.(liqs);
+        return;
+      }
+      
+      isFirstPoll = false;
       
       // Call callbacks
       onLiquidations?.(liqs);

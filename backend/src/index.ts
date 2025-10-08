@@ -146,7 +146,7 @@ if (!config.useMockSubgraph) {
     service: subgraphService,
     intervalMs: config.subgraphPollIntervalMs || 15000,
     logger,
-    pollLimit: config.liquidationPollLimit,
+    pollLimit: config.pollLimit,
     trackMax: config.liquidationTrackMax,
     onDemandHealthFactor,
     onLiquidations: () => {

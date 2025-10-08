@@ -1,14 +1,21 @@
-// PriceService: USD price lookup (stub for future Coingecko integration)
+// PriceService: USD price lookup with optional Chainlink integration
 import { config } from '../config/index.js';
+import { ethers } from 'ethers';
+
+// Chainlink Aggregator V3 Interface ABI (minimal)
+const AGGREGATOR_V3_ABI = [
+  'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)'
+];
 
 /**
  * PriceService provides USD price lookups for tokens.
- * Current implementation uses hardcoded prices.
- * Ready for future integration with Coingecko or on-chain oracles.
+ * Supports Chainlink price feeds with fallback to stub prices.
  */
 export class PriceService {
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
   private readonly cacheTtlMs = 60000; // 1 minute cache
+  private chainlinkFeeds: Map<string, string> = new Map(); // symbol -> feed address
+  private provider: ethers.JsonRpcProvider | null = null;
 
   /**
    * Default price mappings for common tokens (USD per token)
@@ -34,7 +41,28 @@ export class PriceService {
   };
 
   constructor() {
-    if (config.priceOracleMode !== 'coingecko') {
+    // Initialize Chainlink feeds if configured
+    if (config.chainlinkRpcUrl && config.chainlinkFeeds) {
+      try {
+        this.provider = new ethers.JsonRpcProvider(config.chainlinkRpcUrl);
+        
+        // Parse CHAINLINK_FEEDS: "ETH:0xabc...,USDC:0xdef..."
+        const feedPairs = config.chainlinkFeeds.split(',');
+        for (const pair of feedPairs) {
+          const [symbol, address] = pair.split(':').map(s => s.trim());
+          if (symbol && address) {
+            this.chainlinkFeeds.set(symbol.toUpperCase(), address);
+          }
+        }
+        
+        // eslint-disable-next-line no-console
+        console.log(`[price] Chainlink feeds enabled for ${this.chainlinkFeeds.size} symbols`);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[price] Chainlink initialization failed, falling back to stub prices:', err);
+        this.provider = null;
+      }
+    } else {
       // eslint-disable-next-line no-console
       console.log(`[price] Using stub mode (PRICE_ORACLE_MODE=${config.priceOracleMode})`);
     }
@@ -42,6 +70,7 @@ export class PriceService {
 
   /**
    * Get USD price for a token symbol.
+   * Tries Chainlink feed first, falls back to stub prices.
    * @param symbol Token symbol (e.g., 'USDC', 'WETH')
    * @returns USD price per token
    */
@@ -58,13 +87,55 @@ export class PriceService {
       return cached.price;
     }
 
-    // Get price from default mapping
-    const price = this.defaultPrices[upperSymbol] ?? this.defaultPrices.UNKNOWN;
+    let price: number | null = null;
+
+    // Try Chainlink feed if available
+    if (this.provider && this.chainlinkFeeds.has(upperSymbol)) {
+      price = await this.getChainlinkPrice(upperSymbol);
+    }
+
+    // Fall back to default prices
+    if (price === null) {
+      price = this.defaultPrices[upperSymbol] ?? this.defaultPrices.UNKNOWN;
+    }
 
     // Cache the result
     this.priceCache.set(upperSymbol, { price, timestamp: Date.now() });
 
     return price;
+  }
+
+  /**
+   * Get price from Chainlink feed
+   * @param symbol Token symbol
+   * @returns Price in USD or null if unavailable
+   */
+  private async getChainlinkPrice(symbol: string): Promise<number | null> {
+    if (!this.provider) return null;
+
+    const feedAddress = this.chainlinkFeeds.get(symbol);
+    if (!feedAddress) return null;
+
+    try {
+      const aggregator = new ethers.Contract(feedAddress, AGGREGATOR_V3_ABI, this.provider);
+      const roundData = await aggregator.latestRoundData();
+      
+      // Extract answer (price) from tuple
+      const answer = roundData[1]; // int256 answer
+      
+      // Chainlink feeds typically have 8 decimals
+      const price = Number(answer) / 1e8;
+      
+      // Validate price is reasonable
+      if (!isFinite(price) || price <= 0) {
+        return null;
+      }
+
+      return price;
+    } catch (err) {
+      // Silent fallback to stub prices
+      return null;
+    }
   }
 
   /**

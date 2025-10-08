@@ -80,6 +80,10 @@ describe('subgraphPoller', () => {
   });
 
   it('calls onNewLiquidations only for new events', async () => {
+    // Disable bootstrap suppression for this test
+    const originalEnv = process.env.IGNORE_BOOTSTRAP_BATCH;
+    process.env.IGNORE_BOOTSTRAP_BATCH = 'false';
+
     const mockEvents = [
       { id: 'l1', timestamp: 1000 },
       { id: 'l2', timestamp: 2000 },
@@ -117,6 +121,13 @@ describe('subgraphPoller', () => {
     expect(onNewLiquidations).toHaveBeenNthCalledWith(2, [mockEvents[2]]);
 
     poller.stop();
+    
+    // Restore env
+    if (originalEnv !== undefined) {
+      process.env.IGNORE_BOOTSTRAP_BATCH = originalEnv;
+    } else {
+      delete process.env.IGNORE_BOOTSTRAP_BATCH;
+    }
   });
 
   it('exposes tracker stats via getTrackerStats', async () => {
@@ -147,6 +158,10 @@ describe('subgraphPoller', () => {
   });
 
   it('attaches health factors to new liquidation events when on-demand resolver provided', async () => {
+    // Disable bootstrap suppression for this test
+    const originalEnv = process.env.IGNORE_BOOTSTRAP_BATCH;
+    process.env.IGNORE_BOOTSTRAP_BATCH = 'false';
+
     const mockEvents = [
       { id: 'l1', user: '0xuser1', timestamp: 1000 },
       { id: 'l2', user: '0xuser2', timestamp: 2000 }
@@ -185,9 +200,20 @@ describe('subgraphPoller', () => {
     expect(calledEvents[1].healthFactor).toBe(2.3);
 
     poller.stop();
+    
+    // Restore env
+    if (originalEnv !== undefined) {
+      process.env.IGNORE_BOOTSTRAP_BATCH = originalEnv;
+    } else {
+      delete process.env.IGNORE_BOOTSTRAP_BATCH;
+    }
   });
 
   it('handles on-demand resolver errors gracefully without blocking liquidation processing', async () => {
+    // Disable bootstrap suppression for this test
+    const originalEnv = process.env.IGNORE_BOOTSTRAP_BATCH;
+    process.env.IGNORE_BOOTSTRAP_BATCH = 'false';
+
     const mockEvents = [
       { id: 'l1', user: '0xuser1', timestamp: 1000 }
     ];
@@ -223,9 +249,20 @@ describe('subgraphPoller', () => {
     );
 
     poller.stop();
+    
+    // Restore env
+    if (originalEnv !== undefined) {
+      process.env.IGNORE_BOOTSTRAP_BATCH = originalEnv;
+    } else {
+      delete process.env.IGNORE_BOOTSTRAP_BATCH;
+    }
   });
 
   it('does not resolve health factors when resolver not provided', async () => {
+    // Disable bootstrap suppression for this test
+    const originalEnv = process.env.IGNORE_BOOTSTRAP_BATCH;
+    process.env.IGNORE_BOOTSTRAP_BATCH = 'false';
+
     const mockEvents = [
       { id: 'l1', user: '0xuser1', timestamp: 1000 }
     ];
@@ -250,5 +287,66 @@ describe('subgraphPoller', () => {
     expect(calledEvents[0].healthFactor).toBeUndefined();
 
     poller.stop();
+    
+    // Restore env
+    if (originalEnv !== undefined) {
+      process.env.IGNORE_BOOTSTRAP_BATCH = originalEnv;
+    } else {
+      delete process.env.IGNORE_BOOTSTRAP_BATCH;
+    }
+  });
+
+  it('ignores bootstrap batch when IGNORE_BOOTSTRAP_BATCH=true', async () => {
+    // Enable bootstrap suppression for this test
+    const originalEnv = process.env.IGNORE_BOOTSTRAP_BATCH;
+    process.env.IGNORE_BOOTSTRAP_BATCH = 'true';
+
+    const mockEvents = [
+      { id: 'l1', timestamp: 1000 },
+      { id: 'l2', timestamp: 2000 }
+    ];
+
+    getLiquidationCalls
+      .mockResolvedValueOnce(mockEvents)     // first poll (bootstrap)
+      .mockResolvedValueOnce([mockEvents[1], { id: 'l3', timestamp: 3000 }]); // second poll
+
+    const onNewLiquidations = vi.fn();
+    const onLiquidations = vi.fn();
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 2000,
+      onNewLiquidations,
+      onLiquidations,
+      logger
+    });
+
+    // Wait for first tick (bootstrap should be suppressed)
+    await vi.waitFor(() => {
+      expect(onLiquidations).toHaveBeenCalledTimes(1);
+    });
+    
+    // onNewLiquidations should NOT have been called for bootstrap
+    expect(onNewLiquidations).toHaveBeenCalledTimes(0);
+    
+    // Verify bootstrap suppression was logged
+    expect(logger.info).toHaveBeenCalledWith(
+      expect.stringContaining('bootstrap batch ignored')
+    );
+
+    // Second tick should process new events normally
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.waitFor(() => {
+      expect(onNewLiquidations).toHaveBeenCalledTimes(1);
+    });
+
+    poller.stop();
+    
+    // Restore env
+    if (originalEnv !== undefined) {
+      process.env.IGNORE_BOOTSTRAP_BATCH = originalEnv;
+    } else {
+      delete process.env.IGNORE_BOOTSTRAP_BATCH;
+    }
   });
 });
