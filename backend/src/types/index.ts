@@ -53,6 +53,15 @@ export interface HealthFactorResult {
   isAtRisk: boolean;
 }
 
+/**
+ * Annotated health factor result with optional reason for null values.
+ * Used when attaching HF to opportunity objects.
+ */
+export interface AnnotatedHealthFactor {
+  value: number | null;
+  reason?: 'noDebt' | 'dust' | 'notFound' | 'error';
+}
+
 export interface RefinanceRoute {
   fromAsset: string;
   toAsset: string;

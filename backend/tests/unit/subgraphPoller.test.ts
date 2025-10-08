@@ -104,10 +104,11 @@ describe('subgraphPoller', () => {
     });
 
     // Wait for first tick to complete
+    // Now only the LATEST event is passed (mockEvents[1] has timestamp 2000, which is higher than mockEvents[0])
     await vi.waitFor(() => {
       expect(onNewLiquidations).toHaveBeenCalledTimes(1);
     });
-    expect(onNewLiquidations).toHaveBeenCalledWith([mockEvents[0], mockEvents[1]]);
+    expect(onNewLiquidations).toHaveBeenCalledWith([mockEvents[1]]);
 
     // Second tick - no new events (callback should not be called)
     await vi.advanceTimersByTimeAsync(2000);
@@ -171,8 +172,7 @@ describe('subgraphPoller', () => {
 
     const mockResolver = {
       getHealthFactor: vi.fn()
-        .mockResolvedValueOnce(1.5)  // For 0xuser1
-        .mockResolvedValueOnce(2.3)  // For 0xuser2
+        .mockResolvedValueOnce(2.3)  // For 0xuser2 (latest event)
     };
 
     const onNewLiquidations = vi.fn();
@@ -190,14 +190,15 @@ describe('subgraphPoller', () => {
       expect(onNewLiquidations).toHaveBeenCalledTimes(1);
     }, { timeout: 1000 });
 
-    // Verify resolver was called individually for each unique user
-    expect(mockResolver.getHealthFactor).toHaveBeenCalledWith('0xuser1');
+    // Verify resolver was called only for the latest event user (0xuser2 with timestamp 2000)
     expect(mockResolver.getHealthFactor).toHaveBeenCalledWith('0xuser2');
+    expect(mockResolver.getHealthFactor).toHaveBeenCalledTimes(1);
 
-    // Verify health factors were attached to events
+    // Verify only the latest event was passed to callback
     const calledEvents = onNewLiquidations.mock.calls[0][0];
-    expect(calledEvents[0].healthFactor).toBe(1.5);
-    expect(calledEvents[1].healthFactor).toBe(2.3);
+    expect(calledEvents).toHaveLength(1);
+    expect(calledEvents[0].id).toBe('l2');
+    expect(calledEvents[0].healthFactor).toBe(2.3);
 
     poller.stop();
     

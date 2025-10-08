@@ -73,29 +73,34 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
         liquidationNewEventsTotal.inc(newEvents.length);
       }
       
-      // Resolve health factors for new events (on-demand, one at a time)
+      // Select only the LATEST new event for enrichment and notification
+      // Sort by timestamp descending and take the first (most recent)
+      let latestEvent: LiquidationCall | null = null;
+      let skippedOlderCount = 0;
+      
+      if (newEvents.length > 0) {
+        // Sort by timestamp descending to get the latest
+        const sortedNew = [...newEvents].sort((a, b) => b.timestamp - a.timestamp);
+        latestEvent = sortedNew[0];
+        skippedOlderCount = newEvents.length - 1;
+        
+        if (skippedOlderCount > 0) {
+          logger.info(`[subgraph] processing latest event only, skippedOlderNewEvents=${skippedOlderCount}`);
+        }
+      }
+      
+      // Resolve health factor for the latest event only (on-demand)
       let hfResolved = 0;
-      if (onDemandHealthFactor && newEvents.length > 0) {
+      if (onDemandHealthFactor && latestEvent) {
         try {
-          // Gather unique user IDs from new events
-          const uniqueUserIds = [...new Set(newEvents.map(e => e.user.toLowerCase()))];
-          
-          // Fetch health factor individually for each unique user (no batching)
-          for (const userId of uniqueUserIds) {
-            try {
-              const hf = await onDemandHealthFactor.getHealthFactor(userId);
-              
-              // Attach HF to all events for this user
-              for (const event of newEvents) {
-                if (event.user.toLowerCase() === userId) {
-                  event.healthFactor = hf;
-                  if (hf !== null) hfResolved++;
-                }
-              }
-            } catch (err: unknown) {
-              const msg = formatError(err);
-              logger.error(`[subgraph] health factor resolution error for ${userId}: ${msg}`);
-            }
+          const userId = latestEvent.user.toLowerCase();
+          try {
+            const hf = await onDemandHealthFactor.getHealthFactor(userId);
+            latestEvent.healthFactor = hf;
+            if (hf !== null) hfResolved++;
+          } catch (err: unknown) {
+            const msg = formatError(err);
+            logger.error(`[subgraph] health factor resolution error for ${userId}: ${msg}`);
           }
         } catch (err: unknown) {
           const msg = formatError(err);
@@ -103,10 +108,11 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
         }
       }
       
-      // Log with new format (include hfResolved when > 0)
+      // Log with new format (include hfResolved and skipped counts)
       const hfResolvedMsg = hfResolved > 0 ? ` hfResolved=${hfResolved}` : '';
+      const skippedMsg = skippedOlderCount > 0 ? ` skippedOlderNewEvents=${skippedOlderCount}` : '';
       logger.info(
-        `[subgraph] liquidation snapshot size=${snapshotLen} new=${newEvents.length} totalSeen=${seenSize}${hfResolvedMsg}`
+        `[subgraph] liquidation snapshot size=${snapshotLen} new=${newEvents.length} totalSeen=${seenSize}${hfResolvedMsg}${skippedMsg}`
       );
       
       // Log sample of new IDs if any
@@ -114,6 +120,11 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
         const sampleIds = newEvents.slice(0, 3).map(l => l.id.substring(0, 12)).join(', ');
         const truncated = newEvents.length > 3 ? '...' : '';
         logger.info(`[subgraph] new liquidation IDs: ${sampleIds}${truncated}`);
+      }
+      
+      // Log the latest event being processed
+      if (latestEvent) {
+        logger.info(`[subgraph] processing latest event: id=${latestEvent.id.substring(0, 12)} timestamp=${latestEvent.timestamp}`);
       }
       
       // Check if this is the first poll and bootstrap suppression is enabled
@@ -131,8 +142,9 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
       
       // Call callbacks
       onLiquidations?.(liqs);
-      if (newEvents.length > 0) {
-        onNewLiquidations?.(newEvents);
+      // Only notify about the latest event (if any)
+      if (latestEvent) {
+        onNewLiquidations?.([latestEvent]);
       }
     } catch (err: unknown) {
       const msg = formatError(err);

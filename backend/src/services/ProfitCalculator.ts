@@ -17,35 +17,44 @@ export interface ProfitCalculatorOptions {
 
 /**
  * ProfitCalculator provides centralized profit estimation logic.
- * Formula: gross = (collateralValue - principalValue) + (collateralValue * bonusPct)
- *          net = gross - fees - gasCost
+ * 
+ * POST-EVENT CALCULATION (using actual seized amounts from LiquidationCall):
+ * Formula: netProfit = collateralValueUsd - principalValueUsd - gasCostUsd
+ * 
+ * The collateralAmount from the event already includes the liquidation bonus,
+ * so we do NOT re-apply a bonus multiplier.
+ * 
+ * bonusPct is kept as a nominal field for backward compatibility but is NOT
+ * used in the net profit calculation.
  */
 export class ProfitCalculator {
-  private bonusPct: number;
+  private bonusPct: number;  // Nominal only - not applied in calculation
   private feeBps: number;
   private gasCostUsd: number;
 
   constructor(options: ProfitCalculatorOptions = {}) {
-    this.bonusPct = options.bonusPct ?? 0.05; // 5% default liquidation bonus
+    // bonusPct is nominal/placeholder - not applied to post-event amounts
+    this.bonusPct = options.bonusPct ?? 0.05; // 5% default (for reference only)
     this.feeBps = options.feeBps ?? config.profitFeeBps;
     this.gasCostUsd = options.gasCostUsd ?? config.gasCostUsd;
   }
 
   /**
-   * Calculate profit with detailed breakdown
-   * @param collateralValueUsd Collateral value in USD
-   * @param principalValueUsd Principal (debt) value in USD
+   * Calculate profit with detailed breakdown using actual post-event amounts.
+   * 
+   * @param collateralValueUsd Actual collateral seized in USD (from event)
+   * @param principalValueUsd Actual debt repaid in USD (from event)
    * @returns Detailed profit breakdown
    */
   calculateProfit(collateralValueUsd: number, principalValueUsd: number): ProfitBreakdown {
-    // Raw spread
+    // Raw spread (collateral already includes bonus from liquidation)
     const rawSpread = collateralValueUsd - principalValueUsd;
     
-    // Bonus value on collateral
-    const bonusValue = collateralValueUsd * this.bonusPct;
+    // Bonus value is NOT applied - the event's collateralAmount already reflects what was seized
+    const bonusValue = 0;
     
-    // Gross profit
-    const gross = rawSpread + bonusValue;
+    // Gross profit (no bonus applied)
+    const gross = rawSpread;
     
     // Calculate fees on gross
     const fees = gross * (this.feeBps / 10000);
