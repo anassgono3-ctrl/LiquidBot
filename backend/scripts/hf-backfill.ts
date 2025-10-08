@@ -1,8 +1,10 @@
 #!/usr/bin/env tsx
 // hf-backfill.ts: Recompute historical users' health factors and produce JSON report
 
-import { GraphQLClient } from 'graphql-request';
 import { writeFileSync } from 'fs';
+
+import { GraphQLClient } from 'graphql-request';
+
 import { config } from '../src/config/index.js';
 import { OnDemandHealthFactor } from '../src/services/OnDemandHealthFactor.js';
 import { SubgraphService } from '../src/services/SubgraphService.js';

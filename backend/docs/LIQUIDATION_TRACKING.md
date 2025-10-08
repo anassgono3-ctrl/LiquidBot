@@ -28,12 +28,19 @@ The liquidation tracking system implements incremental (delta) detection of liqu
 ### Environment Variables
 
 ```bash
-# Maximum number of liquidations to fetch per poll (default: 50)
-LIQUIDATION_POLL_LIMIT=50
+# Maximum number of liquidations to fetch per poll (default: 5)
+# Note: This was reduced from 50 to minimize subgraph load
+POLL_LIMIT=5
+
+# Legacy variable (use POLL_LIMIT instead)
+# LIQUIDATION_POLL_LIMIT=5
 
 # Maximum number of unique IDs to track (default: 5000)
 # Oldest IDs are pruned when this limit is exceeded
 LIQUIDATION_TRACK_MAX=5000
+
+# Ignore first (bootstrap) batch for notifications (default: true)
+IGNORE_BOOTSTRAP_BATCH=true
 ```
 
 ### Configuration in Code
@@ -41,8 +48,9 @@ LIQUIDATION_TRACK_MAX=5000
 ```typescript
 import { config } from './config/index.js';
 
-const pollLimit = config.liquidationPollLimit;  // 50
+const pollLimit = config.pollLimit;             // 5 (new default)
 const trackMax = config.liquidationTrackMax;    // 5000
+const ignoreBootstrap = config.ignoreBootstrapBatch; // true
 ```
 
 ## Usage
@@ -58,7 +66,7 @@ const service = new SubgraphService();
 const poller = startSubgraphPoller({
   service,
   intervalMs: 15000,
-  pollLimit: 50,
+  pollLimit: 5,  // Reduced from 50 to minimize load
   trackMax: 5000,
   
   // Called with full snapshot (optional)

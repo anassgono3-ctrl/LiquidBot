@@ -1,6 +1,7 @@
 // PriceService: USD price lookup with optional Chainlink integration
-import { config } from '../config/index.js';
 import { ethers } from 'ethers';
+
+import { config } from '../config/index.js';
 
 // Chainlink Aggregator V3 Interface ABI (minimal)
 const AGGREGATOR_V3_ABI = [

@@ -3,6 +3,7 @@ import { GraphQLClient, gql } from 'graphql-request';
 import { z } from 'zod';
 
 import type { User } from '../types/index.js';
+
 import { HealthCalculator } from './HealthCalculator.js';
 
 /**

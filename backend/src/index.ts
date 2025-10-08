@@ -11,7 +11,7 @@ import { authenticate } from "./middleware/auth.js";
 import { rateLimiter } from "./middleware/rateLimit.js";
 import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
-import { registry, opportunitiesGeneratedTotal, opportunityProfitEstimate, healthBreachEventsTotal } from "./metrics/index.js";
+import { registry, opportunitiesGeneratedTotal, opportunityProfitEstimate } from "./metrics/index.js";
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";
@@ -134,7 +134,7 @@ app.get("/health", (_req, res) => {
 app.use("/api/v1", authenticate, buildRoutes(subgraphService));
 
 // Initialize WebSocket server
-const { wss, broadcastLiquidationEvent, broadcastOpportunityEvent, broadcastHealthBreachEvent } = initWebSocketServer(httpServer);
+const { wss, broadcastLiquidationEvent, broadcastOpportunityEvent } = initWebSocketServer(httpServer);
 
 let subgraphPoller: SubgraphPollerHandle | null = null;
 
