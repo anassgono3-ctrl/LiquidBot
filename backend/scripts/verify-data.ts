@@ -24,16 +24,16 @@
 //   * Compute with existing HealthCalculator
 //   * Independently recompute inline (manual loop) and compare absolute difference
 
-import { writeFileSync } from 'fs';
+import { writeFileSync } from "fs";
 
-import { config } from '../src/config/index.js';
-import { SubgraphService } from '../src/services/SubgraphService.js';
-import { HealthCalculator } from '../src/services/HealthCalculator.js';
-import type { LiquidationCall, User } from '../src/types/index.js';
+import { config } from "../src/config/index.js";
+import { SubgraphService } from "../src/services/SubgraphService.js";
+import { HealthCalculator } from "../src/services/HealthCalculator.js";
+import type { LiquidationCall, User } from "../src/types/index.js";
 
 interface VerificationIssue {
   type: string;
-  severity: 'error' | 'warning' | 'info';
+  severity: "error" | "warning" | "info";
   message: string;
   details?: unknown;
 }
@@ -84,16 +84,16 @@ function parseArgs(): {
   let help = false;
 
   for (const arg of args) {
-    if (arg === '--help' || arg === '-h') {
+    if (arg === "--help" || arg === "-h") {
       help = true;
-    } else if (arg.startsWith('--recent=')) {
-      recent = parseInt(arg.split('=')[1], 10);
-    } else if (arg.startsWith('--user=')) {
-      user = arg.split('=')[1];
-    } else if (arg === '--verbose') {
+    } else if (arg.startsWith("--recent=")) {
+      recent = parseInt(arg.split("=")[1], 10);
+    } else if (arg.startsWith("--user=")) {
+      user = arg.split("=")[1];
+    } else if (arg === "--verbose") {
       verbose = true;
-    } else if (arg.startsWith('--out=')) {
-      out = arg.split('=')[1];
+    } else if (arg.startsWith("--out=")) {
+      out = arg.split("=")[1];
     }
   }
 
@@ -144,65 +144,65 @@ Checks Performed:
 function validateLiquidationSchema(liq: LiquidationCall): VerificationIssue[] {
   const issues: VerificationIssue[] = [];
 
-  if (!liq.id || typeof liq.id !== 'string') {
+  if (!liq.id || typeof liq.id !== "string") {
     issues.push({
-      type: 'schema',
-      severity: 'error',
-      message: 'Missing or invalid liquidation id',
+      type: "schema",
+      severity: "error",
+      message: "Missing or invalid liquidation id",
     });
   }
 
-  if (!liq.user || typeof liq.user !== 'string') {
+  if (!liq.user || typeof liq.user !== "string") {
     issues.push({
-      type: 'schema',
-      severity: 'error',
-      message: 'Missing or invalid user address',
+      type: "schema",
+      severity: "error",
+      message: "Missing or invalid user address",
     });
   }
 
-  if (typeof liq.timestamp !== 'number' || liq.timestamp <= 0) {
+  if (typeof liq.timestamp !== "number" || liq.timestamp <= 0) {
     issues.push({
-      type: 'schema',
-      severity: 'error',
-      message: 'Invalid timestamp (must be positive number)',
+      type: "schema",
+      severity: "error",
+      message: "Invalid timestamp (must be positive number)",
       details: { timestamp: liq.timestamp },
     });
   }
 
-  if (!liq.principalAmount || typeof liq.principalAmount !== 'string') {
+  if (!liq.principalAmount || typeof liq.principalAmount !== "string") {
     issues.push({
-      type: 'schema',
-      severity: 'error',
-      message: 'Missing or invalid principalAmount',
+      type: "schema",
+      severity: "error",
+      message: "Missing or invalid principalAmount",
     });
   }
 
-  if (!liq.collateralAmount || typeof liq.collateralAmount !== 'string') {
+  if (!liq.collateralAmount || typeof liq.collateralAmount !== "string") {
     issues.push({
-      type: 'schema',
-      severity: 'error',
-      message: 'Missing or invalid collateralAmount',
+      type: "schema",
+      severity: "error",
+      message: "Missing or invalid collateralAmount",
     });
   }
 
   // Verify reserve decimals are numeric if present
   if (liq.principalReserve && liq.principalReserve.decimals !== null) {
-    if (typeof liq.principalReserve.decimals !== 'number' || liq.principalReserve.decimals < 0) {
+    if (typeof liq.principalReserve.decimals !== "number" || liq.principalReserve.decimals < 0) {
       issues.push({
-        type: 'schema',
-        severity: 'error',
-        message: 'Invalid principalReserve decimals (must be non-negative number)',
+        type: "schema",
+        severity: "error",
+        message: "Invalid principalReserve decimals (must be non-negative number)",
         details: { decimals: liq.principalReserve.decimals },
       });
     }
   }
 
   if (liq.collateralReserve && liq.collateralReserve.decimals !== null) {
-    if (typeof liq.collateralReserve.decimals !== 'number' || liq.collateralReserve.decimals < 0) {
+    if (typeof liq.collateralReserve.decimals !== "number" || liq.collateralReserve.decimals < 0) {
       issues.push({
-        type: 'schema',
-        severity: 'error',
-        message: 'Invalid collateralReserve decimals (must be non-negative number)',
+        type: "schema",
+        severity: "error",
+        message: "Invalid collateralReserve decimals (must be non-negative number)",
         details: { decimals: liq.collateralReserve.decimals },
       });
     }
@@ -226,8 +226,8 @@ function verifyUserReserves(user: User): VerificationIssue[] {
   if (user.borrowedReservesCount !== reservesWithDebt.length) {
     const mismatchList = reservesWithDebt.map((ur) => ur.reserve.symbol);
     issues.push({
-      type: 'borrowedReservesCount',
-      severity: 'warning',
+      type: "borrowedReservesCount",
+      severity: "warning",
       message: `borrowedReservesCount mismatch: reported=${user.borrowedReservesCount}, actual=${reservesWithDebt.length}`,
       details: { mismatchList },
     });
@@ -238,8 +238,8 @@ function verifyUserReserves(user: User): VerificationIssue[] {
     if (ur.reserve.usageAsCollateralEnabled) {
       if (ur.reserve.reserveLiquidationThreshold <= 0) {
         issues.push({
-          type: 'collateralThreshold',
-          severity: 'error',
+          type: "collateralThreshold",
+          severity: "error",
           message: `Reserve ${ur.reserve.symbol} has usageAsCollateralEnabled but reserveLiquidationThreshold <= 0`,
           details: {
             symbol: ur.reserve.symbol,
@@ -258,8 +258,8 @@ function verifyUserReserves(user: User): VerificationIssue[] {
 
     if (balance < 0) {
       issues.push({
-        type: 'negativeBalance',
-        severity: 'error',
+        type: "negativeBalance",
+        severity: "error",
         message: `Negative aToken balance for ${ur.reserve.symbol}`,
         details: { symbol: ur.reserve.symbol, balance },
       });
@@ -267,8 +267,8 @@ function verifyUserReserves(user: User): VerificationIssue[] {
 
     if (varDebt < 0) {
       issues.push({
-        type: 'negativeDebt',
-        severity: 'error',
+        type: "negativeDebt",
+        severity: "error",
         message: `Negative variable debt for ${ur.reserve.symbol}`,
         details: { symbol: ur.reserve.symbol, varDebt },
       });
@@ -276,8 +276,8 @@ function verifyUserReserves(user: User): VerificationIssue[] {
 
     if (stableDebt < 0) {
       issues.push({
-        type: 'negativeDebt',
-        severity: 'error',
+        type: "negativeDebt",
+        severity: "error",
         message: `Negative stable debt for ${ur.reserve.symbol}`,
         details: { symbol: ur.reserve.symbol, stableDebt },
       });
@@ -299,7 +299,8 @@ function calculateHealthFactorIndependent(user: User): number {
 
     // Calculate collateral value in ETH
     if (reserve.usageAsCollateralEnabled) {
-      const collateralBalance = parseFloat(userReserve.currentATokenBalance) / Math.pow(10, decimals);
+      const collateralBalance =
+        parseFloat(userReserve.currentATokenBalance) / Math.pow(10, decimals);
       const collateralValueETH = collateralBalance * priceInEth;
 
       // Apply liquidation threshold (basis points to decimal)
@@ -339,8 +340,8 @@ function verifyHealthFactor(user: User, healthCalculator: HealthCalculator): Ver
 
     if (diff > tolerance) {
       issues.push({
-        type: 'healthFactorMismatch',
-        severity: 'error',
+        type: "healthFactorMismatch",
+        severity: "error",
         message: `Health factor mismatch: calculator=${calculatorHF.toFixed(4)}, independent=${independentHF.toFixed(4)}, diff=${diff.toFixed(4)}`,
         details: { calculatorHF, independentHF, diff },
       });
@@ -348,8 +349,8 @@ function verifyHealthFactor(user: User, healthCalculator: HealthCalculator): Ver
   } else if (calculatorHF !== independentHF) {
     // Both should be Infinity if one is
     issues.push({
-      type: 'healthFactorMismatch',
-      severity: 'error',
+      type: "healthFactorMismatch",
+      severity: "error",
       message: `Health factor infinity mismatch: calculator=${calculatorHF}, independent=${independentHF}`,
       details: { calculatorHF, independentHF },
     });
@@ -366,7 +367,7 @@ async function main() {
     process.exit(0);
   }
 
-  console.log('[verify-data] Starting data verification...');
+  console.log("[verify-data] Starting data verification...");
   if (recent) {
     console.log(`[verify-data] Mode: Verify last ${recent} liquidations`);
   } else if (user) {
@@ -379,7 +380,7 @@ async function main() {
 
   // Initialize services
   if (config.useMockSubgraph) {
-    console.error('[verify-data] Cannot run with USE_MOCK_SUBGRAPH=true');
+    console.error("[verify-data] Cannot run with USE_MOCK_SUBGRAPH=true");
     process.exit(1);
   }
 
@@ -400,10 +401,12 @@ async function main() {
   // Fetch liquidations
   if (user) {
     // For specific user, fetch recent liquidations and filter
-    console.log('[verify-data] Fetching recent liquidations to find user...');
+    console.log("[verify-data] Fetching recent liquidations to find user...");
     const allLiquidations = await subgraphService.getLiquidationCalls(100);
-    liquidationsToVerify = allLiquidations.filter((l) => l.user.toLowerCase() === user.toLowerCase());
-    
+    liquidationsToVerify = allLiquidations.filter(
+      (l) => l.user.toLowerCase() === user.toLowerCase(),
+    );
+
     if (liquidationsToVerify.length === 0) {
       console.log(`[verify-data] No liquidations found for user ${user}`);
       // Still verify the user's current state if we can fetch it
@@ -411,9 +414,9 @@ async function main() {
         const userData = await subgraphService.getSingleUserWithDebt(user);
         if (userData) {
           console.log(`[verify-data] Verifying user ${user} current state...`);
-          
+
           const verification: LiquidationVerification = {
-            liquidationId: 'N/A',
+            liquidationId: "N/A",
             user: user,
             timestamp: Date.now(),
             schemaValid: true,
@@ -431,7 +434,7 @@ async function main() {
 
           const calcResult = healthCalculator.calculateHealthFactor(userData);
           const independentHF = calculateHealthFactorIndependent(userData);
-          
+
           if (isFinite(calcResult.healthFactor) && isFinite(independentHF)) {
             verification.healthFactorCheck = {
               calculatorHF: calcResult.healthFactor,
@@ -447,7 +450,7 @@ async function main() {
             const stableDebt = parseFloat(ur.currentStableDebt);
             return varDebt > 0 || stableDebt > 0;
           });
-          
+
           verification.borrowedReservesCheck = {
             reported: userData.borrowedReservesCount,
             actual: reservesWithDebt.length,
@@ -455,23 +458,29 @@ async function main() {
           };
 
           if (!verification.borrowedReservesCheck.matches) {
-            verification.borrowedReservesCheck.mismatchList = reservesWithDebt.map((ur) => ur.reserve.symbol);
+            verification.borrowedReservesCheck.mismatchList = reservesWithDebt.map(
+              (ur) => ur.reserve.symbol,
+            );
           }
 
           report.liquidations.push(verification);
           report.totalLiquidations = 1;
           report.verifiedCount = 1;
 
-          const errorCount = verification.issues.filter((i) => i.severity === 'error').length;
-          const warningCount = verification.issues.filter((i) => i.severity === 'warning').length;
+          const errorCount = verification.issues.filter((i) => i.severity === "error").length;
+          const warningCount = verification.issues.filter((i) => i.severity === "warning").length;
           report.errorCount = errorCount;
           report.warningCount = warningCount;
 
           if (verbose) {
             console.log(`[verify-data] User ${user}:`);
-            console.log(`  - Borrowed reserves: ${verification.borrowedReservesCheck.reported} (actual: ${verification.borrowedReservesCheck.actual})`);
+            console.log(
+              `  - Borrowed reserves: ${verification.borrowedReservesCheck.reported} (actual: ${verification.borrowedReservesCheck.actual})`,
+            );
             if (verification.healthFactorCheck) {
-              console.log(`  - Health factor: ${verification.healthFactorCheck.calculatorHF.toFixed(4)} (independent: ${verification.healthFactorCheck.independentHF.toFixed(4)})`);
+              console.log(
+                `  - Health factor: ${verification.healthFactorCheck.calculatorHF.toFixed(4)} (independent: ${verification.healthFactorCheck.independentHF.toFixed(4)})`,
+              );
             }
             if (verification.issues.length > 0) {
               console.log(`  - Issues: ${verification.issues.length}`);
@@ -479,7 +488,7 @@ async function main() {
                 console.log(`    [${issue.severity}] ${issue.type}: ${issue.message}`);
               }
             } else {
-              console.log('  - No issues found');
+              console.log("  - No issues found");
             }
           }
         } else {
@@ -489,7 +498,9 @@ async function main() {
         console.error(`[verify-data] Error fetching user ${user}:`, err);
       }
     } else {
-      console.log(`[verify-data] Found ${liquidationsToVerify.length} liquidations for user ${user}`);
+      console.log(
+        `[verify-data] Found ${liquidationsToVerify.length} liquidations for user ${user}`,
+      );
     }
   } else if (recent) {
     console.log(`[verify-data] Fetching ${recent} recent liquidations...`);
@@ -502,9 +513,11 @@ async function main() {
   // Verify each liquidation
   for (let i = 0; i < liquidationsToVerify.length; i++) {
     const liq = liquidationsToVerify[i];
-    
+
     if (verbose) {
-      console.log(`[verify-data] [${i + 1}/${liquidationsToVerify.length}] Verifying liquidation ${liq.id}...`);
+      console.log(
+        `[verify-data] [${i + 1}/${liquidationsToVerify.length}] Verifying liquidation ${liq.id}...`,
+      );
     } else {
       console.log(`[verify-data] [${i + 1}/${liquidationsToVerify.length}] ${liq.id}`);
     }
@@ -521,14 +534,14 @@ async function main() {
     // 1. Validate liquidation schema
     const schemaIssues = validateLiquidationSchema(liq);
     verification.issues.push(...schemaIssues);
-    if (schemaIssues.some((i) => i.severity === 'error')) {
+    if (schemaIssues.some((i) => i.severity === "error")) {
       verification.schemaValid = false;
     }
 
     // 2. Fetch user data and verify
     try {
       const userData = await subgraphService.getSingleUserWithDebt(liq.user);
-      
+
       if (userData) {
         verification.userDataFetched = true;
 
@@ -543,7 +556,7 @@ async function main() {
         // Store health factor comparison
         const calcResult = healthCalculator.calculateHealthFactor(userData);
         const independentHF = calculateHealthFactorIndependent(userData);
-        
+
         if (isFinite(calcResult.healthFactor) && isFinite(independentHF)) {
           verification.healthFactorCheck = {
             calculatorHF: calcResult.healthFactor,
@@ -559,7 +572,7 @@ async function main() {
           const stableDebt = parseFloat(ur.currentStableDebt);
           return varDebt > 0 || stableDebt > 0;
         });
-        
+
         verification.borrowedReservesCheck = {
           reported: userData.borrowedReservesCount,
           actual: reservesWithDebt.length,
@@ -567,14 +580,20 @@ async function main() {
         };
 
         if (!verification.borrowedReservesCheck.matches) {
-          verification.borrowedReservesCheck.mismatchList = reservesWithDebt.map((ur) => ur.reserve.symbol);
+          verification.borrowedReservesCheck.mismatchList = reservesWithDebt.map(
+            (ur) => ur.reserve.symbol,
+          );
         }
 
         if (verbose) {
           console.log(`  - User: ${liq.user}`);
-          console.log(`  - Borrowed reserves: ${verification.borrowedReservesCheck.reported} (actual: ${verification.borrowedReservesCheck.actual})`);
+          console.log(
+            `  - Borrowed reserves: ${verification.borrowedReservesCheck.reported} (actual: ${verification.borrowedReservesCheck.actual})`,
+          );
           if (verification.healthFactorCheck) {
-            console.log(`  - Health factor: ${verification.healthFactorCheck.calculatorHF.toFixed(4)} (independent: ${verification.healthFactorCheck.independentHF.toFixed(4)})`);
+            console.log(
+              `  - Health factor: ${verification.healthFactorCheck.calculatorHF.toFixed(4)} (independent: ${verification.healthFactorCheck.independentHF.toFixed(4)})`,
+            );
           }
           if (verification.issues.length > 0) {
             console.log(`  - Issues: ${verification.issues.length}`);
@@ -582,21 +601,21 @@ async function main() {
               console.log(`    [${issue.severity}] ${issue.type}: ${issue.message}`);
             }
           } else {
-            console.log('  - No issues found');
+            console.log("  - No issues found");
           }
         }
       } else {
         verification.issues.push({
-          type: 'userData',
-          severity: 'warning',
-          message: 'User not found in subgraph',
+          type: "userData",
+          severity: "warning",
+          message: "User not found in subgraph",
         });
       }
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : String(err);
       verification.issues.push({
-        type: 'userData',
-        severity: 'error',
+        type: "userData",
+        severity: "error",
         message: `Failed to fetch user data: ${errorMessage}`,
       });
     }
@@ -605,14 +624,14 @@ async function main() {
     report.verifiedCount++;
 
     // Update error/warning counts
-    const errorCount = verification.issues.filter((i) => i.severity === 'error').length;
-    const warningCount = verification.issues.filter((i) => i.severity === 'warning').length;
+    const errorCount = verification.issues.filter((i) => i.severity === "error").length;
+    const warningCount = verification.issues.filter((i) => i.severity === "warning").length;
     report.errorCount += errorCount;
     report.warningCount += warningCount;
   }
 
   // Print summary
-  console.log('\n[verify-data] Verification Summary:');
+  console.log("\n[verify-data] Verification Summary:");
   console.log(`  Total liquidations: ${report.totalLiquidations}`);
   console.log(`  Verified: ${report.verifiedCount}`);
   console.log(`  Errors: ${report.errorCount}`);
@@ -624,7 +643,7 @@ async function main() {
     console.log(`[verify-data] Report written to ${out}`);
   }
 
-  console.log('[verify-data] Complete.');
+  console.log("[verify-data] Complete.");
 
   // Exit with error code if there were errors
   if (report.errorCount > 0) {
@@ -633,6 +652,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[verify-data] Fatal error:', err);
+  console.error("[verify-data] Fatal error:", err);
   process.exit(1);
 });
