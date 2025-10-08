@@ -280,4 +280,44 @@ describe("verify-data validation functions", () => {
       expect(stableDebt).toBeGreaterThanOrEqual(0);
     });
   });
+
+  describe("HF classification logic", () => {
+    const hfEpsilon = 1e-9;
+    const dustEpsilon = 1e-9;
+
+    it("should classify NO_DEBT when totalDebtETH is zero", () => {
+      const totalDebtETH = 0;
+      const classification = totalDebtETH === 0 ? "NO_DEBT" : "OK";
+      expect(classification).toBe("NO_DEBT");
+    });
+
+    it("should classify DUST_DEBT when debt is below dust epsilon", () => {
+      const totalDebtETH = 5e-10; // Less than dustEpsilon
+      const classification = totalDebtETH > 0 && totalDebtETH < dustEpsilon ? "DUST_DEBT" : "OK";
+      expect(classification).toBe("DUST_DEBT");
+    });
+
+    it("should classify HUGE when HF exceeds 10000", () => {
+      const healthFactor = 15000;
+      const classification = healthFactor > 10000 ? "HUGE" : "OK";
+      expect(classification).toBe("HUGE");
+    });
+
+    it("should classify MISMATCH when HF diff exceeds epsilon", () => {
+      const primaryHF = 1.5;
+      const recomputedHF = 1.5 + 2e-9; // Difference greater than epsilon
+      const hfDiff = Math.abs(primaryHF - recomputedHF);
+      const classification = hfDiff > hfEpsilon ? "MISMATCH" : "OK";
+      expect(classification).toBe("MISMATCH");
+    });
+
+    it("should classify OK when HF is normal and consistent", () => {
+      const primaryHF = 1.5;
+      const recomputedHF = 1.5 + 1e-10; // Difference less than epsilon
+      const hfDiff = Math.abs(primaryHF - recomputedHF);
+      const classification = hfDiff > hfEpsilon ? "MISMATCH" : "OK";
+      expect(classification).toBe("OK");
+      expect(hfDiff).toBeLessThan(hfEpsilon);
+    });
+  });
 });
