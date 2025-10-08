@@ -11,6 +11,12 @@ import type { User } from '../types/index.js';
 
 import { HealthCalculator } from './HealthCalculator.js';
 
+/**
+ * IMPORTANT:
+ * The subgraph returns several numeric fields as strings (e.g. reserveLiquidationThreshold, decimals).
+ * We accept union(number|string) and normalize to number so downstream logic is stable.
+ */
+
 const SINGLE_USER_HF_QUERY = gql`
   query SingleUserHealthFactor($id: ID!) {
     user(id: $id) {
@@ -57,12 +63,15 @@ const BATCH_USER_HF_QUERY = gql`
   }
 `;
 
+// Helpers to coerce numeric strings
+const numericString = z.string().regex(/^\d+$/).transform(v => Number(v));
+
 const ReserveSchema = z.object({
   symbol: z.string(),
-  decimals: z.number(),
-  reserveLiquidationThreshold: z.number(),
+  decimals: z.union([z.number(), numericString]).transform(v => typeof v === 'number' ? v : Number(v)),
+  reserveLiquidationThreshold: z.union([z.number(), numericString]).transform(v => typeof v === 'number' ? v : Number(v)),
   usageAsCollateralEnabled: z.boolean(),
-  price: z.object({ priceInEth: z.string() }),
+  price: z.object({ priceInEth: z.string() }), // priceInEth remains string; HealthCalculator already handles parsing
 });
 
 const UserReserveSchema = z.object({
@@ -74,7 +83,7 @@ const UserReserveSchema = z.object({
 
 const UserSchema = z.object({
   id: z.string(),
-  borrowedReservesCount: z.number(),
+  borrowedReservesCount: z.union([z.number(), numericString]).transform(v => typeof v === 'number' ? v : Number(v)),
   reserves: z.array(UserReserveSchema),
 });
 
@@ -95,7 +104,7 @@ export interface HealthFactorResolverOptions {
  * - Queries subgraph only for specific user addresses
  * - Caches results with configurable TTL
  * - Supports batching to reduce round trips
- * - Returns null for users with zero debt
+ * - Returns null for users with zero debt (instead of Infinity)
  */
 export class HealthFactorResolver {
   private client: GraphQLClient;
@@ -117,7 +126,7 @@ export class HealthFactorResolver {
   /**
    * Get health factors for multiple users.
    * Uses cache when available, batches queries for cache misses.
-   * @param userIds Array of user addresses (lowercase)
+   * @param userIds Array of user addresses (lowercase recommended)
    * @returns Map of user ID to health factor (null if zero debt)
    */
   async getHealthFactorsForUsers(userIds: string[]): Promise<Map<string, number | null>> {
@@ -125,30 +134,22 @@ export class HealthFactorResolver {
     const toFetch: string[] = [];
     const now = Date.now();
 
-    // Check cache first
     for (const userId of userIds) {
       const entry = this.cache.get(userId);
       if (entry && (now - entry.timestamp) < this.cacheTtlMs) {
-        // Cache hit
         result.set(userId, entry.healthFactor);
         userHealthCacheHitsTotal.inc();
       } else {
-        // Cache miss
         toFetch.push(userId);
         userHealthCacheMissesTotal.inc();
       }
     }
 
-    // Fetch missing users
     if (toFetch.length > 0) {
       const fetched = await this.fetchHealthFactors(toFetch);
       for (const [userId, hf] of fetched.entries()) {
         result.set(userId, hf);
-        // Update cache
-        this.cache.set(userId, {
-          healthFactor: hf,
-          timestamp: now
-        });
+        this.cache.set(userId, { healthFactor: hf, timestamp: now });
       }
     }
 
@@ -158,55 +159,44 @@ export class HealthFactorResolver {
   /**
    * Fetch health factors from subgraph for given user IDs.
    * Batches queries when multiple users are requested.
-   * @param userIds Array of user addresses to fetch
-   * @returns Map of user ID to health factor
    */
   private async fetchHealthFactors(userIds: string[]): Promise<Map<string, number | null>> {
     const result = new Map<string, number | null>();
-
-    if (userIds.length === 0) {
-      return result;
-    }
+    if (userIds.length === 0) return result;
 
     if (userIds.length === 1) {
-      // Single user query
       const userId = userIds[0];
       try {
         const data = await this.client.request<{ user: unknown }>(SINGLE_USER_HF_QUERY, { id: userId });
         userHealthQueriesTotal.inc({ mode: 'single', result: 'success' });
-        
+
         if (data.user) {
           const user = UserSchema.parse(data.user) as User;
-          const hf = this.calculateHealthFactor(user);
-          result.set(userId, hf);
+            const hf = this.calculateHealthFactor(user);
+            result.set(userId, hf);
         } else {
-          // User not found or no data
           result.set(userId, null);
         }
       } catch (err) {
         userHealthQueriesTotal.inc({ mode: 'single', result: 'error' });
         this.logError('single user query', err);
-        // Return null for errors (graceful degradation)
         result.set(userId, null);
       }
     } else {
-      // Batch query (split into chunks if needed)
       const chunks = this.chunkArray(userIds, this.maxBatchSize);
-      
       for (const chunk of chunks) {
         try {
           const data = await this.client.request<{ users: unknown[] }>(BATCH_USER_HF_QUERY, { ids: chunk });
           userHealthQueriesTotal.inc({ mode: 'batch', result: 'success' });
-          
+
+          // Parse with tolerant schema (handles string/number)
           const users = z.array(UserSchema).parse(data.users) as User[];
-          
-          // Calculate HF for each user
+
           for (const user of users) {
             const hf = this.calculateHealthFactor(user);
             result.set(user.id, hf);
           }
-          
-          // For users not returned in response, set null (might not exist or have no debt)
+
           for (const userId of chunk) {
             if (!result.has(userId)) {
               result.set(userId, null);
@@ -215,7 +205,6 @@ export class HealthFactorResolver {
         } catch (err) {
           userHealthQueriesTotal.inc({ mode: 'batch', result: 'error' });
           this.logError('batch query', err);
-          // Set null for all users in failed batch
           for (const userId of chunk) {
             if (!result.has(userId)) {
               result.set(userId, null);
@@ -230,19 +219,14 @@ export class HealthFactorResolver {
 
   /**
    * Calculate health factor for a user.
-   * Returns null if user has zero debt.
-   * @param user User data from subgraph
-   * @returns Health factor value or null
+   * Returns null if user has zero debt or invalid data.
    */
   private calculateHealthFactor(user: User): number | null {
     try {
       const result = this.healthCalculator.calculateHealthFactor(user);
-      
-      // Return null for zero debt (prefer null over Infinity for filtering)
       if (result.totalDebtETH === 0 || !isFinite(result.healthFactor)) {
         return null;
       }
-      
       return result.healthFactor;
     } catch (err) {
       this.logError('health factor calculation', err);
@@ -250,23 +234,17 @@ export class HealthFactorResolver {
     }
   }
 
-  /**
-   * Log error with optional debug output
-   */
   private logError(context: string, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     // eslint-disable-next-line no-console
     console.error(`[health-resolver] ${context} error: ${message}`);
-    
+
     if (this.debugErrors) {
       // eslint-disable-next-line no-console
       console.error('[health-resolver][debug] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
     }
   }
 
-  /**
-   * Split array into chunks of specified size
-   */
   private chunkArray<T>(array: T[], size: number): T[][] {
     const chunks: T[][] = [];
     for (let i = 0; i < array.length; i += size) {
@@ -275,9 +253,6 @@ export class HealthFactorResolver {
     return chunks;
   }
 
-  /**
-   * Get cache statistics
-   */
   getCacheStats() {
     return {
       size: this.cache.size,
@@ -286,9 +261,6 @@ export class HealthFactorResolver {
     };
   }
 
-  /**
-   * Clear cache (useful for testing)
-   */
   clearCache(): void {
     this.cache.clear();
   }
