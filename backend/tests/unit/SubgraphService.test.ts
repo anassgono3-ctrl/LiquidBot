@@ -242,6 +242,132 @@ describe('SubgraphService', () => {
     });
   });
 
+  describe('getUsersPage', () => {
+    it('should fetch and parse users with all required reserve fields including name', async () => {
+      requestMock.mockResolvedValue({
+        users: [
+          {
+            id: '0xuser1',
+            borrowedReservesCount: 1,
+            reserves: [
+              {
+                currentATokenBalance: '1000000000',
+                currentVariableDebt: '500000000',
+                currentStableDebt: '0',
+                reserve: {
+                  id: '0xusdc',
+                  symbol: 'USDC',
+                  name: 'USD Coin',
+                  decimals: 6,
+                  reserveLiquidationThreshold: 8500,
+                  usageAsCollateralEnabled: true,
+                  price: { priceInEth: '0.0005' },
+                },
+              },
+            ],
+          },
+          {
+            id: '0xuser2',
+            borrowedReservesCount: 2,
+            reserves: [
+              {
+                currentATokenBalance: '2000000000',
+                currentVariableDebt: '1000000000',
+                currentStableDebt: '0',
+                reserve: {
+                  id: '0xusdc',
+                  symbol: 'USDC',
+                  name: 'USD Coin',
+                  decimals: 6,
+                  reserveLiquidationThreshold: 8500,
+                  usageAsCollateralEnabled: true,
+                  price: { priceInEth: '0.0005' },
+                },
+              },
+              {
+                currentATokenBalance: '0',
+                currentVariableDebt: '500000000000000000',
+                currentStableDebt: '0',
+                reserve: {
+                  id: '0xweth',
+                  symbol: 'WETH',
+                  name: 'Wrapped Ether',
+                  decimals: 18,
+                  reserveLiquidationThreshold: 8250,
+                  usageAsCollateralEnabled: true,
+                  price: { priceInEth: '1.0' },
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      const result = await service.getUsersPage(10);
+      
+      expect(result).toHaveLength(2);
+      expect(result[0].id).toBe('0xuser1');
+      expect(result[0].borrowedReservesCount).toBe(1);
+      expect(result[0].reserves[0].reserve.name).toBe('USD Coin');
+      
+      expect(result[1].id).toBe('0xuser2');
+      expect(result[1].borrowedReservesCount).toBe(2);
+      expect(result[1].reserves[0].reserve.name).toBe('USD Coin');
+      expect(result[1].reserves[1].reserve.name).toBe('Wrapped Ether');
+    });
+
+    it('should reject users with missing name field in reserve', async () => {
+      requestMock.mockResolvedValue({
+        users: [
+          {
+            id: '0xuser1',
+            borrowedReservesCount: 1,
+            reserves: [
+              {
+                currentATokenBalance: '1000000000',
+                currentVariableDebt: '500000000',
+                currentStableDebt: '0',
+                reserve: {
+                  id: '0xusdc',
+                  symbol: 'USDC',
+                  // name field is missing!
+                  decimals: 6,
+                  reserveLiquidationThreshold: 8500,
+                  usageAsCollateralEnabled: true,
+                  price: { priceInEth: '0.0005' },
+                },
+              },
+            ],
+          },
+        ],
+      });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      
+      // Should throw Zod validation error because name is required
+      await expect(service.getUsersPage(10)).rejects.toThrow();
+    });
+
+    it('should handle empty users array', async () => {
+      requestMock.mockResolvedValue({ users: [] });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      const result = await service.getUsersPage(5);
+      expect(result).toHaveLength(0);
+    });
+
+    it('should clamp limit to 200', async () => {
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      requestMock.mockResolvedValue({ users: [] });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      
+      await service.getUsersPage(300);
+      
+      expect(consoleWarnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('getUsersPage: limit 300 clamped to 200')
+      );
+      consoleWarnSpy.mockRestore();
+    });
+  });
+
   describe('error handling', () => {
     it('should throw on GraphQL errors and retry', async () => {
       requestMock.mockReset();
