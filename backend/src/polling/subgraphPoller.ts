@@ -1,10 +1,14 @@
 import type { SubgraphService } from '../services/SubgraphService.js';
 import type { LiquidationCall } from '../types/index.js';
 import type { OnDemandHealthFactor } from '../services/OnDemandHealthFactor.js';
+import type { AtRiskScanner } from '../services/AtRiskScanner.js';
 import {
   liquidationNewEventsTotal,
   liquidationSnapshotSize,
-  liquidationSeenTotal
+  liquidationSeenTotal,
+  atRiskScanUsersTotal,
+  atRiskScanCriticalTotal,
+  atRiskScanWarnTotal
 } from '../metrics/index.js';
 
 import { createLiquidationTracker, type LiquidationTracker } from './liquidationTracker.js';
@@ -18,6 +22,8 @@ export interface SubgraphPollerOptions {
   pollLimit?: number;
   trackMax?: number;
   onDemandHealthFactor?: OnDemandHealthFactor;
+  atRiskScanner?: AtRiskScanner;
+  atRiskScanLimit?: number;
 }
 
 export interface SubgraphPollerHandle {
@@ -42,7 +48,9 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
     onNewLiquidations,
     pollLimit = 5,
     trackMax = 5000,
-    onDemandHealthFactor
+    onDemandHealthFactor,
+    atRiskScanner,
+    atRiskScanLimit = 0
   } = opts;
 
   let active = true;
@@ -145,6 +153,33 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
       // Only notify about the latest event (if any)
       if (latestEvent) {
         onNewLiquidations?.([latestEvent]);
+      }
+
+      // At-risk user scanning (if enabled)
+      if (atRiskScanner && atRiskScanLimit > 0) {
+        try {
+          const scanResult = await atRiskScanner.scanAndClassify(atRiskScanLimit);
+          
+          // Update metrics
+          atRiskScanUsersTotal.inc(scanResult.scannedCount);
+          atRiskScanCriticalTotal.inc(scanResult.criticalCount);
+          atRiskScanWarnTotal.inc(scanResult.warnCount);
+          
+          // Log summary
+          logger.info(
+            `[at-risk-scan] users=${atRiskScanLimit} scanned=${scanResult.scannedCount} ` +
+            `critical=${scanResult.criticalCount} warn=${scanResult.warnCount} ` +
+            `skippedNoDebt=${scanResult.noDebtCount}`
+          );
+          
+          // Send notifications for at-risk users
+          if (scanResult.users.length > 0) {
+            await atRiskScanner.notifyAtRiskUsers(scanResult.users);
+          }
+        } catch (err: unknown) {
+          const msg = formatError(err);
+          logger.error(`[at-risk-scan] scan error: ${msg}`);
+        }
       }
     } catch (err: unknown) {
       const msg = formatError(err);

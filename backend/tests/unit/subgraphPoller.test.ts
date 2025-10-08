@@ -297,6 +297,85 @@ describe('subgraphPoller', () => {
     }
   });
 
+  it('does not call at-risk scanner when limit is 0', async () => {
+    getLiquidationCalls.mockResolvedValueOnce([]);
+    
+    const scanAndClassify = vi.fn();
+    const mockScanner = { scanAndClassify, notifyAtRiskUsers: vi.fn() };
+
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 2000,
+      logger,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      atRiskScanner: mockScanner as any,
+      atRiskScanLimit: 0
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scanAndClassify).not.toHaveBeenCalled();
+    poller.stop();
+  });
+
+  it('calls at-risk scanner when enabled', async () => {
+    getLiquidationCalls.mockResolvedValueOnce([]);
+    
+    const scanResult = {
+      scannedCount: 10,
+      criticalCount: 1,
+      warnCount: 2,
+      noDebtCount: 3,
+      users: [
+        { userId: '0x1', healthFactor: 0.95, classification: 'CRITICAL', totalDebtETH: 0.5, totalCollateralETH: 0.55 }
+      ]
+    };
+    const scanAndClassify = vi.fn().mockResolvedValue(scanResult);
+    const notifyAtRiskUsers = vi.fn();
+    const mockScanner = { scanAndClassify, notifyAtRiskUsers };
+
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 2000,
+      logger,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      atRiskScanner: mockScanner as any,
+      atRiskScanLimit: 10
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(scanAndClassify).toHaveBeenCalledWith(10);
+    expect(notifyAtRiskUsers).toHaveBeenCalledWith(scanResult.users);
+    poller.stop();
+  });
+
+  it('continues polling after at-risk scanner error', async () => {
+    getLiquidationCalls
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([]);
+    
+    const scanAndClassify = vi.fn().mockRejectedValueOnce(new Error('Scanner error'));
+    const mockScanner = { scanAndClassify, notifyAtRiskUsers: vi.fn() };
+
+    const poller = startSubgraphPoller({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      service: { getLiquidationCalls } as any,
+      intervalMs: 2000,
+      logger,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      atRiskScanner: mockScanner as any,
+      atRiskScanLimit: 10
+    });
+
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(2000);
+    
+    // Should still have called liquidation service twice
+    expect(getLiquidationCalls).toHaveBeenCalledTimes(2);
+    poller.stop();
+  });
+
   it('ignores bootstrap batch when IGNORE_BOOTSTRAP_BATCH=true', async () => {
     // Enable bootstrap suppression for this test
     const originalEnv = process.env.IGNORE_BOOTSTRAP_BATCH;

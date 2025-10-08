@@ -401,4 +401,51 @@ export class SubgraphService {
       return UserSchema.parse(data.user);
     });
   }
+
+  /**
+   * Get a page of users with debt for at-risk scanning.
+   * This performs a lightweight bulk query for proactive health monitoring.
+   * @param limit Maximum number of users to fetch (clamped to 200)
+   * @returns Array of user data with reserve information
+   */
+  async getUsersPage(limit: number): Promise<User[]> {
+    // Hard cap at 200 to prevent runaway large scans
+    const clampedLimit = Math.min(limit, 200);
+    if (clampedLimit !== limit && limit > 200) {
+      // eslint-disable-next-line no-console
+      console.warn(`[subgraph] getUsersPage: limit ${limit} clamped to 200`);
+    }
+
+    if (this.mock) {
+      return [];
+    }
+    if (this.degraded) return [];
+    this.ensureLive();
+    
+    return this.perform('usersPage', async () => {
+      const query = gql`
+        query UsersPage($first: Int!) {
+          users(first: $first, where: { borrowedReservesCount_gt: 0 }) {
+            id
+            borrowedReservesCount
+            reserves {
+              currentATokenBalance
+              currentVariableDebt
+              currentStableDebt
+              reserve {
+                id
+                symbol
+                decimals
+                reserveLiquidationThreshold
+                usageAsCollateralEnabled
+                price { priceInEth }
+              }
+            }
+          }
+        }
+      `;
+      const data = await this.client!.request<{ users: unknown[] }>(query, { first: clampedLimit });
+      return z.array(UserSchema).parse(data.users);
+    });
+  }
 }
