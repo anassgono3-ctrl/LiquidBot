@@ -102,3 +102,21 @@ export const userHealthCacheMissesTotal = new Counter({
   help: 'Total user health factor cache misses',
   registers: [registry]
 });
+
+export const atRiskScanUsersTotal = new Counter({
+  name: 'liquidbot_at_risk_scan_users_total',
+  help: 'Total number of users scanned for at-risk detection',
+  registers: [registry]
+});
+
+export const atRiskScanCriticalTotal = new Counter({
+  name: 'liquidbot_at_risk_scan_critical_total',
+  help: 'Total number of users detected below liquidation threshold',
+  registers: [registry]
+});
+
+export const atRiskScanWarnTotal = new Counter({
+  name: 'liquidbot_at_risk_scan_warn_total',
+  help: 'Total number of users detected between warn and liquidation thresholds',
+  registers: [registry]
+});

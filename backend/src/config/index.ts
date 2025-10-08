@@ -118,6 +118,13 @@ export const config = {
   get chainlinkRpcUrl() { return env.chainlinkRpcUrl; },
   get chainlinkFeeds() { return env.chainlinkFeeds; },
 
+  // At-risk user scanning
+  get atRiskScanLimit() { return env.atRiskScanLimit; },
+  get atRiskWarnThreshold() { return env.atRiskWarnThreshold; },
+  get atRiskLiqThreshold() { return env.atRiskLiqThreshold; },
+  get atRiskDustEpsilon() { return env.atRiskDustEpsilon; },
+  get atRiskNotifyWarn() { return env.atRiskNotifyWarn; },
+
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
   rateLimitMaxRequests: 120,

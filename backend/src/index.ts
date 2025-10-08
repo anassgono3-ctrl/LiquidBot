@@ -19,6 +19,8 @@ import { OpportunityService } from "./services/OpportunityService.js";
 import { NotificationService } from "./services/NotificationService.js";
 import { HealthMonitor } from "./services/HealthMonitor.js";
 import { OnDemandHealthFactor } from "./services/OnDemandHealthFactor.js";
+import { HealthCalculator } from "./services/HealthCalculator.js";
+import { AtRiskScanner } from "./services/AtRiskScanner.js";
 
 const logger = createLogger({
   level: "info",
@@ -58,6 +60,30 @@ if (!config.useMockSubgraph) {
     client,
     debugErrors: config.subgraphDebugErrors
   });
+}
+
+// Initialize at-risk scanner (only when enabled via config)
+let atRiskScanner: AtRiskScanner | undefined;
+if (config.atRiskScanLimit > 0) {
+  const healthCalculator = new HealthCalculator();
+  atRiskScanner = new AtRiskScanner(
+    subgraphService,
+    healthCalculator,
+    {
+      warnThreshold: config.atRiskWarnThreshold,
+      liqThreshold: config.atRiskLiqThreshold,
+      dustEpsilon: config.atRiskDustEpsilon,
+      notifyWarn: config.atRiskNotifyWarn
+    },
+    notificationService
+  );
+  logger.info(
+    `[at-risk-scanner] Initialized with limit=${config.atRiskScanLimit} ` +
+    `warnThreshold=${config.atRiskWarnThreshold} liqThreshold=${config.atRiskLiqThreshold} ` +
+    `notifyWarn=${config.atRiskNotifyWarn}`
+  );
+} else {
+  logger.info('[at-risk-scanner] Disabled (AT_RISK_SCAN_LIMIT=0)');
 }
 
 // Track opportunity stats for health endpoint
@@ -149,6 +175,8 @@ if (!config.useMockSubgraph) {
     pollLimit: config.pollLimit,
     trackMax: config.liquidationTrackMax,
     onDemandHealthFactor,
+    atRiskScanner,
+    atRiskScanLimit: config.atRiskScanLimit,
     onLiquidations: () => {
       // placeholder for raw snapshot callback
     },

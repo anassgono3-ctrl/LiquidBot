@@ -186,6 +186,59 @@ CHAINLINK_FEEDS=                  # Optional Chainlink feed addresses (comma-sep
 - Profit calculation formula with detailed breakdown
 - Historical backfill script usage (`hf-backfill.ts`)
 
+## At-Risk User Scanning (Optional)
+
+**New Feature**: Limited bulk scanning to proactively detect accounts approaching liquidation without relying on subgraph `healthFactor` fields.
+
+**Key Principles**:
+- **Optional**: Controlled by `AT_RISK_SCAN_LIMIT` (0 disables entirely)
+- **Lightweight**: Single slim multi-user query per poll (if enabled)
+- **Local computation**: Health factors computed locally from reserve data
+- **Rate-limit safe**: Hard cap at 200 users to prevent runaway scans
+- **Classification tiers**: NO_DEBT, DUST, OK, WARN, CRITICAL
+- **Selective notifications**: CRITICAL always notified, WARN optional
+
+**Configuration**:
+```env
+AT_RISK_SCAN_LIMIT=50              # Number of users to scan per poll (0 disables)
+AT_RISK_WARN_THRESHOLD=1.05        # HF below this triggers warning tier
+AT_RISK_LIQ_THRESHOLD=1.0          # HF below this is critical (liquidatable)
+AT_RISK_DUST_EPSILON=1e-9          # Debt ETH threshold to treat as dust
+AT_RISK_NOTIFY_WARN=false          # Whether to notify warn tier users
+```
+
+**Classification Logic**:
+```
+if totalDebtETH < dustEpsilon → DUST (hf=null)
+else if totalDebtETH == 0 → NO_DEBT (hf=null)
+else hf = weightedCollateralETH / totalDebtETH
+  if hf < LIQ_THRESHOLD → CRITICAL
+  else if hf < WARN_THRESHOLD → WARN
+  else → OK
+```
+
+**How It Works**:
+1. After processing liquidation events, if `AT_RISK_SCAN_LIMIT > 0`:
+   - Query up to N users with debt from subgraph (slim query, no healthFactor field)
+   - Compute health factors locally using existing `HealthCalculator`
+   - Classify users into risk tiers
+   - Send notifications for CRITICAL users (and WARN if enabled)
+2. Metrics tracked:
+   - `at_risk_scan_users_total`: Total users scanned
+   - `at_risk_scan_critical_total`: Users below liquidation threshold
+   - `at_risk_scan_warn_total`: Users in warning tier
+
+**Benefits**:
+- **Proactive detection**: Surface at-risk users before liquidation events
+- **No health snapshots**: Uses existing on-demand architecture
+- **Minimal overhead**: One additional query per poll cycle (if enabled)
+- **Configurable notifications**: Choose whether to alert on warnings
+
+**Safeguards**:
+- Hard cap at 200 users (warns and clamps if exceeded)
+- Errors logged but don't degrade main liquidation path
+- Can be disabled entirely by setting limit to 0
+
 ## Environment Validation
 
 The service validates critical environment variables at startup using Zod schemas. It will exit early with descriptive errors if:

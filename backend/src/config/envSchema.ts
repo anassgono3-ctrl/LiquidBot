@@ -72,7 +72,14 @@ export const rawEnvSchema = z.object({
 
   // Chainlink price feeds
   CHAINLINK_RPC_URL: z.string().optional(),
-  CHAINLINK_FEEDS: z.string().optional()
+  CHAINLINK_FEEDS: z.string().optional(),
+
+  // At-risk user scanning
+  AT_RISK_SCAN_LIMIT: z.string().optional(),
+  AT_RISK_WARN_THRESHOLD: z.string().optional(),
+  AT_RISK_LIQ_THRESHOLD: z.string().optional(),
+  AT_RISK_DUST_EPSILON: z.string().optional(),
+  AT_RISK_NOTIFY_WARN: z.string().optional()
 });
 
 export const env = (() => {
@@ -145,6 +152,13 @@ export const env = (() => {
 
     // Chainlink price feeds
     chainlinkRpcUrl: parsed.CHAINLINK_RPC_URL,
-    chainlinkFeeds: parsed.CHAINLINK_FEEDS
+    chainlinkFeeds: parsed.CHAINLINK_FEEDS,
+
+    // At-risk user scanning
+    atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),
+    atRiskWarnThreshold: Number(parsed.AT_RISK_WARN_THRESHOLD || 1.05),
+    atRiskLiqThreshold: Number(parsed.AT_RISK_LIQ_THRESHOLD || 1.0),
+    atRiskDustEpsilon: Number(parsed.AT_RISK_DUST_EPSILON || 1e-9),
+    atRiskNotifyWarn: (parsed.AT_RISK_NOTIFY_WARN || 'false').toLowerCase() === 'true'
   };
 })();
