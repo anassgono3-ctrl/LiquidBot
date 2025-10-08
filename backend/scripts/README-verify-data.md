@@ -31,6 +31,11 @@ node -r dotenv/config dist/scripts/verify-data.js [options]
 - `--user=<address>`: Verify a specific user by Ethereum address
 - `--verbose`: Enable verbose output with detailed checks
 - `--out=<file>`: Output JSON report to specified file
+- `--show-hf`: Force per-user HF detail output (even if not verbose)
+- `--quiet`: Suppress standard per-liquidation ID lines; only show HF when --show-hf or mismatches
+- `--json-hf`: Include hfDetails array in JSON output (requires --out)
+- `--hf-epsilon=<float>`: HF comparison tolerance (default: 1e-9)
+- `--dust-epsilon=<float>`: Dust debt threshold in ETH (default: 1e-9)
 - `--help`, `-h`: Show help message
 
 ### Examples
@@ -45,14 +50,34 @@ node -r dotenv/config dist/scripts/verify-data.js
 node -r dotenv/config dist/scripts/verify-data.js --recent=25
 ```
 
-#### 3. Verify Specific User with Verbose Output
+#### 3. Show Health Factor Details
+```bash
+node -r dotenv/config dist/scripts/verify-data.js --recent=5 --show-hf
+```
+
+Or use the npm script:
+```bash
+npm run verify:hf
+```
+
+#### 4. Quiet Mode with HF Details Only
+```bash
+node -r dotenv/config dist/scripts/verify-data.js --recent=10 --quiet --show-hf
+```
+
+#### 5. Generate JSON Report with Full HF Details
+```bash
+node -r dotenv/config dist/scripts/verify-data.js --recent=25 --out=verify-report.json --json-hf
+```
+
+#### 6. Verify Specific User with Verbose Output
 ```bash
 node -r dotenv/config dist/scripts/verify-data.js --user=0x1234567890abcdef --verbose
 ```
 
-#### 4. Generate JSON Report
+#### 7. Custom HF Epsilon for Strict Validation
 ```bash
-node -r dotenv/config dist/scripts/verify-data.js --recent=25 --out=verify-report.json
+node -r dotenv/config dist/scripts/verify-data.js --recent=10 --show-hf --hf-epsilon=1e-12
 ```
 
 ## Verification Checks
@@ -96,16 +121,40 @@ For each user with valid data:
 
 **b) Comparison**
 - Compares absolute difference between the two calculations
-- Tolerance threshold: 0.01 (1%)
+- Tolerance threshold: configurable via `--hf-epsilon` (default: 1e-9)
 - Reports inconsistencies if difference exceeds tolerance
 
-**c) Result Structure**
+**c) Classification**
+The script classifies each user's health factor into one of five categories:
+
+- **NO_DEBT**: User has zero debt (HF would be Infinity). Reported as `null` in output.
+- **DUST_DEBT**: User has debt below the dust-epsilon threshold (default: 1e-9 ETH). These are effectively zero debt positions but with trace amounts.
+- **HUGE**: Health factor exceeds 10000, indicating effectively no liquidation risk.
+- **MISMATCH**: Absolute difference between primary and recomputed HF exceeds hf-epsilon, indicating a calculation inconsistency.
+- **OK**: Normal health factor with consistent calculations.
+
+**d) Result Structure**
 ```typescript
 {
   calculatorHF: number;      // From HealthCalculator
   independentHF: number;     // From inline calculation
   diff: number;              // Absolute difference
   isConsistent: boolean;     // Within tolerance?
+}
+```
+
+**e) HF Detail Structure (when using --show-hf or --json-hf)**
+```typescript
+{
+  user: string;                    // User address
+  healthFactor: number | null;     // Primary HF (null for NO_DEBT)
+  classification: string;          // NO_DEBT, DUST_DEBT, HUGE, MISMATCH, OK
+  totalCollateralETH: number;      // Total collateral value in ETH
+  totalDebtETH: number;            // Total debt value in ETH
+  weightedCollateralETH: number;   // Collateral × liquidation threshold
+  recomputedHF: number | null;     // Independently computed HF
+  hfDiff: number | null;           // |primary - recomputed|
+  reason?: string;                 // Explanation for classification
 }
 ```
 
@@ -139,6 +188,30 @@ For each user with valid data:
   - No issues found
 ```
 
+**With --show-hf Flag:**
+```
+[verify-data] [1/10] liq-0x123abc
+  - HF: 1.2500 classification=OK collateralETH=1.5000e+0 debtETH=1.0000e+0 weightedCollateral=1.2500e+0 diff=1.23e-10
+[verify-data] [2/10] liq-0x456def
+  - HF: null classification=NO_DEBT collateralETH=5.0000e+0 debtETH=0.0000e+0 weightedCollateral=4.0000e+0 diff=- reason="Zero debt"
+```
+
+**Summary Output with HF Breakdown:**
+```
+[verify-data] Verification Summary:
+  Total liquidations: 10
+  Verified: 10
+  Errors: 0
+  Warnings: 1
+
+[verify-data] Health Factor Summary:
+  OK: 7
+  NO_DEBT (null): 2
+  DUST_DEBT: 0
+  HUGE (>10000): 1
+  MISMATCH: 0
+```
+
 ### JSON Report Structure
 
 See [examples/verify-data-sample-output.json](../examples/verify-data-sample-output.json) for a complete example.
@@ -150,6 +223,13 @@ See [examples/verify-data-sample-output.json](../examples/verify-data-sample-out
   verifiedCount: number;       // Successfully verified count
   errorCount: number;          // Total errors found
   warningCount: number;        // Total warnings found
+  summary: {                   // HF summary breakdown
+    hfOk: number;              // Count of OK classifications
+    hfNull: number;            // Count of NO_DEBT (null HF)
+    hfDust: number;            // Count of DUST_DEBT
+    hfHuge: number;            // Count of HUGE (HF > 10000)
+    hfMismatch: number;        // Count of MISMATCH
+  };
   liquidations: [              // Array of verification results
     {
       liquidationId: string;
@@ -175,15 +255,40 @@ See [examples/verify-data-sample-output.json](../examples/verify-data-sample-out
         matches: boolean;
         mismatchList?: string[];
       };
+      hfDetail?: {             // HF detail (always present when userDataFetched)
+        user: string;
+        healthFactor: number | null;
+        classification: string;
+        totalCollateralETH: number;
+        totalDebtETH: number;
+        weightedCollateralETH: number;
+        recomputedHF: number | null;
+        hfDiff: number | null;
+        reason?: string;
+      };
     }
-  ]
+  ];
+  hfDetails?: [                // Full HF details (only if --json-hf used)
+    {
+      user: string;
+      healthFactor: number | null;
+      classification: string;
+      totalCollateralETH: number;
+      totalDebtETH: number;
+      weightedCollateralETH: number;
+      recomputedHF: number | null;
+      hfDiff: number | null;
+      reason?: string;
+    }
+  ];
 }
 ```
 
 ## Exit Codes
 
-- `0`: Success (no errors found)
-- `1`: Failure (errors detected or fatal error)
+- `0`: Success (no errors or HF mismatches found)
+- `2`: Failure (errors detected, HF mismatches found, or fatal error)
+- `1`: Legacy failure code (replaced by exit code 2)
 
 ## Issue Types
 
