@@ -47,8 +47,8 @@ describe('OpportunityService', () => {
           timestamp: 1234567890,
           user: '0xUser123',
           liquidator: '0xLiquidator456',
-          collateralAmount: '2000000000', // 2000 USDC
-          principalAmount: '1000000000', // 1000 USDC
+          collateralAmount: '2000000000', // 2000 USDC (actual seized, already includes bonus)
+          principalAmount: '1000000000', // 1000 USDC (actual debt repaid)
           txHash: null,
           collateralReserve: { id: '0xusdc', symbol: 'USDC', decimals: 6 },
           principalReserve: { id: '0xusdc2', symbol: 'USDC', decimals: 6 }
@@ -57,15 +57,18 @@ describe('OpportunityService', () => {
 
       const opportunities = await opportunityService.buildOpportunities(liquidations);
 
-      // Collateral: 2000 USD, Principal: 1000 USD
+      // POST-EVENT CALCULATION (no bonus re-applied):
+      // Collateral: 2000 USD (already includes liquidation bonus)
+      // Principal: 1000 USD
       // Raw spread: 1000 USD
-      // Bonus: 2000 * 0.05 = 100 USD
-      // Gross: 1100 USD
-      // Fees: 1100 * 0.003 = 3.3 USD
-      // Net profit: ~1096.7 USD
+      // Bonus applied: 0 (event amounts already reflect seized collateral)
+      // Gross: 1000 USD
+      // Fees: 1000 * 0.003 = 3.0 USD
+      // Gas cost: 0.5 USD (default)
+      // Net profit: ~996.5 USD
 
-      expect(opportunities[0].profitEstimateUsd).toBeGreaterThan(1000);
-      expect(opportunities[0].profitEstimateUsd).toBeLessThan(1100);
+      expect(opportunities[0].profitEstimateUsd).toBeGreaterThan(990);
+      expect(opportunities[0].profitEstimateUsd).toBeLessThan(1000);
     });
 
     it('should include health factor when snapshot provided', async () => {

@@ -121,20 +121,43 @@ export class PriceService {
       const aggregator = new ethers.Contract(feedAddress, AGGREGATOR_V3_ABI, this.provider);
       const roundData = await aggregator.latestRoundData();
       
-      // Extract answer (price) from tuple
-      const answer = roundData[1]; // int256 answer
+      // Extract data from tuple
+      const roundId = roundData[0];      // uint80 roundId
+      const answer = roundData[1];       // int256 answer
+      const updatedAt = roundData[3];    // uint256 updatedAt
+      const answeredInRound = roundData[4]; // uint80 answeredInRound
+      
+      // Validate roundId consistency
+      if (answeredInRound < roundId) {
+        // eslint-disable-next-line no-console
+        console.warn(`[price] Stale Chainlink data for ${symbol}: answeredInRound=${answeredInRound} < roundId=${roundId}`);
+        return null;
+      }
       
       // Chainlink feeds typically have 8 decimals
       const price = Number(answer) / 1e8;
       
-      // Validate price is reasonable
+      // Validate price is positive and finite
       if (!isFinite(price) || price <= 0) {
+        // eslint-disable-next-line no-console
+        console.warn(`[price] Invalid Chainlink price for ${symbol}: ${price}`);
         return null;
+      }
+      
+      // Check freshness (warn if older than 1 hour, but still use it)
+      const now = Math.floor(Date.now() / 1000);
+      const age = now - Number(updatedAt);
+      if (age > 3600) {
+        // eslint-disable-next-line no-console
+        console.warn(`[price] Chainlink price for ${symbol} is ${age}s old (threshold: 3600s)`);
       }
 
       return price;
     } catch (err) {
-      // Silent fallback to stub prices
+      // Log error and fallback to stub prices
+      const message = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.warn(`[price] Chainlink fetch failed for ${symbol}: ${message}`);
       return null;
     }
   }

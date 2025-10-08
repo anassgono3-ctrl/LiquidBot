@@ -7,6 +7,9 @@ import { config } from '../config/index.js';
  * HF = (Σ collateral_value × liquidationThreshold) / Σ debt_value
  */
 export class HealthCalculator {
+  // Dust threshold: treat debt below this value (in ETH) as effectively zero
+  private readonly DUST_EPSILON_ETH = 0.000001;
+
   /**
    * Calculate health factor for a user
    * @param user User data from subgraph
@@ -41,12 +44,12 @@ export class HealthCalculator {
       totalDebtETH += debtValueETH;
     }
 
-    // Handle zero debt case (infinite health factor)
-    if (totalDebtETH === 0) {
+    // Handle zero debt or dust case (infinite health factor)
+    if (totalDebtETH === 0 || totalDebtETH < this.DUST_EPSILON_ETH) {
       return {
         healthFactor: Infinity,
         totalCollateralETH,
-        totalDebtETH: 0,
+        totalDebtETH: totalDebtETH < this.DUST_EPSILON_ETH ? 0 : totalDebtETH,
         isAtRisk: false,
       };
     }

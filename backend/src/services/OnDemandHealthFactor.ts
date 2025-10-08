@@ -2,7 +2,7 @@
 import { GraphQLClient, gql } from 'graphql-request';
 import { z } from 'zod';
 
-import type { User } from '../types/index.js';
+import type { User, AnnotatedHealthFactor } from '../types/index.js';
 
 import { HealthCalculator } from './HealthCalculator.js';
 
@@ -105,6 +105,37 @@ export class OnDemandHealthFactor {
     } catch (err) {
       this.logError('getHealthFactor', userId, err);
       return null;
+    }
+  }
+
+  /**
+   * Get annotated health factor with reason for null values.
+   * Provides more context about why HF might be null.
+   */
+  async getAnnotatedHealthFactor(userId: string): Promise<AnnotatedHealthFactor> {
+    try {
+      const data = await this.client.request<{ user: unknown }>(SINGLE_USER_QUERY, { id: userId });
+
+      if (!data.user) {
+        return { value: null, reason: 'notFound' };
+      }
+
+      const user = UserSchema.parse(data.user) as User;
+      const result = this.healthCalculator.calculateHealthFactor(user);
+
+      // Check for zero/dust debt
+      if (result.totalDebtETH === 0) {
+        return { value: null, reason: 'noDebt' };
+      }
+
+      if (!isFinite(result.healthFactor)) {
+        return { value: null, reason: 'dust' };
+      }
+
+      return { value: result.healthFactor };
+    } catch (err) {
+      this.logError('getAnnotatedHealthFactor', userId, err);
+      return { value: null, reason: 'error' };
     }
   }
 

@@ -140,8 +140,8 @@ export const env = (() => {
     pollLimit: Number(parsed.POLL_LIMIT || 5),
     ignoreBootstrapBatch: (parsed.IGNORE_BOOTSTRAP_BATCH || 'true').toLowerCase() === 'true',
 
-    // Gas cost estimation
-    gasCostUsd: Number(parsed.GAS_COST_USD || 0),
+    // Gas cost estimation (default 0.5 USD)
+    gasCostUsd: Number(parsed.GAS_COST_USD || 0.5),
 
     // Chainlink price feeds
     chainlinkRpcUrl: parsed.CHAINLINK_RPC_URL,
