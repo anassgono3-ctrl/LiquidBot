@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
  * Risk Scanning Script (TypeScript version)
- * Fetches positions from subgraph and identifies at-risk users (HF < 1.1)
+ * Uses AtRiskScanner to identify users approaching liquidation
  * 
  * This version imports from src/ instead of dist/ to avoid stale build issues
  */
@@ -14,75 +14,74 @@ process.env.NODE_ENV = 'development';
 
 import { SubgraphService } from '../src/services/SubgraphService.js';
 import { HealthCalculator } from '../src/services/HealthCalculator.js';
+import { AtRiskScanner } from '../src/services/AtRiskScanner.js';
 import { config } from '../src/config/index.js';
 
 const subgraphService = new SubgraphService();
 const healthCalculator = new HealthCalculator();
 
+// Configure scanner with environment variables or defaults
+const scanner = new AtRiskScanner(
+  subgraphService,
+  healthCalculator,
+  {
+    warnThreshold: config.atRiskWarnThreshold || 1.05,
+    liqThreshold: config.atRiskLiqThreshold || 1.0,
+    dustEpsilon: config.atRiskDustEpsilon || 1e-9,
+    notifyWarn: false // No notifications in script mode
+  }
+);
+
 async function main() {
   console.log('🔍 Scanning for at-risk positions...');
-  console.log(`📊 Alert threshold: HF < ${config.alertThreshold}`);
-  console.log(`⚠️  Emergency threshold: HF < ${config.emergencyThreshold}`);
+  console.log(`📊 Warning threshold: HF < ${config.atRiskWarnThreshold || 1.05}`);
+  console.log(`⚠️  Liquidation threshold: HF < ${config.atRiskLiqThreshold || 1.0}`);
+  console.log(`🔢 Scan limit: ${config.atRiskScanLimit || 100} users`);
   console.log('');
 
   try {
-    // Fetch users with debt
-    const users = await subgraphService.getUsersWithDebt(100);
-    console.log(`📋 Found ${users.length} users with active debt`);
-    console.log('');
-
-    // Calculate health factors and identify at-risk users
-    const atRiskUsers = [];
-    const emergencyUsers = [];
-
-    for (const user of users) {
-      const hf = healthCalculator.calculateHealthFactor(user);
-      
-      if (hf.healthFactor < config.alertThreshold && hf.healthFactor !== Infinity) {
-        atRiskUsers.push({
-          address: user.id,
-          healthFactor: hf.healthFactor,
-          totalCollateralETH: hf.totalCollateralETH,
-          totalDebtETH: hf.totalDebtETH,
-        });
-
-        if (hf.healthFactor < config.emergencyThreshold) {
-          emergencyUsers.push({
-            address: user.id,
-            healthFactor: hf.healthFactor,
-          });
-        }
-      }
-    }
+    const scanLimit = config.atRiskScanLimit || 100;
+    const result = await scanner.scanAndClassify(scanLimit);
 
     // Display results
     console.log('📊 Risk Assessment Results:');
     console.log('─'.repeat(80));
-    console.log(`Total positions scanned: ${users.length}`);
-    console.log(`At-risk positions (HF < ${config.alertThreshold}): ${atRiskUsers.length}`);
-    console.log(`Emergency positions (HF < ${config.emergencyThreshold}): ${emergencyUsers.length}`);
+    console.log(`Total positions scanned: ${result.scannedCount}`);
+    console.log(`Positions with no debt/dust: ${result.noDebtCount}`);
+    console.log(`Warning tier (HF < ${config.atRiskWarnThreshold || 1.05}): ${result.warnCount}`);
+    console.log(`Critical tier (HF < ${config.atRiskLiqThreshold || 1.0}): ${result.criticalCount}`);
     console.log('');
 
-    if (emergencyUsers.length > 0) {
-      console.log('🚨 EMERGENCY - Immediate Intervention Required:');
-      emergencyUsers.forEach((user) => {
-        console.log(`   ${user.address} - HF: ${user.healthFactor.toFixed(4)}`);
-      });
-      console.log('');
-    }
+    // Filter and display by tier
+    const criticalUsers = result.users.filter(u => u.classification === 'CRITICAL');
+    const warnUsers = result.users.filter(u => u.classification === 'WARN');
 
-    if (atRiskUsers.length > 0) {
-      console.log('⚠️  AT RISK - Monitor Closely:');
-      atRiskUsers.forEach((user) => {
+    if (criticalUsers.length > 0) {
+      console.log('🚨 CRITICAL - Liquidation Imminent:');
+      criticalUsers.forEach((user) => {
         console.log(
-          `   ${user.address} - HF: ${user.healthFactor.toFixed(4)} | ` +
+          `   ${user.userId} - HF: ${user.healthFactor?.toFixed(4) || 'N/A'} | ` +
           `Collateral: ${user.totalCollateralETH.toFixed(6)} ETH | ` +
           `Debt: ${user.totalDebtETH.toFixed(6)} ETH`
         );
       });
       console.log('');
-    } else {
-      console.log('✅ No at-risk positions found - all users are healthy!');
+    }
+
+    if (warnUsers.length > 0) {
+      console.log('⚠️  WARNING - Monitor Closely:');
+      warnUsers.forEach((user) => {
+        console.log(
+          `   ${user.userId} - HF: ${user.healthFactor?.toFixed(4) || 'N/A'} | ` +
+          `Collateral: ${user.totalCollateralETH.toFixed(6)} ETH | ` +
+          `Debt: ${user.totalDebtETH.toFixed(6)} ETH`
+        );
+      });
+      console.log('');
+    }
+
+    if (criticalUsers.length === 0 && warnUsers.length === 0) {
+      console.log('✅ No at-risk positions found - all scanned users are healthy!');
       console.log('');
     }
 
