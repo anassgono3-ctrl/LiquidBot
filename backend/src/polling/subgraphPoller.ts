@@ -1,5 +1,6 @@
 import type { SubgraphService } from '../services/SubgraphService.js';
 import type { LiquidationCall } from '../types/index.js';
+import type { HealthFactorResolver } from '../services/HealthFactorResolver.js';
 import {
   liquidationNewEventsTotal,
   liquidationSnapshotSize,
@@ -16,6 +17,7 @@ export interface SubgraphPollerOptions {
   onNewLiquidations?: (events: LiquidationCall[]) => void;
   pollLimit?: number;
   trackMax?: number;
+  healthFactorResolver?: HealthFactorResolver;
 }
 
 export interface SubgraphPollerHandle {
@@ -39,7 +41,8 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
     onLiquidations,
     onNewLiquidations,
     pollLimit = 50,
-    trackMax = 5000
+    trackMax = 5000,
+    healthFactorResolver
   } = opts;
 
   let active = true;
@@ -69,9 +72,34 @@ export function startSubgraphPoller(opts: SubgraphPollerOptions): SubgraphPoller
         liquidationNewEventsTotal.inc(newEvents.length);
       }
       
-      // Log with new format
+      // Resolve health factors for new events (on-demand)
+      let hfResolved = 0;
+      if (healthFactorResolver && newEvents.length > 0) {
+        try {
+          // Gather unique user IDs from new events
+          const uniqueUserIds = [...new Set(newEvents.map(e => e.user.toLowerCase()))];
+          
+          // Resolve health factors
+          const healthFactors = await healthFactorResolver.getHealthFactorsForUsers(uniqueUserIds);
+          
+          // Attach HF to each new event
+          for (const event of newEvents) {
+            const hf = healthFactors.get(event.user.toLowerCase());
+            if (hf !== undefined) {
+              event.healthFactor = hf;
+              if (hf !== null) hfResolved++;
+            }
+          }
+        } catch (err: unknown) {
+          const msg = formatError(err);
+          logger.error(`[subgraph] health factor resolution error: ${msg}`);
+        }
+      }
+      
+      // Log with new format (include hfResolved when > 0)
+      const hfResolvedMsg = hfResolved > 0 ? ` hfResolved=${hfResolved}` : '';
       logger.info(
-        `[subgraph] liquidation snapshot size=${snapshotLen} new=${newEvents.length} totalSeen=${seenSize}`
+        `[subgraph] liquidation snapshot size=${snapshotLen} new=${newEvents.length} totalSeen=${seenSize}${hfResolvedMsg}`
       );
       
       // Log sample of new IDs if any

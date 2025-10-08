@@ -9,10 +9,16 @@ LiquidBot includes comprehensive liquidation opportunity detection, borrower hea
 ### 1. Liquidation Opportunity Detection
 
 When new liquidation calls are detected, the system:
-- Fetches current borrower health factors
+- Fetches current borrower health factors on-demand (only for new liquidations)
 - Estimates profit potential for the liquidation
 - Broadcasts structured events via WebSocket
 - Sends Telegram notifications for profitable opportunities
+
+**On-Demand Health Factor Resolution**: The system uses a smart caching strategy to minimize subgraph queries:
+- Only queries health factors for users appearing in NEW liquidation events
+- Caches results for 60 seconds (configurable via `HEALTH_USER_CACHE_TTL_MS`)
+- Batches multiple user queries into single GraphQL requests (max 25 per batch, configurable via `HEALTH_MAX_BATCH`)
+- Returns null for users with zero debt to optimize filtering
 
 ### 2. Health Factor Monitoring
 
@@ -56,6 +62,11 @@ PROFIT_MIN_USD=10                  # Minimum profit threshold to alert
 
 # Price Oracle (placeholder for future integration)
 PRICE_ORACLE_MODE=coingecko
+
+# Health Factor Resolver (on-demand query optimization)
+HEALTH_USER_CACHE_TTL_MS=60000      # Cache TTL in milliseconds (default: 60s)
+HEALTH_MAX_BATCH=25                  # Max users per batch query (default: 25)
+HEALTH_QUERY_MODE=on_demand          # Query mode: on_demand (default)
 ```
 
 ### Getting Telegram Credentials
@@ -171,6 +182,9 @@ New Prometheus metrics available at `/metrics`:
 | `liquidbot_opportunities_generated_total` | Counter | Total liquidation opportunities detected |
 | `liquidbot_opportunity_profit_estimate` | Histogram | Profit estimate distribution (buckets: 1, 5, 10, 25, 50, 100, 250, 500, 1000 USD) |
 | `liquidbot_health_breach_events_total` | Counter | Total health factor breach events |
+| `liquidbot_user_health_queries_total{mode,result}` | Counter | Total health factor queries (mode: single/batch, result: success/error) |
+| `liquidbot_user_health_cache_hits_total` | Counter | Total cache hits for health factor queries |
+| `liquidbot_user_health_cache_misses_total` | Counter | Total cache misses for health factor queries |
 
 ## Health Endpoint
 
@@ -193,6 +207,12 @@ The `/health` endpoint now includes additional monitoring stats:
   },
   "notifications": {
     "telegramEnabled": true
+  },
+  "healthFactorCache": {
+    "size": 15,
+    "ttlMs": 60000,
+    "maxBatchSize": 25,
+    "queryMode": "on_demand"
   }
 }
 ```
@@ -225,12 +245,26 @@ The `/health` endpoint now includes additional monitoring stats:
 - Maintains in-memory state for efficient breach detection
 - Runs on configurable interval (default: 2x poll interval)
 
+#### HealthFactorResolver (NEW)
+- On-demand health factor resolution for liquidation events
+- Smart TTL-based caching (default 60s) to reduce subgraph queries
+- Automatic batching of multiple user queries (default max 25 per batch)
+- Graceful error handling with null fallback
+- Returns null for users with zero debt
+- Exposes cache statistics via health endpoint
+
+**Query Efficiency**:
+- **Without new liquidations**: Zero health factor queries
+- **With N unique users**: At most `ceil(N / HEALTH_MAX_BATCH)` queries
+- **Cache hits**: Subsequent liquidations for same user within TTL use cached value
+- **Metrics**: Track query count, cache hit/miss rate, batch vs single query mode
+
 ### Integration Flow
 
 1. **Subgraph Poller** detects new liquidation calls
-2. **HealthMonitor** fetches current health snapshot
-3. **OpportunityService** builds opportunities with profit estimates
-4. **Metrics** updated with opportunity counts and profit distribution
+2. **HealthFactorResolver** (NEW) queries health factors on-demand for new liquidation users
+3. **OpportunityService** builds opportunities with profit estimates (using resolved health factors)
+4. **Metrics** updated with opportunity counts, profit distribution, and HF query stats
 5. **WebSocket** broadcasts opportunity events to connected clients
 6. **NotificationService** sends Telegram alerts for profitable opportunities
 7. **HealthMonitor** (on interval) detects health factor breaches and broadcasts/notifies

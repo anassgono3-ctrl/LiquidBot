@@ -125,12 +125,41 @@ Coverage reports are generated in `./coverage` directory.
 
 - **SubgraphService**: Fetch Aave V3 data from The Graph with retry logic and rate limiting
 - **HealthCalculator**: Calculate health factors
+- **HealthFactorResolver**: On-demand health factor resolution with smart caching (NEW)
 - **HealthMonitor**: Track health factor changes and detect threshold breaches
 - **OpportunityService**: Detect and evaluate liquidation opportunities with profit estimation
 - **PriceService**: USD price lookups (stub, ready for oracle integration)
 - **NotificationService**: Telegram bot notifications for opportunities and breaches
 - **FlashLoanService**: Plan and execute refinancing (stub)
 - **SubscriptionService**: Manage user subscriptions
+
+### HealthFactorResolver
+
+**Purpose**: Efficiently resolve health factors for users appearing in new liquidation events, reducing subgraph API quota usage.
+
+**Features**:
+- **On-Demand Queries**: Only fetches health factors for users in newly detected liquidations
+- **Smart Caching**: TTL-based cache (default 60s) to avoid repeated queries for the same user
+- **Batch Optimization**: Combines multiple user queries into single GraphQL requests (default: max 25 per batch)
+- **Graceful Degradation**: Returns null on errors or for users with zero debt
+- **Observable**: Exposes Prometheus metrics for cache hits/misses and query stats
+
+**Configuration**:
+```env
+HEALTH_USER_CACHE_TTL_MS=60000   # Cache TTL (default: 60 seconds)
+HEALTH_MAX_BATCH=25               # Max users per batch query (default: 25)
+HEALTH_QUERY_MODE=on_demand       # Query mode (default: on_demand)
+```
+
+**Metrics**:
+- `liquidbot_user_health_queries_total{mode,result}`: Total queries (mode: single/batch, result: success/error)
+- `liquidbot_user_health_cache_hits_total`: Cache hits
+- `liquidbot_user_health_cache_misses_total`: Cache misses
+
+**Efficiency**:
+- With **no new liquidations**: Zero queries
+- With **N unique users**: At most `ceil(N / HEALTH_MAX_BATCH)` queries
+- Cache hit rate typically >70% in steady state with liquidation clustering
 
 ## Environment Validation
 

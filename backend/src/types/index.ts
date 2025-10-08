@@ -43,6 +43,7 @@ export interface LiquidationCall {
     symbol: string | null;
     decimals: number | null;
   } | null;
+  healthFactor?: number | null;  // Resolved on-demand for new events
 }
 
 export interface HealthFactorResult {

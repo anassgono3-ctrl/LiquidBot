@@ -4,7 +4,7 @@ import express from "express";
 import cors from "cors";
 import promClient from "prom-client";
 import { createLogger, format, transports } from "winston";
-import { gql } from 'graphql-request';
+import { gql, GraphQLClient } from 'graphql-request';
 
 import { config } from "./config/index.js";
 import { authenticate } from "./middleware/auth.js";
@@ -18,6 +18,7 @@ import { buildInfo } from "./buildInfo.js";
 import { OpportunityService } from "./services/OpportunityService.js";
 import { NotificationService } from "./services/NotificationService.js";
 import { HealthMonitor } from "./services/HealthMonitor.js";
+import { HealthFactorResolver } from "./services/HealthFactorResolver.js";
 
 const logger = createLogger({
   level: "info",
@@ -43,6 +44,23 @@ const subgraphService = new SubgraphService();
 const opportunityService = new OpportunityService();
 const notificationService = new NotificationService();
 const healthMonitor = new HealthMonitor(subgraphService);
+
+// Initialize health factor resolver (only when not mocking)
+let healthFactorResolver: HealthFactorResolver | undefined;
+if (!config.useMockSubgraph) {
+  const { endpoint, needsHeader } = config.resolveSubgraphEndpoint();
+  let headers: Record<string, string> | undefined;
+  if (needsHeader && config.graphApiKey) {
+    headers = { Authorization: `Bearer ${config.graphApiKey}` };
+  }
+  const client = new GraphQLClient(endpoint, { headers });
+  healthFactorResolver = new HealthFactorResolver({
+    client,
+    cacheTtlMs: config.healthUserCacheTtlMs,
+    maxBatchSize: config.healthMaxBatch,
+    debugErrors: config.subgraphDebugErrors
+  });
+}
 
 // Track opportunity stats for health endpoint
 const opportunityStats = {
@@ -107,6 +125,17 @@ app.get("/health", (_req, res) => {
   healthData.notifications = {
     telegramEnabled: notificationService.isEnabled()
   };
+
+  // Add health factor resolver stats
+  if (healthFactorResolver) {
+    const cacheStats = healthFactorResolver.getCacheStats();
+    healthData.healthFactorCache = {
+      size: cacheStats.size,
+      ttlMs: cacheStats.ttlMs,
+      maxBatchSize: cacheStats.maxBatchSize,
+      queryMode: config.healthQueryMode
+    };
+  }
   
   res.json(healthData);
 });
@@ -130,6 +159,7 @@ if (!config.useMockSubgraph) {
     logger,
     pollLimit: config.liquidationPollLimit,
     trackMax: config.liquidationTrackMax,
+    healthFactorResolver,
     onLiquidations: () => {
       // placeholder for raw snapshot callback
     },
