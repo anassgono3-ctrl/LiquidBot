@@ -86,7 +86,9 @@ export interface Opportunity {
   collateralValueUsd?: number | null;    // estimated by price lookup
   principalValueUsd?: number | null;
   profitEstimateUsd?: number | null;     // (collateralValue - principalValue) * bonus - fees
-  bonusPct?: number | null;              // placeholder (if we expose liquidation bonus later)
+  bonusPct?: number | null;              // liquidation bonus percentage
+  hfVerified?: number | null;            // verified health factor (if verifier available)
+  hfDiff?: number | null;                // difference between original and verified HF
 }
 
 export interface HealthSnapshot {

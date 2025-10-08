@@ -107,6 +107,17 @@ export const config = {
   get healthMaxBatch() { return env.healthMaxBatch; },
   get healthQueryMode() { return env.healthQueryMode; },
 
+  // Poll configuration
+  get pollLimit() { return env.pollLimit; },
+  get ignoreBootstrapBatch() { return env.ignoreBootstrapBatch; },
+
+  // Gas cost estimation
+  get gasCostUsd() { return env.gasCostUsd; },
+
+  // Chainlink price feeds
+  get chainlinkRpcUrl() { return env.chainlinkRpcUrl; },
+  get chainlinkFeeds() { return env.chainlinkFeeds; },
+
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
   rateLimitMaxRequests: 120,

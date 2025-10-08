@@ -138,35 +138,53 @@ Coverage reports are generated in `./coverage` directory.
 
 **Design Philosophy**: Health factors are computed **only** when a new liquidation event is detected, strictly on a per-user basis. This eliminates bulk snapshot queries (previously 500 users every poll) and massive Zod parsing overhead.
 
-**Key Changes**:
+**Key Features**:
 - **Bulk monitoring DISABLED**: `HealthMonitor` is now a no-op stub
-- **No scheduled snapshots**: Health factor updates removed from polling loop
-- **Single-user queries only**: Each unique user in new liquidations triggers one individual query
+- **Bootstrap suppression**: First poll batch ignored (configurable via `IGNORE_BOOTSTRAP_BATCH`)
+- **Reduced poll limit**: Default poll limit reduced from 50 to 5 (configurable via `POLL_LIMIT`)
+- **Single-user queries**: Each unique user in new liquidations triggers one individual query
 - **No batching**: Sequential per-user resolution (simpler, more predictable)
-- **No caching**: Direct query each time (can be added later if needed)
+- **Health factor verification**: Optional cross-verification with `HealthFactorVerifier`
+- **Enhanced profit calculation**: Centralized `ProfitCalculator` with detailed breakdowns (gross, fees, gas, net)
+- **Chainlink price feeds**: Optional real-time on-chain prices with fallback to stub prices
 
 **How It Works**:
 1. Poller detects new liquidation events (delta from tracker)
-2. For each unique user address in new events:
+2. First poll batch suppressed if `IGNORE_BOOTSTRAP_BATCH=true` (default)
+3. For each unique user address in new events:
    - `OnDemandHealthFactor.getHealthFactor(userId)` is called
    - Single GraphQL query: `query SingleUser($id: ID!) { user(id: $id) { ... } }`
    - Health factor calculated and attached to liquidation event
-3. Opportunities are built from liquidations with attached health factors
+4. Opportunities are built from liquidations with attached health factors
+5. Profit calculated with `ProfitCalculator` (gross, bonus, fees, gas, net)
 
 **Benefits**:
 - **Reduced API quota**: No more 500-user bulk queries
 - **No Zod spam**: Single-user schemas are simple and parse cleanly
 - **Event-driven**: Health factors resolved only when liquidations occur
 - **Predictable**: One query per unique user, no complex batching logic
+- **No bootstrap noise**: First poll batch ignored to prevent false alerts
 
 **Configuration**:
 ```env
 HEALTH_QUERY_MODE=on_demand       # Query mode (always on_demand now)
+POLL_LIMIT=5                      # Max new liquidations to process per poll
+IGNORE_BOOTSTRAP_BATCH=true       # Ignore first poll batch for notifications
+GAS_COST_USD=0                    # Gas cost estimate in USD for profit calculation
+CHAINLINK_RPC_URL=                # Optional Chainlink RPC URL for price feeds
+CHAINLINK_FEEDS=                  # Optional Chainlink feed addresses (comma-separated)
 ```
 
 **Efficiency**:
 - With **no new liquidations**: Zero health factor queries
 - With **N unique users** in new liquidations: Exactly **N queries** (one per user)
+- **Bootstrap suppression**: Prevents processing stale liquidations on startup
+
+**Documentation**: See [docs/ON_DEMAND_HEALTH_VERIFICATION.md](./docs/ON_DEMAND_HEALTH_VERIFICATION.md) for detailed information on:
+- Health factor verification logic
+- Price feed layers (Chainlink + stub fallback)
+- Profit calculation formula with detailed breakdown
+- Historical backfill script usage (`hf-backfill.ts`)
 
 ## Environment Validation
 

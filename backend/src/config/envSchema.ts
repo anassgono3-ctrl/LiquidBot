@@ -61,7 +61,18 @@ export const rawEnvSchema = z.object({
   // Health factor resolver
   HEALTH_USER_CACHE_TTL_MS: z.string().optional(),
   HEALTH_MAX_BATCH: z.string().optional(),
-  HEALTH_QUERY_MODE: z.string().optional()
+  HEALTH_QUERY_MODE: z.string().optional(),
+
+  // Poll configuration
+  POLL_LIMIT: z.string().optional(),
+  IGNORE_BOOTSTRAP_BATCH: z.string().optional(),
+
+  // Gas cost estimation
+  GAS_COST_USD: z.string().optional(),
+
+  // Chainlink price feeds
+  CHAINLINK_RPC_URL: z.string().optional(),
+  CHAINLINK_FEEDS: z.string().optional()
 });
 
 export const env = (() => {
@@ -123,6 +134,17 @@ export const env = (() => {
     // Health factor resolver
     healthUserCacheTtlMs: Number(parsed.HEALTH_USER_CACHE_TTL_MS || 60000),
     healthMaxBatch: Number(parsed.HEALTH_MAX_BATCH || 25),
-    healthQueryMode: parsed.HEALTH_QUERY_MODE || 'on_demand'
+    healthQueryMode: parsed.HEALTH_QUERY_MODE || 'on_demand',
+
+    // Poll configuration
+    pollLimit: Number(parsed.POLL_LIMIT || 5),
+    ignoreBootstrapBatch: (parsed.IGNORE_BOOTSTRAP_BATCH || 'true').toLowerCase() === 'true',
+
+    // Gas cost estimation
+    gasCostUsd: Number(parsed.GAS_COST_USD || 0),
+
+    // Chainlink price feeds
+    chainlinkRpcUrl: parsed.CHAINLINK_RPC_URL,
+    chainlinkFeeds: parsed.CHAINLINK_FEEDS
   };
 })();

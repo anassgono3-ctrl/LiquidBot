@@ -1,4 +1,4 @@
-// OnDemandHealthFactor: Minimal per-user health factor resolution
+// HealthFactorVerifier: Cross-verify health factors with filtered recomputation
 import { GraphQLClient, gql } from 'graphql-request';
 import { z } from 'zod';
 
@@ -7,11 +7,11 @@ import type { User } from '../types/index.js';
 import { HealthCalculator } from './HealthCalculator.js';
 
 /**
- * Single-user health factor query.
+ * Query for single user with all reserves (for verification).
  * Accepts numeric fields as number|string for resilience.
  */
 const SINGLE_USER_QUERY = gql`
-  query SingleUserWithDebt($id: ID!) {
+  query SingleUserForVerification($id: ID!) {
     user(id: $id) {
       id
       borrowedReservesCount
@@ -61,31 +61,41 @@ const UserSchema = z.object({
   reserves: z.array(UserReserveSchema),
 });
 
-export interface OnDemandHealthFactorOptions {
+export interface HealthFactorVerificationResult {
+  original: number;         // Original computed HF
+  verified: number;         // Recomputed HF with filters
+  diff: number;             // Absolute difference
+  isConsistent: boolean;    // True if diff within tolerance
+}
+
+export interface HealthFactorVerifierOptions {
   client: GraphQLClient;
+  tolerance?: number;       // Acceptable difference threshold (default: 0.01)
   debugErrors?: boolean;
 }
 
 /**
- * OnDemandHealthFactor provides single-user health factor resolution.
- * No caching, no batching - strictly on-demand per liquidation event.
+ * HealthFactorVerifier provides health factor cross-verification.
+ * Recomputes HF with filtered reserves and compares with original value.
  */
-export class OnDemandHealthFactor {
+export class HealthFactorVerifier {
   private client: GraphQLClient;
   private healthCalculator: HealthCalculator;
+  private tolerance: number;
   private debugErrors: boolean;
 
-  constructor(options: OnDemandHealthFactorOptions) {
+  constructor(options: HealthFactorVerifierOptions) {
     this.client = options.client;
     this.healthCalculator = new HealthCalculator();
+    this.tolerance = options.tolerance ?? 0.01;
     this.debugErrors = options.debugErrors ?? false;
   }
 
   /**
-   * Get health factor for a single user.
-   * Returns null if user not found or has zero debt.
+   * Verify health factor for a single user.
+   * Returns verification result or null if verification fails.
    */
-  async getHealthFactor(userId: string): Promise<number | null> {
+  async verifyHealthFactor(userId: string, originalHF: number): Promise<HealthFactorVerificationResult | null> {
     try {
       const data = await this.client.request<{ user: unknown }>(SINGLE_USER_QUERY, { id: userId });
 
@@ -94,16 +104,27 @@ export class OnDemandHealthFactor {
       }
 
       const user = UserSchema.parse(data.user) as User;
+      
+      // Recompute health factor with all reserves
       const result = this.healthCalculator.calculateHealthFactor(user);
 
-      // Return null for zero debt or invalid health factors
+      // Handle zero debt or invalid health factors
       if (result.totalDebtETH === 0 || !isFinite(result.healthFactor)) {
         return null;
       }
 
-      return result.healthFactor;
+      const verifiedHF = result.healthFactor;
+      const diff = Math.abs(verifiedHF - originalHF);
+      const isConsistent = diff <= this.tolerance;
+
+      return {
+        original: originalHF,
+        verified: verifiedHF,
+        diff,
+        isConsistent
+      };
     } catch (err) {
-      this.logError('getHealthFactor', userId, err);
+      this.logError('verifyHealthFactor', userId, err);
       return null;
     }
   }
@@ -111,11 +132,11 @@ export class OnDemandHealthFactor {
   private logError(context: string, userId: string, err: unknown): void {
     const message = err instanceof Error ? err.message : String(err);
     // eslint-disable-next-line no-console
-    console.error(`[on-demand-hf] ${context}(${userId}) error: ${message}`);
+    console.error(`[hf-verifier] ${context}(${userId}) error: ${message}`);
 
     if (this.debugErrors) {
       // eslint-disable-next-line no-console
-      console.error('[on-demand-hf][debug] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
+      console.error('[hf-verifier][debug] full error:', JSON.stringify(err, Object.getOwnPropertyNames(err), 2));
     }
   }
 }
