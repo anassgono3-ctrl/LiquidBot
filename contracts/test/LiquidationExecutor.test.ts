@@ -156,7 +156,7 @@ describe("LiquidationExecutor", function () {
       
       await expect(
         executor.initiateLiquidation(params)
-      ).to.be.revertedWithCustomError(executor, "Paused");
+      ).to.be.revertedWithCustomError(executor, "ContractPaused");
     });
   });
 
