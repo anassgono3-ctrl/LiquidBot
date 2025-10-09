@@ -40,7 +40,7 @@ contract LiquidationExecutor is IFlashLoanRecipient {
     
     // Errors
     error Unauthorized();
-    error Paused();
+    error ContractPaused();
     error InvalidAddress();
     error AssetNotWhitelisted();
     error InsufficientOutput();
@@ -55,7 +55,7 @@ contract LiquidationExecutor is IFlashLoanRecipient {
     }
     
     modifier whenNotPaused() {
-        if (paused) revert Paused();
+        if (paused) revert ContractPaused();
         _;
     }
     

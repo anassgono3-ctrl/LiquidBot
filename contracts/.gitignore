@@ -3,6 +3,10 @@ cache/
 artifacts/
 typechain-types/
 
+# Solc build artifacts
+*.abi
+*.bin
+
 # Node
 node_modules/
 package-lock.json
