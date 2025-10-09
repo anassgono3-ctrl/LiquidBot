@@ -1,0 +1,18 @@
+{
+  "name": "liquidbot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LiquidBot - Aave V3 Base Liquidation Protection Service",
+  "license": "MIT",
+  "workspaces": [
+    "backend",
+    "contracts"
+  ],
+  "scripts": {
+    "contracts:build": "cd contracts && npm run build",
+    "contracts:test": "cd contracts && npm run test",
+    "contracts:test:fork": "cd contracts && npm run test:fork",
+    "test": "cd backend && npm test",
+    "test:all": "npm run contracts:test && npm run test"
+  }
+}

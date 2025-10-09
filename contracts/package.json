@@ -5,13 +5,18 @@
   "description": "Smart contracts for LiquidBot liquidation executor",
   "license": "MIT",
   "scripts": {
-    "build:contracts": "hardhat compile",
-    "test:contracts": "hardhat test",
+    "build": "hardhat compile",
+    "test": "hardhat test test/LiquidationExecutor.test.ts test/LiquidationExecutor.unit.test.ts",
+    "test:fork": "hardhat test test/LiquidationExecutor.fork.test.ts",
+    "contracts:build": "hardhat compile",
+    "contracts:test": "hardhat test test/LiquidationExecutor.test.ts test/LiquidationExecutor.unit.test.ts",
+    "contracts:test:fork": "hardhat test test/LiquidationExecutor.fork.test.ts",
     "deploy:executor": "hardhat run scripts/deploy-executor.ts --network base"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
     "@types/node": "^20.16.5",
+    "dotenv": "^17.2.3",
     "hardhat": "^2.19.5",
     "solc": "^0.8.19",
     "ts-node": "^10.9.2",
