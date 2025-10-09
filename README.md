@@ -161,6 +161,28 @@ npm run build
 npm test
 ```
 
+### Environment Files
+
+The project uses separate environment files for backend and contracts:
+
+#### Backend Environment (`backend/.env`)
+Contains service configuration, API keys, execution settings, and monitoring parameters. Copy from `backend/.env.example`:
+```bash
+cd backend
+cp .env.example .env
+# Edit .env with your configuration
+```
+
+#### Contracts Environment (`contracts/.env`)
+Contains deployment configuration, private keys, and RPC URLs. Copy from `contracts/.env.example`:
+```bash
+cd contracts
+cp .env.example .env
+# Edit .env with your deployment settings
+```
+
+**Note**: The Hardhat config will first try to load `contracts/.env`, then fallback to `backend/.env` if variables are not found. This allows sharing common variables while keeping deployment-specific settings separate.
+
 ## Execution (Scaffold)
 
 The bot includes an **opt-in execution pipeline scaffold** with MEV/gas controls and risk management. This is a safe framework for future liquidation execution — **disabled by default** and currently in dry-run mode.
@@ -311,9 +333,11 @@ EXECUTION_PRIVATE_KEY=0x...your_private_key
 RPC_URL=https://mainnet.base.org
 CHAIN_ID=8453
 
-# 1inch API (required for swaps)
-ONEINCH_API_KEY=your_1inch_api_key_here
-ONEINCH_BASE_URL=https://api.1inch.dev/swap/v6.0/8453
+# 1inch API Configuration
+# Mode 'io' uses public API (no key required), 'dev' uses API key
+ONEINCH_API_MODE=io
+ONEINCH_BASE_URL=https://api.1inch.io/v5.0/8453
+# ONEINCH_API_KEY=your_1inch_api_key_here  # Only needed for dev mode
 
 # Execution Settings
 MAX_SLIPPAGE_BPS=100                 # 1% slippage tolerance
@@ -323,6 +347,8 @@ CLOSE_FACTOR_MODE=auto               # auto or fixed (50%)
 EXECUTION_ENABLED=true
 DRY_RUN_EXECUTION=false              # ⚠️ Set to false only when ready!
 ```
+
+**Note**: By default, the service uses the 1inch public API (v5) which doesn't require an API key. For high-volume production use, you can switch to `ONEINCH_API_MODE=dev` with a 1inch developer API key.
 
 #### 3. Whitelist Assets
 
@@ -446,11 +472,42 @@ The test suite validates:
 | `EXECUTION_PRIVATE_KEY` | - | Private key for signing txs |
 | `RPC_URL` | - | Base RPC endpoint |
 | `CHAIN_ID` | 8453 | Base chain ID |
-| `ONEINCH_API_KEY` | - | 1inch API key |
-| `ONEINCH_BASE_URL` | `https://api.1inch.dev/swap/v6.0/8453` | 1inch API URL |
+| `ONEINCH_API_MODE` | io | 1inch API mode: `io` (public v5) or `dev` (v6 with key) |
+| `ONEINCH_API_KEY` | - | 1inch API key (required only for dev mode) |
+| `ONEINCH_BASE_URL` | `https://api.1inch.io/v5.0/8453` | 1inch API URL |
 | `MAX_SLIPPAGE_BPS` | 100 | Max slippage (1%) |
 | `CLOSE_FACTOR_MODE` | auto | Close factor: auto or fixed |
 | `PRIVATE_BUNDLE_RPC` | - | Optional MEV relay URL |
+
+### 1inch API Dual-Mode Support
+
+The service supports two 1inch API modes:
+
+#### Public API Mode (io) - Default
+- **URL**: `https://api.1inch.io/v5.0/8453`
+- **Authentication**: None required
+- **Parameters**: `fromTokenAddress`, `toTokenAddress`, `amount`, `slippage`
+- **Best for**: Development, testing, low-volume production use
+- **Configuration**:
+  ```bash
+  ONEINCH_API_MODE=io
+  ONEINCH_BASE_URL=https://api.1inch.io/v5.0/8453
+  # ONEINCH_API_KEY not required
+  ```
+
+#### Developer API Mode (dev)
+- **URL**: `https://api.1inch.dev/swap/v6.0/8453`
+- **Authentication**: Required (Bearer token)
+- **Parameters**: `src`, `dst`, `amount`
+- **Best for**: High-volume production use with API key
+- **Configuration**:
+  ```bash
+  ONEINCH_API_MODE=dev
+  ONEINCH_BASE_URL=https://api.1inch.dev/swap/v6.0/8453
+  ONEINCH_API_KEY=your_api_key_here
+  ```
+
+**Auto-detection**: If `ONEINCH_API_MODE` is not set, the service auto-detects the mode based on the URL domain (`api.1inch.dev` → `dev`, `api.1inch.io` → `io`).
 
 ### Notes
 
@@ -458,6 +515,7 @@ The test suite validates:
 - Close factor auto mode uses full debt amount from opportunity
 - Close factor fixed mode uses 50% of total debt
 - Private bundle RPC support is a placeholder (not fully implemented)
+- Scanner limit (`AT_RISK_SCAN_LIMIT`) is automatically clamped to a maximum of 200 users per poll
 - 1inch API key can be obtained from https://portal.1inch.dev/
 - Always test in dry-run mode first before enabling real execution
 
