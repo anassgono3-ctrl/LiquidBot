@@ -73,14 +73,15 @@ if (config.atRiskScanLimit > 0) {
       warnThreshold: config.atRiskWarnThreshold,
       liqThreshold: config.atRiskLiqThreshold,
       dustEpsilon: config.atRiskDustEpsilon,
-      notifyWarn: config.atRiskNotifyWarn
+      notifyWarn: config.atRiskNotifyWarn,
+      notifyCritical: config.atRiskNotifyCritical
     },
     notificationService
   );
   logger.info(
     `[at-risk-scanner] Initialized with limit=${config.atRiskScanLimit} ` +
     `warnThreshold=${config.atRiskWarnThreshold} liqThreshold=${config.atRiskLiqThreshold} ` +
-    `notifyWarn=${config.atRiskNotifyWarn}`
+    `notifyWarn=${config.atRiskNotifyWarn} notifyCritical=${config.atRiskNotifyCritical}`
   );
 } else {
   logger.info('[at-risk-scanner] Disabled (AT_RISK_SCAN_LIMIT=0)');

@@ -25,7 +25,7 @@ describe('HealthCalculator', () => {
               reserveLiquidationThreshold: 8500, // 85%
               usageAsCollateralEnabled: true,
               price: {
-                priceInEth: '0.0005', // ~$2000 ETH price
+                priceInEth: '500000000000000', // ~$2000 ETH price
               },
             },
           },
@@ -55,7 +55,7 @@ describe('HealthCalculator', () => {
               reserveLiquidationThreshold: 8500, // 85%
               usageAsCollateralEnabled: true,
               price: {
-                priceInEth: '0.0005',
+                priceInEth: '500000000000000',
               },
             },
           },
@@ -90,7 +90,7 @@ describe('HealthCalculator', () => {
               reserveLiquidationThreshold: 8500, // 85%
               usageAsCollateralEnabled: true,
               price: {
-                priceInEth: '0.0005',
+                priceInEth: '500000000000000',
               },
             },
           },
@@ -124,7 +124,7 @@ describe('HealthCalculator', () => {
               decimals: 6,
               reserveLiquidationThreshold: 8500,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '0.0005' },
+              price: { priceInEth: '500000000000000' },
             },
           },
           {
@@ -138,7 +138,7 @@ describe('HealthCalculator', () => {
               decimals: 18,
               reserveLiquidationThreshold: 8000,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '1' },
+              price: { priceInEth: '1000000000000000000' },
             },
           },
         ],
@@ -179,7 +179,7 @@ describe('HealthCalculator', () => {
                 decimals: 6,
                 reserveLiquidationThreshold: 8500,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '0.0005' },
+                price: { priceInEth: '500000000000000' },
               },
             },
           ],

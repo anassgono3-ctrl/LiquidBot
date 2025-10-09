@@ -20,6 +20,7 @@ export interface AtRiskScanConfig {
   liqThreshold: number;
   dustEpsilon: number;
   notifyWarn: boolean;
+  notifyCritical?: boolean; // Optional, defaults to true
 }
 
 export interface AtRiskScanResult {
@@ -138,16 +139,19 @@ export class AtRiskScanner {
 
   /**
    * Send notifications for at-risk users.
-   * Always notifies CRITICAL users. WARN users only if config.notifyWarn is true.
+   * Notifies CRITICAL users if config.notifyCritical is true (default).
+   * Notifies WARN users only if config.notifyWarn is true.
    */
   async notifyAtRiskUsers(users: AtRiskUser[]): Promise<void> {
     if (!this.notificationService) {
       return;
     }
 
+    const notifyCritical = this.config.notifyCritical !== false; // Default to true
+
     for (const user of users) {
       const shouldNotify = 
-        user.classification === 'CRITICAL' || 
+        (user.classification === 'CRITICAL' && notifyCritical) || 
         (user.classification === 'WARN' && this.config.notifyWarn);
 
       if (shouldNotify && user.healthFactor !== null) {

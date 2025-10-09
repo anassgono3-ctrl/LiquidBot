@@ -66,7 +66,7 @@ describe('HealthFactorResolver', () => {
               reserveLiquidationThreshold: 8250, // 82.5%
               usageAsCollateralEnabled: true,
               price: {
-                priceInEth: '1.0'
+                priceInEth: '1000000000000000000'
               }
             }
           }
@@ -99,7 +99,7 @@ describe('HealthFactorResolver', () => {
               reserveLiquidationThreshold: 8250,
               usageAsCollateralEnabled: true,
               price: {
-                priceInEth: '1.0'
+                priceInEth: '1000000000000000000'
               }
             }
           }
@@ -131,7 +131,7 @@ describe('HealthFactorResolver', () => {
                 decimals: 18,
                 reserveLiquidationThreshold: 8000,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '1.0' }
+                price: { priceInEth: '1000000000000000000' }
               }
             }
           ]
@@ -149,7 +149,7 @@ describe('HealthFactorResolver', () => {
                 decimals: 18,
                 reserveLiquidationThreshold: 8000,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '1.0' }
+                price: { priceInEth: '1000000000000000000' }
               }
             }
           ]
@@ -167,7 +167,7 @@ describe('HealthFactorResolver', () => {
                 decimals: 18,
                 reserveLiquidationThreshold: 8000,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '1.0' }
+                price: { priceInEth: '1000000000000000000' }
               }
             }
           ]
@@ -202,7 +202,7 @@ describe('HealthFactorResolver', () => {
               decimals: 18,
               reserveLiquidationThreshold: 8000,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '1.0' }
+              price: { priceInEth: '1000000000000000000' }
             }
           }
         ]
@@ -245,7 +245,7 @@ describe('HealthFactorResolver', () => {
               decimals: 18,
               reserveLiquidationThreshold: 8000,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '1.0' }
+              price: { priceInEth: '1000000000000000000' }
             }
           }
         ]
@@ -336,7 +336,7 @@ describe('HealthFactorResolver', () => {
               decimals: 18,
               reserveLiquidationThreshold: 8000,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '1.0' }
+              price: { priceInEth: '1000000000000000000' }
             }
           }
         ]
