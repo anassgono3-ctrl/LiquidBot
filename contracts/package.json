@@ -8,10 +8,14 @@
     "build": "hardhat compile",
     "test": "hardhat test test/LiquidationExecutor.test.ts test/LiquidationExecutor.unit.test.ts",
     "test:fork": "hardhat test test/LiquidationExecutor.fork.test.ts",
+    "test:all": "npm run test && npm run test:fork",
     "contracts:build": "hardhat compile",
     "contracts:test": "hardhat test test/LiquidationExecutor.test.ts test/LiquidationExecutor.unit.test.ts",
     "contracts:test:fork": "hardhat test test/LiquidationExecutor.fork.test.ts",
-    "deploy:executor": "hardhat run scripts/deploy-executor.ts --network base"
+    "deploy:executor": "hardhat run scripts/deploy-executor.ts --network base",
+    "e2e:local": "hardhat run scripts/e2e-local.ts",
+    "e2e:fork": "hardhat run scripts/e2e-fork.ts --network hardhat",
+    "verify:executor": "ts-node scripts/verify-executor.ts"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^4.0.0",
