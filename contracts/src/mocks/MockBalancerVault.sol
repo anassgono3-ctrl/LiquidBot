@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
-import "../../src/interfaces/IFlashLoanRecipient.sol";
+import "../interfaces/IFlashLoanRecipient.sol";
 
 /**
  * @title MockBalancerVault
