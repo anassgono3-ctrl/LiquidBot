@@ -1,5 +1,6 @@
 import { ethers } from "hardhat";
 import { expect } from "chai";
+import * as hre from "hardhat";
 
 /**
  * E2E Local Test Script
@@ -14,6 +15,12 @@ async function main() {
   console.log("=".repeat(80));
   console.log("E2E Local Test: LiquidationExecutor Full Flow");
   console.log("=".repeat(80));
+  console.log();
+
+  // Ensure contracts are compiled
+  console.log("🔨 Compiling contracts...");
+  await hre.run("compile");
+  console.log("  ✓ Compilation complete");
   console.log();
 
   // Deploy mock contracts
