@@ -319,6 +319,212 @@ backend/
         └── execution.test.ts            # End-to-end execution tests
 ```
 
+### End-to-End Testing
+
+LiquidBot includes comprehensive E2E test scripts that validate the full liquidation pipeline from start to finish.
+
+#### Local E2E Test (Recommended for Development)
+
+The local E2E test runs a complete liquidation flow on a local Hardhat network with mocks. This is **deterministic** and requires no external dependencies.
+
+**What it tests:**
+- Deploys mock tokens, protocols (Balancer, Aave, 1inch), and LiquidationExecutor
+- Creates a liquidatable position with funded mocks
+- Executes full flow: flash loan → liquidate → swap → repay → profit
+- Asserts: `LiquidationExecuted` event emitted, profit equals expected (within 1 wei), flash loan repaid
+
+**Run:**
+```bash
+npm run e2e:local
+```
+
+Or from contracts directory:
+```bash
+cd contracts
+npm run e2e:local
+```
+
+**Expected output:**
+```
+🧪 Starting Local E2E Liquidation Test
+...
+🎉 E2E Local Test PASSED
+```
+
+#### Fork E2E Test (Optional)
+
+The fork E2E test validates executor deployment and call path preparation on a Base mainnet fork. It **auto-skips** if `RPC_URL` is not configured.
+
+**What it tests:**
+- Verifies Base protocol addresses (Balancer, Aave, 1inch) are valid contracts
+- Deploys executor on Base fork
+- Validates configuration, whitelist operations, pause/unpause
+- Validates call path preparation (no actual execution)
+
+**Run:**
+```bash
+export RPC_URL=https://mainnet.base.org  # or your Base RPC URL
+npm run e2e:fork
+```
+
+Or from contracts directory:
+```bash
+cd contracts
+export RPC_URL=https://mainnet.base.org
+npm run e2e:fork
+```
+
+**Expected output:**
+```
+🔱 Starting Base Fork E2E Test
+...
+🎉 Base Fork E2E Test PASSED
+```
+
+**Note:** Skips gracefully if `RPC_URL` is not set.
+
+#### Backend Execution Harness
+
+Tests the full backend execution pipeline: loads fixture opportunity, fetches 1inch v6 quote (mockable), encodes parameters, and calls executor.
+
+**What it tests:**
+- Mocked 1inch quote generation
+- Parameter encoding for `initiateLiquidation`
+- MinOut propagation from quote to executor
+- Revert bubbling on insufficient output
+- Profit realization
+
+**Run (local with mocks):**
+```bash
+npm run e2e:backend
+```
+
+**Run (dry-run mode):**
+```bash
+npm run e2e:backend -- --dry
+```
+
+Or from contracts directory:
+```bash
+cd contracts
+npm run e2e:backend           # Local execution
+npm run e2e:backend -- --dry  # Dry-run (log only)
+```
+
+**Expected output:**
+```
+🔧 Backend Execution Harness
+...
+🎉 Backend Execution Harness PASSED
+```
+
+### Deployment and Verification Helpers
+
+#### Deploy Executor
+
+Deploys `LiquidationExecutor` to Base mainnet with production addresses.
+
+**Usage:**
+```bash
+# Set environment variables
+export RPC_URL=https://mainnet.base.org
+export EXECUTION_PRIVATE_KEY=0x...your_private_key
+
+# Deploy
+npm run deploy:executor -- --network base
+```
+
+Or from contracts directory:
+```bash
+cd contracts
+npm run deploy:executor -- --network base
+```
+
+**Output:**
+```
+LiquidationExecutor deployed to: 0x...
+Balancer Vault: 0xBA12222222228d8Ba445958a75a0704d566BF2C8
+Aave Pool: 0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
+1inch Router: 0x1111111254EEB25477B68fb85Ed929f73A960582
+Payout Default: 0x...
+
+Next steps:
+1. Set EXECUTOR_ADDRESS=0x... in backend .env
+2. Whitelist assets using setWhitelist(asset, true)
+3. Fund the executor with gas tokens
+```
+
+#### Verify Executor
+
+Verifies the deployed executor contract on Basescan.
+
+**Usage:**
+```bash
+# Set API key
+export BASESCAN_API_KEY=your_api_key_here
+
+# Verify with default constructor args (Base addresses)
+npm run verify:executor -- --network base --address 0x...
+
+# Verify with custom constructor args
+npm run verify:executor -- --network base --address 0x... --payout 0x...
+```
+
+Or from contracts directory:
+```bash
+cd contracts
+npm run verify:executor -- --network base --address 0x...
+```
+
+**Optional arguments:**
+- `--address 0x...`: Deployed contract address (required)
+- `--vault 0x...`: Balancer Vault address (default: Base address)
+- `--pool 0x...`: Aave Pool address (default: Base address)
+- `--router 0x...`: 1inch Router address (default: Base address)
+- `--payout 0x...`: Payout address (default: assumes deployer)
+
+**Output:**
+```
+🔍 Verifying LiquidationExecutor Contract
+...
+🎉 Contract Verified Successfully!
+View on Basescan: https://basescan.org/address/0x...#code
+```
+
+### Required Environment Variables for E2E & Deployment
+
+| Variable | Required For | Description |
+|----------|-------------|-------------|
+| `RPC_URL` | Fork tests, deployment | Base RPC endpoint (e.g., Alchemy, Infura) |
+| `EXECUTION_PRIVATE_KEY` | Deployment | Private key for deployment account |
+| `BASESCAN_API_KEY` | Verification | Basescan API key for contract verification |
+| `ONEINCH_API_KEY` | Backend harness (optional) | 1inch API key for real quotes |
+
+**Get API keys:**
+- Base RPC: [Alchemy](https://www.alchemy.com/), [Infura](https://infura.io/), [QuickNode](https://www.quicknode.com/)
+- Basescan: [basescan.org/myapikey](https://basescan.org/myapikey)
+- 1inch: [portal.1inch.dev](https://portal.1inch.dev/)
+
+### E2E Test Expectations
+
+✅ **Local E2E (`e2e:local`):**
+- Always runs (no external dependencies)
+- Deterministic results
+- ~30 seconds execution time
+- All assertions pass (profit, repayment, events)
+
+✅ **Fork E2E (`e2e:fork`):**
+- Skips if `RPC_URL` not set (clean skip, not error)
+- Validates Base protocol addresses
+- No real liquidations executed
+- ~60 seconds execution time
+
+✅ **Backend Harness (`e2e:backend`):**
+- Local mode: full execution with mocks
+- Dry-run mode: parameter logging only
+- Validates minOut propagation
+- Tests revert bubbling
+
 ## Execution (Scaffold)
 
 The bot includes an **opt-in execution pipeline scaffold** with MEV/gas controls and risk management. This is a safe framework for future liquidation execution — **disabled by default** and currently in dry-run mode.
