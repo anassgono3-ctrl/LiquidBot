@@ -33,7 +33,7 @@ async function main() {
 
   // Deploy mock tokens
   console.log("  Deploying MockERC20 tokens...");
-  const MockERC20 = await ethers.getContractFactory("MockERC20");
+  const MockERC20 = await ethers.getContractFactory("src/mocks/MockERC20.sol:MockERC20");
   const collateralToken = await MockERC20.deploy("Wrapped Ether", "WETH", 18);
   await collateralToken.waitForDeployment();
   const debtToken = await MockERC20.deploy("USD Coin", "USDC", 6);

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.19;
 
+import "../../src/interfaces/IERC20.sol";
+
 /**
  * @title MockAavePool
  * @notice Mock Aave V3 Pool for testing liquidations
@@ -22,32 +24,25 @@ contract MockAavePool {
      * @notice Mock liquidation call
      * @param collateralAsset Address of collateral asset
      * @param debtAsset Address of debt asset
-     * @param user Address of borrower (unused in mock)
      * @param debtToCover Amount of debt to cover
-     * @param receiveAToken Whether to receive aTokens (unused in mock)
      * @return Amount of collateral received
      */
     function liquidationCall(
         address collateralAsset,
         address debtAsset,
-        address user,
+        address /* user */,
         uint256 debtToCover,
-        bool receiveAToken
+        bool /* receiveAToken */
     ) external returns (uint256) {
         // Transfer debt from liquidator to pool
-        MockERC20(debtAsset).transferFrom(msg.sender, address(this), debtToCover);
+        IERC20(debtAsset).transferFrom(msg.sender, address(this), debtToCover);
         
         // Calculate collateral to give (debt + bonus)
         uint256 collateralAmount = debtToCover + (debtToCover * liquidationBonus / 10000);
         
         // Transfer collateral to liquidator
-        MockERC20(collateralAsset).transfer(msg.sender, collateralAmount);
+        IERC20(collateralAsset).transfer(msg.sender, collateralAmount);
         
         return collateralAmount;
     }
-}
-
-interface MockERC20 {
-    function transfer(address to, uint256 amount) external returns (bool);
-    function transferFrom(address from, address to, uint256 amount) external returns (bool);
 }
