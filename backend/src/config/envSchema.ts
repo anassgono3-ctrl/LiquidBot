@@ -90,7 +90,17 @@ export const rawEnvSchema = z.object({
   MIN_PROFIT_AFTER_GAS_USD: z.string().optional(),
   MAX_POSITION_SIZE_USD: z.string().optional(),
   DAILY_LOSS_LIMIT_USD: z.string().optional(),
-  BLACKLISTED_TOKENS: z.string().optional()
+  BLACKLISTED_TOKENS: z.string().optional(),
+
+  // On-chain executor
+  EXECUTOR_ADDRESS: z.string().optional(),
+  EXECUTION_PRIVATE_KEY: z.string().optional(),
+  RPC_URL: z.string().optional(),
+  CHAIN_ID: z.string().optional(),
+  ONEINCH_API_KEY: z.string().optional(),
+  ONEINCH_BASE_URL: z.string().optional(),
+  MAX_SLIPPAGE_BPS: z.string().optional(),
+  CLOSE_FACTOR_MODE: z.string().optional()
 });
 
 export const env = (() => {
@@ -184,6 +194,16 @@ export const env = (() => {
     blacklistedTokens: (parsed.BLACKLISTED_TOKENS || '')
       .split(',')
       .map(t => t.trim().toUpperCase())
-      .filter(t => t.length > 0)
+      .filter(t => t.length > 0),
+
+    // On-chain executor
+    executorAddress: parsed.EXECUTOR_ADDRESS,
+    executionPrivateKey: parsed.EXECUTION_PRIVATE_KEY,
+    rpcUrl: parsed.RPC_URL,
+    chainId: Number(parsed.CHAIN_ID || 8453),
+    oneInchApiKey: parsed.ONEINCH_API_KEY,
+    oneInchBaseUrl: parsed.ONEINCH_BASE_URL || 'https://api.1inch.dev/swap/v6.0/8453',
+    maxSlippageBps: Number(parsed.MAX_SLIPPAGE_BPS || 100),
+    closeFactorMode: parsed.CLOSE_FACTOR_MODE || 'auto'
   };
 })();

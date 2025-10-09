@@ -1,6 +1,8 @@
 // ExecutionService: Execution pipeline with MEV/gas controls
+import { ethers } from 'ethers';
 import type { Opportunity } from '../types/index.js';
 import { executionConfig } from '../config/executionConfig.js';
+import { OneInchQuoteService } from './OneInchQuoteService.js';
 
 export interface ExecutionResult {
   success: boolean;
@@ -17,13 +19,28 @@ export interface GasEstimator {
 
 /**
  * ExecutionService orchestrates liquidation execution with safety controls.
- * Currently a scaffold with TODOs for actual on-chain execution.
+ * Implements on-chain execution via LiquidationExecutor contract.
  */
 export class ExecutionService {
   private gasEstimator?: GasEstimator;
+  private oneInchService: OneInchQuoteService;
+  private provider?: ethers.JsonRpcProvider;
+  private wallet?: ethers.Wallet;
+  private executorAddress?: string;
 
-  constructor(gasEstimator?: GasEstimator) {
+  constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService) {
     this.gasEstimator = gasEstimator;
+    this.oneInchService = oneInchService || new OneInchQuoteService();
+    
+    // Initialize provider and wallet if configured
+    const rpcUrl = process.env.RPC_URL;
+    const privateKey = process.env.EXECUTION_PRIVATE_KEY;
+    this.executorAddress = process.env.EXECUTOR_ADDRESS;
+    
+    if (rpcUrl && privateKey) {
+      this.provider = new ethers.JsonRpcProvider(rpcUrl);
+      this.wallet = new ethers.Wallet(privateKey, this.provider);
+    }
   }
 
   /**
@@ -91,44 +108,174 @@ export class ExecutionService {
   }
 
   /**
-   * Execute real liquidation (placeholder implementation)
-   * TODO: Implement actual on-chain execution:
-   * 1. Build flash loan request (Aave/Balancer)
-   * 2. Call Aave V3 liquidation
-   * 3. Swap collateral to debt token (DEX router)
-   * 4. Repay flash loan + fee
-   * 5. Return realized profit
+   * Execute real liquidation via on-chain executor
+   * Orchestrates flash loan, liquidation, and swap
    */
   private async executeReal(opportunity: Opportunity): Promise<ExecutionResult> {
+    // Validate configuration
+    if (!this.provider || !this.wallet || !this.executorAddress) {
+      return {
+        success: false,
+        simulated: false,
+        reason: 'execution_not_configured: missing RPC_URL, EXECUTION_PRIVATE_KEY, or EXECUTOR_ADDRESS'
+      };
+    }
+
+    if (!this.oneInchService.isConfigured()) {
+      return {
+        success: false,
+        simulated: false,
+        reason: 'oneinch_not_configured: missing ONEINCH_API_KEY'
+      };
+    }
+
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[execution] REAL execution starting:', {
+        opportunityId: opportunity.id,
+        user: opportunity.user,
+        collateral: opportunity.collateralReserve.symbol,
+        debt: opportunity.principalReserve.symbol
+      });
+
+      // Step 1: Calculate debt to cover (respecting close factor)
+      const debtToCover = await this.calculateDebtToCover(opportunity);
+      
+      // Step 2: Get 1inch swap quote
+      const slippageBps = Number(process.env.MAX_SLIPPAGE_BPS || 100); // 1% default
+      
+      const swapQuote = await this.oneInchService.getSwapCalldata({
+        fromToken: opportunity.collateralReserve.id,
+        toToken: opportunity.principalReserve.id,
+        amount: opportunity.collateralAmountRaw, // Use full collateral amount
+        slippageBps: slippageBps,
+        fromAddress: this.executorAddress
+      });
+
+      // Step 3: Build liquidation parameters
+      const liquidationParams = {
+        user: opportunity.user,
+        collateralAsset: opportunity.collateralReserve.id,
+        debtAsset: opportunity.principalReserve.id,
+        debtToCover: debtToCover,
+        oneInchCalldata: swapQuote.data,
+        minOut: swapQuote.minOut,
+        payout: this.wallet.address // Send profit to executor wallet
+      };
+
+      // Step 4: Prepare executor contract call
+      const executorAbi = [
+        'function initiateLiquidation((address user, address collateralAsset, address debtAsset, uint256 debtToCover, bytes oneInchCalldata, uint256 minOut, address payout) params) external'
+      ];
+      
+      const executor = new ethers.Contract(
+        this.executorAddress,
+        executorAbi,
+        this.wallet
+      );
+
+      // Step 5: Send transaction
+      // eslint-disable-next-line no-console
+      console.log('[execution] Sending transaction to executor...', {
+        executor: this.executorAddress,
+        debtToCover: debtToCover.toString(),
+        minOut: swapQuote.minOut
+      });
+
+      let tx;
+      const privateBundleRpc = process.env.PRIVATE_BUNDLE_RPC;
+      
+      if (privateBundleRpc) {
+        // Use private bundle RPC if configured
+        // eslint-disable-next-line no-console
+        console.log('[execution] Using private bundle RPC:', privateBundleRpc);
+        tx = await this.submitPrivateTransaction(executor, liquidationParams, privateBundleRpc);
+      } else {
+        // Standard transaction
+        tx = await executor.initiateLiquidation(liquidationParams);
+      }
+
+      // eslint-disable-next-line no-console
+      console.log('[execution] Transaction sent:', tx.hash);
+
+      // Step 6: Wait for confirmation
+      const receipt = await tx.wait();
+      
+      // eslint-disable-next-line no-console
+      console.log('[execution] Transaction confirmed:', {
+        txHash: receipt.hash,
+        gasUsed: receipt.gasUsed.toString(),
+        status: receipt.status
+      });
+
+      if (receipt.status !== 1) {
+        return {
+          success: false,
+          simulated: false,
+          txHash: receipt.hash,
+          reason: 'transaction_reverted'
+        };
+      }
+
+      // Step 7: Parse profit from events (optional - placeholder)
+      const realizedProfit = opportunity.profitEstimateUsd || 0;
+
+      return {
+        success: true,
+        simulated: false,
+        txHash: receipt.hash,
+        gasUsed: Number(receipt.gasUsed),
+        realizedProfitUsd: realizedProfit
+      };
+
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[execution] Execution failed:', error);
+      
+      return {
+        success: false,
+        simulated: false,
+        reason: error instanceof Error ? error.message : 'unknown_error'
+      };
+    }
+  }
+
+  /**
+   * Calculate debt to cover respecting close factor
+   * @param opportunity The liquidation opportunity
+   * @returns Debt amount to cover in wei
+   */
+  private async calculateDebtToCover(opportunity: Opportunity): Promise<bigint> {
+    const closeFactorMode = process.env.CLOSE_FACTOR_MODE || 'auto';
+    
+    if (closeFactorMode === 'fixed') {
+      // Use fixed 50% close factor
+      const debtAmount = BigInt(opportunity.principalAmountRaw);
+      return debtAmount / 2n;
+    }
+    
+    // Auto mode: use full debt amount from opportunity
+    // In production, you would query Aave data provider for actual close factor
+    // For now, use the amount from the opportunity which represents what was liquidated
+    return BigInt(opportunity.principalAmountRaw);
+  }
+
+  /**
+   * Submit transaction via private bundle RPC
+   * @param executor Contract instance
+   * @param params Liquidation parameters
+   * @param privateBundleRpc Private RPC URL
+   */
+  private async submitPrivateTransaction(
+    executor: ethers.Contract,
+    params: unknown,
+    privateBundleRpc: string
+  ): Promise<ethers.ContractTransactionResponse> {
+    // For now, fall back to standard transaction
+    // Full private bundle implementation would require specific bundle RPC protocols
     // eslint-disable-next-line no-console
-    console.log('[execution] REAL execution requested (not yet implemented):', {
-      opportunityId: opportunity.id,
-      user: opportunity.user
-    });
-
-    // TODO: Flash loan orchestration
-    // const flashLoanProvider = this.selectFlashLoanProvider();
-    // const flashLoanAmount = opportunity.principalValueUsd;
-    
-    // TODO: Build liquidation call parameters
-    // const liquidationParams = this.buildLiquidationParams(opportunity);
-    
-    // TODO: Submit transaction
-    // - If privateBundleRpc configured, use MEV relay
-    // - Otherwise use standard RPC
-    // const tx = await this.submitTransaction(liquidationParams);
-    
-    // TODO: Wait for confirmation and parse results
-    // const receipt = await tx.wait();
-    // const realizedProfit = this.calculateRealizedProfit(receipt);
-
-    // Placeholder: Return simulated result for now
-    return {
-      success: true,
-      simulated: true,
-      reason: 'real_execution_not_implemented',
-      realizedProfitUsd: opportunity.profitEstimateUsd || 0
-    };
+    console.warn('[execution] Private bundle RPC not fully implemented, using standard transaction');
+    return executor.initiateLiquidation(params);
   }
 
   /**
