@@ -19,6 +19,8 @@ import { OpportunityService } from "./services/OpportunityService.js";
 import { NotificationService } from "./services/NotificationService.js";
 import { HealthMonitor } from "./services/HealthMonitor.js";
 import { OnDemandHealthFactor } from "./services/OnDemandHealthFactor.js";
+import { ExecutionService } from "./services/ExecutionService.js";
+import { RiskManager } from "./services/RiskManager.js";
 import { HealthCalculator } from "./services/HealthCalculator.js";
 import { AtRiskScanner } from "./services/AtRiskScanner.js";
 
@@ -46,6 +48,10 @@ const subgraphService = new SubgraphService();
 const opportunityService = new OpportunityService();
 const notificationService = new NotificationService();
 const healthMonitor = new HealthMonitor(subgraphService);
+
+// Initialize execution scaffold
+const executionService = new ExecutionService();
+const riskManager = new RiskManager();
 
 // Initialize on-demand health factor service (only when not mocking)
 let onDemandHealthFactor: OnDemandHealthFactor | undefined;
@@ -243,6 +249,44 @@ if (!config.useMockSubgraph) {
         
         if (profitableOps.length > 0) {
           logger.info(`[opportunity] Found ${profitableOps.length} profitable opportunities (profit >= $${config.profitMinUsd})`);
+        }
+
+        // Execution pipeline (scaffold - disabled by default)
+        // Note: This does NOT auto-execute from scanner - requires explicit enablement
+        for (const op of profitableOps) {
+          try {
+            // Calculate after-gas profit
+            const gasCostUsd = config.gasCostUsd;
+            const afterGasProfit = (op.profitEstimateUsd || 0) - gasCostUsd;
+
+            // Apply risk checks
+            const riskCheck = riskManager.canExecute(op, afterGasProfit);
+            if (!riskCheck.allowed) {
+              logger.info(`[execution] Skipped opportunity ${op.id}: ${riskCheck.reason}`);
+              continue;
+            }
+
+            // Execute (will be simulated/skipped based on config)
+            const result = await executionService.execute(op);
+            
+            if (result.success) {
+              logger.info(`[execution] Executed opportunity ${op.id}:`, {
+                simulated: result.simulated,
+                reason: result.reason,
+                txHash: result.txHash,
+                realizedProfitUsd: result.realizedProfitUsd
+              });
+              
+              // Record realized P&L if real execution
+              if (!result.simulated && result.realizedProfitUsd !== undefined) {
+                riskManager.recordRealizedProfit(result.realizedProfitUsd);
+              }
+            } else {
+              logger.info(`[execution] Skipped opportunity ${op.id}: ${result.reason}`);
+            }
+          } catch (err) {
+            logger.error(`[execution] Failed to execute opportunity ${op.id}:`, err);
+          }
         }
       } catch (err) {
         logger.error('[opportunity] Failed to process opportunities:', err);

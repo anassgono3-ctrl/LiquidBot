@@ -80,7 +80,17 @@ export const rawEnvSchema = z.object({
   AT_RISK_LIQ_THRESHOLD: z.string().optional(),
   AT_RISK_DUST_EPSILON: z.string().optional(),
   AT_RISK_NOTIFY_WARN: z.string().optional(),
-  AT_RISK_NOTIFY_CRITICAL: z.string().optional()
+  AT_RISK_NOTIFY_CRITICAL: z.string().optional(),
+
+  // Execution scaffold
+  EXECUTION_ENABLED: z.string().optional(),
+  DRY_RUN_EXECUTION: z.string().optional(),
+  PRIVATE_BUNDLE_RPC: z.string().optional(),
+  MAX_GAS_PRICE_GWEI: z.string().optional(),
+  MIN_PROFIT_AFTER_GAS_USD: z.string().optional(),
+  MAX_POSITION_SIZE_USD: z.string().optional(),
+  DAILY_LOSS_LIMIT_USD: z.string().optional(),
+  BLACKLISTED_TOKENS: z.string().optional()
 });
 
 export const env = (() => {
@@ -161,6 +171,19 @@ export const env = (() => {
     atRiskLiqThreshold: Number(parsed.AT_RISK_LIQ_THRESHOLD || 1.0),
     atRiskDustEpsilon: Number(parsed.AT_RISK_DUST_EPSILON || 1e-9),
     atRiskNotifyWarn: (parsed.AT_RISK_NOTIFY_WARN || 'false').toLowerCase() === 'true',
-    atRiskNotifyCritical: (parsed.AT_RISK_NOTIFY_CRITICAL || 'true').toLowerCase() === 'true'
+    atRiskNotifyCritical: (parsed.AT_RISK_NOTIFY_CRITICAL || 'true').toLowerCase() === 'true',
+
+    // Execution scaffold
+    executionEnabled: (parsed.EXECUTION_ENABLED || 'false').toLowerCase() === 'true',
+    dryRunExecution: (parsed.DRY_RUN_EXECUTION || 'true').toLowerCase() === 'true',
+    privateBundleRpc: parsed.PRIVATE_BUNDLE_RPC,
+    maxGasPriceGwei: Number(parsed.MAX_GAS_PRICE_GWEI || 50),
+    minProfitAfterGasUsd: Number(parsed.MIN_PROFIT_AFTER_GAS_USD || 10),
+    maxPositionSizeUsd: Number(parsed.MAX_POSITION_SIZE_USD || 5000),
+    dailyLossLimitUsd: Number(parsed.DAILY_LOSS_LIMIT_USD || 1000),
+    blacklistedTokens: (parsed.BLACKLISTED_TOKENS || '')
+      .split(',')
+      .map(t => t.trim().toUpperCase())
+      .filter(t => t.length > 0)
   };
 })();

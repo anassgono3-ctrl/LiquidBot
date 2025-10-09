@@ -161,6 +161,100 @@ npm run build
 npm test
 ```
 
+## Execution (Scaffold)
+
+The bot includes an **opt-in execution pipeline scaffold** with MEV/gas controls and risk management. This is a safe framework for future liquidation execution — **disabled by default** and currently in dry-run mode.
+
+### ⚠️ Safety First
+
+- **Execution is OFF by default**: `EXECUTION_ENABLED=false`
+- **Dry-run mode enabled by default**: `DRY_RUN_EXECUTION=true`
+- **No auto-execution from scanner**: Detection and execution are separate concerns
+- **Comprehensive risk controls**: Position limits, daily loss limits, blacklists, gas caps
+
+### How It Works
+
+When enabled, the execution pipeline:
+1. Takes profitable opportunities from the detection pipeline
+2. Applies risk management rules (blacklists, position size, profit threshold)
+3. Checks current gas price against configured cap
+4. In dry-run mode: logs simulated execution without broadcasting
+5. In real mode: executes liquidations (implementation pending)
+
+### Configuration
+
+Add to `.env`:
+
+```bash
+# Execution Controls (all optional - defaults are safe)
+EXECUTION_ENABLED=false              # Master switch (default: false)
+DRY_RUN_EXECUTION=true               # Simulate only (default: true)
+MAX_GAS_PRICE_GWEI=50                # Skip if gas too high (default: 50)
+MIN_PROFIT_AFTER_GAS_USD=10          # Min profit threshold (default: 10)
+
+# Risk Management
+MAX_POSITION_SIZE_USD=5000           # Per-liquidation cap (default: 5000)
+DAILY_LOSS_LIMIT_USD=1000            # Daily loss limit (default: 1000)
+BLACKLISTED_TOKENS=                  # Comma-separated, e.g., WBTC,XYZ
+
+# Optional MEV Protection
+PRIVATE_BUNDLE_RPC=                  # e.g., https://rpc.flashbots.net
+```
+
+### Enabling Execution (Staged Approach)
+
+**Stage 1: Dry-Run Testing**
+```bash
+EXECUTION_ENABLED=true
+DRY_RUN_EXECUTION=true
+```
+This logs execution decisions without broadcasting transactions. Monitor logs to verify logic.
+
+**Stage 2: Real Execution (Future)**
+```bash
+EXECUTION_ENABLED=true
+DRY_RUN_EXECUTION=false
+```
+⚠️ **Only enable when flash-loan implementation is complete**. Current implementation returns placeholder results.
+
+### Risk Controls
+
+The `RiskManager` enforces:
+- **Token blacklist**: Skip liquidations involving specific tokens
+- **Position size cap**: Reject liquidations exceeding `MAX_POSITION_SIZE_USD`
+- **After-gas profit threshold**: Only execute if profit ≥ `MIN_PROFIT_AFTER_GAS_USD`
+- **Daily loss limit**: Stop executing if daily losses exceed `DAILY_LOSS_LIMIT_USD`
+
+### MEV & Gas Controls
+
+The `ExecutionService`:
+- Checks current gas price and skips execution if above `MAX_GAS_PRICE_GWEI`
+- Supports private bundle submission via `PRIVATE_BUNDLE_RPC` (stub)
+- Defaults to dry-run simulation for safety
+
+### Implementation Status
+
+✅ **Complete (Scaffold)**
+- Risk management framework
+- Gas price gating
+- Configuration management
+- Dry-run simulation
+- Unit & integration tests
+
+⏳ **Pending (Future Work)**
+- Flash loan orchestration (Aave/Balancer)
+- Aave V3 liquidation call
+- DEX router integration for collateral swaps
+- Private bundle submission
+- On-chain simulation
+
+### Notes
+
+- `PROFIT_MIN_USD` gates profitable opportunity *detection*
+- `MIN_PROFIT_AFTER_GAS_USD` gates actual *execution*
+- Scanner continues detecting/notifying regardless of execution settings
+- All execution results are logged with structured output
+
 ## At-Risk Position Scanner
 
 The bot includes an at-risk scanner that proactively detects users approaching liquidation by computing health factors locally.
