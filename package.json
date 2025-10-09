@@ -12,6 +12,10 @@
     "contracts:build": "cd contracts && npm run build",
     "contracts:test": "cd contracts && npm run test",
     "contracts:test:fork": "cd contracts && npm run test:fork",
+    "contracts:e2e:local": "cd contracts && npm run e2e:local",
+    "contracts:e2e:fork": "cd contracts && npm run e2e:fork",
+    "contracts:verify": "cd contracts && npm run verify:executor",
+    "contracts:deploy": "cd contracts && npm run deploy:executor",
     "test": "cd backend && npm test",
     "test:all": "npm run contracts:test && npm run test"
   }

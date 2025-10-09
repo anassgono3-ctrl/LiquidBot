@@ -193,6 +193,22 @@ npm run contracts:test
 - ✅ Access control: Owner-only operations
 - ✅ Configuration management: Address setters with validation
 
+#### E2E Local Test (One-Command Full Flow)
+
+Run a complete end-to-end test with mock contracts:
+
+```bash
+cd contracts
+npm run e2e:local
+```
+
+This is the **recommended one-command test** for validating the entire liquidation system. It:
+- Deploys all mocks (Balancer Vault, Aave Pool, 1inch Router, ERC20 tokens)
+- Creates a liquidatable position with 5% liquidation bonus
+- Executes the full flow: flash loan → liquidation → swap → repay → profit
+- Asserts exact profit calculation, flash loan repayment, and payout transfer
+- ✅ No external dependencies or RPC required
+
 #### Fork Tests (Optional, Requires RPC)
 
 Fork tests run against a Base mainnet fork to validate protocol integrations. They **auto-skip** if `RPC_URL` is not configured.
@@ -213,6 +229,22 @@ npm run test:fork
 - ✅ Call path validation (without real liquidity)
 
 **Note:** Fork tests do NOT rely on real liquidity or execute actual liquidations. They only validate wiring and call paths.
+
+#### E2E Fork Test (Integration with Real Base Addresses)
+
+Validate call-path wiring with real Base protocol addresses:
+
+```bash
+cd contracts
+export RPC_URL=https://mainnet.base.org
+npm run e2e:fork
+```
+
+This script:
+- Deploys executor to a forked Base network
+- Verifies real protocol contracts exist at expected addresses
+- Tests configuration, whitelist, and pause functionality
+- Auto-skips if RPC_URL not configured
 
 ### Backend Tests
 
@@ -458,7 +490,33 @@ This deploys `LiquidationExecutor.sol` with the following addresses (Base):
 - Aave V3 Pool: `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5`
 - 1inch Router: `0x1111111254EEB25477B68fb85Ed929f73A960582`
 
-#### 2. Configure the Backend
+#### 2. Verify on Basescan
+
+After deployment, verify your contract on Basescan:
+
+```bash
+cd contracts
+
+# Set your Basescan API key
+export ETHERSCAN_API_KEY=your_basescan_api_key
+
+# Verify with auto-detected constructor args
+npm run verify:executor -- --network base --address 0xYourDeployedAddress --payout-default 0xYourPayoutAddress
+```
+
+The verification helper automatically:
+- Infers constructor arguments from environment variables or uses Base mainnet defaults
+- Handles the correct argument order (Balancer Vault, Aave Pool, 1inch Router, Payout Default)
+- Provides troubleshooting guidance for common issues
+
+**Troubleshooting:**
+- Get your Basescan API key from [basescan.org/myapikey](https://basescan.org/myapikey)
+- Ensure `--payout-default` matches the address used during deployment
+- Use `--contract` flag if you have multiple contracts with the same name
+
+See `contracts/README.md` for detailed verification options.
+
+#### 3. Configure the Backend
 
 Add to `backend/.env`:
 
@@ -482,7 +540,7 @@ EXECUTION_ENABLED=true
 DRY_RUN_EXECUTION=false              # ⚠️ Set to false only when ready!
 ```
 
-#### 3. Whitelist Assets
+#### 4. Whitelist Assets
 
 Before executing liquidations, whitelist the assets:
 
@@ -494,7 +552,7 @@ executor.setWhitelist(DAI_ADDRESS, true);
 // ... add other collateral/debt assets
 ```
 
-#### 4. Fund the Executor
+#### 5. Fund the Executor
 
 Send some ETH to the executor contract for gas:
 
