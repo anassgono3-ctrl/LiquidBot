@@ -46,7 +46,6 @@ interface ICollateralOptimizer {
      */
     function planRebalance(address user)
         external
-        view
         returns (
             address fromAsset,
             address toAsset,
