@@ -18,7 +18,7 @@ describe("LiquidationExecutor - Unit Tests with Mocks", function () {
     [owner, user, payout] = await ethers.getSigners();
     
     // Deploy mock tokens
-    const MockERC20 = await ethers.getContractFactory("MockERC20");
+    const MockERC20 = await ethers.getContractFactory("src/mocks/MockERC20.sol:MockERC20");
     collateralToken = await MockERC20.deploy("Wrapped Ether", "WETH", 18);
     debtToken = await MockERC20.deploy("USD Coin", "USDC", 6);
     await collateralToken.waitForDeployment();
@@ -250,7 +250,7 @@ describe("LiquidationExecutor - Unit Tests with Mocks", function () {
   describe("Whitelist Enforcement", function () {
     it("should revert if collateral not whitelisted", async function () {
       // Deploy non-whitelisted token
-      const MockERC20 = await ethers.getContractFactory("MockERC20");
+      const MockERC20 = await ethers.getContractFactory("src/mocks/MockERC20.sol:MockERC20");
       const badToken = await MockERC20.deploy("Bad Token", "BAD", 18);
       await badToken.waitForDeployment();
       
@@ -269,7 +269,7 @@ describe("LiquidationExecutor - Unit Tests with Mocks", function () {
     });
     
     it("should revert if debt not whitelisted", async function () {
-      const MockERC20 = await ethers.getContractFactory("MockERC20");
+      const MockERC20 = await ethers.getContractFactory("src/mocks/MockERC20.sol:MockERC20");
       const badToken = await MockERC20.deploy("Bad Token", "BAD", 18);
       await badToken.waitForDeployment();
       
