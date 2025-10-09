@@ -54,12 +54,19 @@ async function main() {
   console.log('🔍 Scanning for at-risk positions...');
   console.log(`📊 Warning threshold: HF < ${config.atRiskWarnThreshold || 1.05}`);
   console.log(`⚠️  Liquidation threshold: HF < ${config.atRiskLiqThreshold || 1.0}`);
-  console.log(`🔢 Scan limit: ${config.atRiskScanLimit || 100} users`);
+  
+  // Clamp scan limit to 200
+  let scanLimit = config.atRiskScanLimit || 100;
+  if (scanLimit > 200) {
+    console.log(`⚠️  AT_RISK_SCAN_LIMIT=${scanLimit} exceeds maximum of 200, clamping to 200`);
+    scanLimit = 200;
+  }
+  
+  console.log(`🔢 Scan limit: ${scanLimit} users`);
   console.log(`📱 Notifications: ${enableNotifications ? 'enabled' : 'disabled'}`);
   console.log('');
 
   try {
-    const scanLimit = config.atRiskScanLimit || 100;
     const result = await scanner.scanAndClassify(scanLimit);
 
     // Display results

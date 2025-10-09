@@ -1,5 +1,13 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "@nomicfoundation/hardhat-toolbox";
+import * as dotenv from "dotenv";
+import * as path from "path";
+
+// Load .env from contracts directory first, fallback to backend .env
+dotenv.config({ path: path.resolve(__dirname, '.env') });
+if (!process.env.RPC_URL) {
+  dotenv.config({ path: path.resolve(__dirname, '../backend/.env') });
+}
 
 const config: HardhatUserConfig = {
   solidity: {

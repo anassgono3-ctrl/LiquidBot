@@ -98,6 +98,7 @@ export const rawEnvSchema = z.object({
   RPC_URL: z.string().optional(),
   CHAIN_ID: z.string().optional(),
   ONEINCH_API_KEY: z.string().optional(),
+  ONEINCH_API_MODE: z.string().optional(),
   ONEINCH_BASE_URL: z.string().optional(),
   MAX_SLIPPAGE_BPS: z.string().optional(),
   CLOSE_FACTOR_MODE: z.string().optional()
@@ -202,7 +203,8 @@ export const env = (() => {
     rpcUrl: parsed.RPC_URL,
     chainId: Number(parsed.CHAIN_ID || 8453),
     oneInchApiKey: parsed.ONEINCH_API_KEY,
-    oneInchBaseUrl: parsed.ONEINCH_BASE_URL || 'https://api.1inch.dev/swap/v6.0/8453',
+    oneInchApiMode: parsed.ONEINCH_API_MODE,
+    oneInchBaseUrl: parsed.ONEINCH_BASE_URL || 'https://api.1inch.io/v5.0/8453',
     maxSlippageBps: Number(parsed.MAX_SLIPPAGE_BPS || 100),
     closeFactorMode: parsed.CLOSE_FACTOR_MODE || 'auto'
   };

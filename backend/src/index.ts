@@ -70,7 +70,16 @@ if (!config.useMockSubgraph) {
 
 // Initialize at-risk scanner (only when enabled via config)
 let atRiskScanner: AtRiskScanner | undefined;
+let effectiveScanLimit = config.atRiskScanLimit;
 if (config.atRiskScanLimit > 0) {
+  // Clamp scan limit to 200 with warning
+  if (config.atRiskScanLimit > 200) {
+    logger.warn(
+      `[at-risk-scanner] AT_RISK_SCAN_LIMIT=${config.atRiskScanLimit} exceeds maximum of 200, clamping to 200`
+    );
+    effectiveScanLimit = 200;
+  }
+  
   const healthCalculator = new HealthCalculator();
   atRiskScanner = new AtRiskScanner(
     subgraphService,
@@ -85,7 +94,7 @@ if (config.atRiskScanLimit > 0) {
     notificationService
   );
   logger.info(
-    `[at-risk-scanner] Initialized with limit=${config.atRiskScanLimit} ` +
+    `[at-risk-scanner] Initialized with limit=${effectiveScanLimit} ` +
     `warnThreshold=${config.atRiskWarnThreshold} liqThreshold=${config.atRiskLiqThreshold} ` +
     `notifyWarn=${config.atRiskNotifyWarn} notifyCritical=${config.atRiskNotifyCritical}`
   );
@@ -183,7 +192,7 @@ if (!config.useMockSubgraph) {
     trackMax: config.liquidationTrackMax,
     onDemandHealthFactor,
     atRiskScanner,
-    atRiskScanLimit: config.atRiskScanLimit,
+    atRiskScanLimit: effectiveScanLimit,
     onLiquidations: () => {
       // placeholder for raw snapshot callback
     },
