@@ -1,5 +1,5 @@
 // Unit tests for RiskManager
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 import { RiskManager } from '../../src/services/RiskManager.js';
 import type { Opportunity } from '../../src/types/index.js';

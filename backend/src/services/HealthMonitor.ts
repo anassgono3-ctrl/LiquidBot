@@ -3,6 +3,7 @@
 // Health factors are resolved on-demand per liquidation event instead.
 
 import type { HealthSnapshot } from '../types/index.js';
+
 import { SubgraphService } from './SubgraphService.js';
 
 export interface HealthBreachDetection {

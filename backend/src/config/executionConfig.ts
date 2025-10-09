@@ -1,5 +1,4 @@
 // Execution configuration for liquidation execution pipeline
-import { config } from './index.js';
 
 export interface ExecutionConfig {
   // Master switch
