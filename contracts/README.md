@@ -103,16 +103,66 @@ npm run build:contracts
 This compiles all Solidity contracts using Hardhat.
 
 ### Testing
+
+#### Unit Tests (Deterministic)
+
+Run deterministic unit tests with mock contracts:
+
 ```bash
-npm run test:contracts
+npm run test
+# or
+npm run contracts:test
 ```
 
-Runs the Hardhat test suite. Current test coverage includes:
-- LiquidationExecutor access control
-- Whitelist management
-- Pause functionality
-- Configuration management
-- Input validation
+These tests use mock contracts (MockERC20, MockBalancerVault, MockAavePool, MockOneInchRouter) to provide deterministic, fast test execution with no external dependencies.
+
+**Test Coverage:**
+- ✅ Happy path: Full liquidation flow (flashLoan → liquidate → swap → repay → profit)
+- ✅ Slippage guard: Revert if swap output < minOut
+- ✅ Pause functionality: Block execution when paused
+- ✅ Whitelist enforcement: Only whitelisted collateral/debt pairs
+- ✅ Approval flows: Correct ERC20 approvals
+- ✅ Event assertions: LiquidationExecuted with exact profit (within 1 wei)
+- ✅ Access control: Owner-only operations
+- ✅ Configuration management: Address setters with validation
+- ✅ Input validation: Zero address checks
+
+#### Fork Tests (Optional)
+
+Run Base mainnet fork tests to validate protocol integrations:
+
+```bash
+export RPC_URL=https://mainnet.base.org  # or your Base RPC URL
+npm run test:fork
+# or
+npm run contracts:test:fork
+```
+
+Fork tests **auto-skip** if `RPC_URL` is not configured. They validate:
+- ✅ Deployment on Base fork
+- ✅ Protocol address validation (Balancer, Aave, 1inch are contracts)
+- ✅ Contract configuration and state management
+- ✅ Whitelist operations on fork
+- ✅ Pause/unpause on fork
+- ✅ Call path preparation (no real execution)
+
+**Note:** Fork tests do NOT execute real liquidations or rely on real liquidity. They only validate the wiring and call paths with actual protocol contracts.
+
+#### Environment Setup for Fork Tests
+
+Create a `.env` file based on `.env.example`:
+
+```bash
+cp .env.example .env
+# Edit .env and add your RPC_URL
+```
+
+Example `.env`:
+```bash
+RPC_URL=https://mainnet.base.org
+# Or use a provider like Alchemy:
+# RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR-API-KEY
+```
 
 ### Deployment
 

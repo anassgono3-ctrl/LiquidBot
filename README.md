@@ -161,6 +161,164 @@ npm run build
 npm test
 ```
 
+## Testing
+
+LiquidBot includes comprehensive test coverage for both smart contracts and backend services.
+
+### Contract Tests
+
+The smart contracts have deterministic unit tests using mock contracts and optional Base fork tests.
+
+#### Unit Tests (Deterministic, No External Dependencies)
+
+Run locally:
+```bash
+cd contracts
+npm install
+npm run test
+```
+
+Or from the root:
+```bash
+npm run contracts:test
+```
+
+**Coverage includes:**
+- ✅ Happy path: Full liquidation flow (flashLoan → liquidate → swap → repay → profit)
+- ✅ Slippage guard: Reverts if swap output < minOut
+- ✅ Pause functionality: Blocks execution when paused
+- ✅ Whitelist enforcement: Only whitelisted collateral/debt pairs allowed
+- ✅ Approval flows: Correct ERC20 approvals for Aave and 1inch
+- ✅ Event assertions: LiquidationExecuted emits with exact profit (within 1 wei)
+- ✅ Access control: Owner-only operations
+- ✅ Configuration management: Address setters with validation
+
+#### Fork Tests (Optional, Requires RPC)
+
+Fork tests run against a Base mainnet fork to validate protocol integrations. They **auto-skip** if `RPC_URL` is not configured.
+
+Run locally:
+```bash
+cd contracts
+export RPC_URL=https://mainnet.base.org  # or your Base RPC URL
+npm run test:fork
+```
+
+**Coverage includes:**
+- ✅ Deployment on Base fork
+- ✅ Protocol address validation (Balancer, Aave, 1inch)
+- ✅ Contract configuration
+- ✅ Whitelist operations
+- ✅ Pause/unpause functionality
+- ✅ Call path validation (without real liquidity)
+
+**Note:** Fork tests do NOT rely on real liquidity or execute actual liquidations. They only validate wiring and call paths.
+
+### Backend Tests
+
+The backend has comprehensive unit and integration tests using Vitest.
+
+Run locally:
+```bash
+cd backend
+npm install
+npm test
+```
+
+Or from the root:
+```bash
+npm test
+```
+
+**Coverage includes:**
+
+#### RiskManager Tests
+- ✅ Blacklist enforcement (collateral and debt tokens)
+- ✅ Max position size limits
+- ✅ Daily loss window tracking
+- ✅ After-gas profit threshold enforcement
+
+#### ExecutionService Tests
+- ✅ Dry-run path: Payload building, logging skip reasons
+- ✅ Real-mode path: Configuration validation, gas price checks
+- ✅ ABI encoding for initiateLiquidation
+- ✅ MinOut propagation from 1inch to executor
+- ✅ Error handling and revert bubbling
+
+#### OneInchQuoteService Tests (v6 API)
+- ✅ Authorization header (Bearer token) presence
+- ✅ Parameter mapping (src, dst, amount, slippage in %)
+- ✅ Slippage conversion (bps → percentage)
+- ✅ Response normalization to { to, data, value, minOut }
+- ✅ Error handling (API errors, network errors)
+- ✅ Input validation
+
+### Run All Tests
+
+Run both contract and backend tests:
+```bash
+npm run test:all
+```
+
+This runs:
+1. Contract unit tests (with mocks)
+2. Backend unit tests
+3. Backend integration tests
+
+### CI/CD
+
+GitHub Actions automatically runs all tests on push/PR:
+
+#### Contract Tests Job
+- Installs dependencies
+- Compiles contracts with Hardhat
+- Runs unit tests
+- **Conditionally** runs fork tests if `BASE_FORK_URL` secret is configured
+
+#### Backend Tests Job
+- Starts PostgreSQL and Redis services
+- Installs dependencies and generates Prisma client
+- Runs linter and type checker
+- Runs tests with coverage
+- Builds the project
+
+### CI Secrets Configuration
+
+For fork tests in CI, add the following secret to your GitHub repository:
+
+**Settings → Secrets and variables → Actions → New repository secret**
+
+- `BASE_FORK_URL`: Your Base RPC URL (e.g., from Alchemy, Infura, or QuickNode)
+
+If this secret is not set, fork tests will be skipped automatically.
+
+### Test Structure
+
+```
+contracts/
+├── test/
+│   ├── LiquidationExecutor.test.ts      # Original basic tests
+│   ├── LiquidationExecutor.unit.test.ts # Comprehensive unit tests with mocks
+│   ├── LiquidationExecutor.fork.test.ts # Optional Base fork smoke tests
+│   └── mocks/
+│       ├── MockERC20.sol                # Mock ERC20 token
+│       ├── MockBalancerVault.sol        # Mock flash loan provider
+│       ├── MockAavePool.sol             # Mock Aave liquidation
+│       └── MockOneInchRouter.sol        # Mock swap router
+
+backend/
+└── tests/
+    ├── unit/
+    │   ├── RiskManager.test.ts          # Risk control tests
+    │   ├── ExecutionService.test.ts     # Execution pipeline tests
+    │   ├── OneInchQuoteService.test.ts  # 1inch API v6 tests
+    │   └── ...
+    └── integration/
+        ├── api.test.ts                  # REST API tests
+        ├── websocket.test.ts            # WebSocket tests
+        └── execution.test.ts            # End-to-end execution tests
+```
+
 ## Execution (Scaffold)
 
 The bot includes an **opt-in execution pipeline scaffold** with MEV/gas controls and risk management. This is a safe framework for future liquidation execution — **disabled by default** and currently in dry-run mode.
