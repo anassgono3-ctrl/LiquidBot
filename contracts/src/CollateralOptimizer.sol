@@ -50,7 +50,6 @@ contract CollateralOptimizer is ICollateralOptimizer {
      */
     function planRebalance(address user)
         external
-        view
         override
         returns (
             address fromAsset,

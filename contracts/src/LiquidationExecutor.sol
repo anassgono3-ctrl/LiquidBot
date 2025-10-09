@@ -162,7 +162,7 @@ contract LiquidationExecutor is IFlashLoanRecipient {
         IERC20(params.collateralAsset).approve(oneInchRouter, collateralReceived);
         
         // Step 5: Swap collateral to debt asset via 1inch
-        (bool swapSuccess, bytes memory swapResult) = oneInchRouter.call(params.oneInchCalldata);
+        (bool swapSuccess, ) = oneInchRouter.call(params.oneInchCalldata);
         if (!swapSuccess) revert SwapFailed();
         
         // Step 6: Verify output meets minimum
