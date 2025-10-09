@@ -255,6 +255,212 @@ The `ExecutionService`:
 - Scanner continues detecting/notifying regardless of execution settings
 - All execution results are logged with structured output
 
+## On-Chain Executor (Balancer + Aave + 1inch)
+
+The bot now includes a **production-ready on-chain liquidation executor** that atomically executes liquidations using flash loans, Aave V3 liquidation calls, and 1inch swaps on Base.
+
+### Architecture
+
+The executor consists of:
+1. **Smart Contract** (`LiquidationExecutor.sol`): Handles flash loan callback, liquidation, and swap
+2. **Backend Service** (`OneInchQuoteService.ts`): Fetches swap quotes and calldata from 1inch API
+3. **Execution Pipeline** (`ExecutionService.ts`): Orchestrates the full liquidation flow
+
+### Smart Contract Features
+
+- **Flash Loan Provider**: Balancer V2 Vault (0% fee on Base)
+- **Liquidation**: Aave V3 Pool integration
+- **Swap Router**: 1inch Aggregation Router V6
+- **Safety Controls**:
+  - Owner-only execution
+  - Pausable circuit breaker
+  - Per-asset whitelist
+  - Slippage protection via `minOut` parameter
+  - Emergency withdraw function
+
+### Deployment
+
+#### 1. Deploy the Contract
+
+```bash
+cd contracts
+npm install
+npm run build:contracts
+
+# Set environment variables
+export RPC_URL=https://mainnet.base.org
+export EXECUTION_PRIVATE_KEY=0x...your_private_key
+
+# Deploy to Base
+npm run deploy:executor
+```
+
+This deploys `LiquidationExecutor.sol` with the following addresses (Base):
+- Balancer Vault: `0xBA12222222228d8Ba445958a75a0704d566BF2C8`
+- Aave V3 Pool: `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5`
+- 1inch Router: `0x1111111254EEB25477B68fb85Ed929f73A960582`
+
+#### 2. Configure the Backend
+
+Add to `backend/.env`:
+
+```bash
+# On-Chain Executor
+EXECUTOR_ADDRESS=0x...deployed_contract_address
+EXECUTION_PRIVATE_KEY=0x...your_private_key
+RPC_URL=https://mainnet.base.org
+CHAIN_ID=8453
+
+# 1inch API (required for swaps)
+ONEINCH_API_KEY=your_1inch_api_key_here
+ONEINCH_BASE_URL=https://api.1inch.dev/swap/v6.0/8453
+
+# Execution Settings
+MAX_SLIPPAGE_BPS=100                 # 1% slippage tolerance
+CLOSE_FACTOR_MODE=auto               # auto or fixed (50%)
+
+# Enable execution
+EXECUTION_ENABLED=true
+DRY_RUN_EXECUTION=false              # ⚠️ Set to false only when ready!
+```
+
+#### 3. Whitelist Assets
+
+Before executing liquidations, whitelist the assets:
+
+```solidity
+// Call from executor owner
+executor.setWhitelist(WETH_ADDRESS, true);
+executor.setWhitelist(USDC_ADDRESS, true);
+executor.setWhitelist(DAI_ADDRESS, true);
+// ... add other collateral/debt assets
+```
+
+#### 4. Fund the Executor
+
+Send some ETH to the executor contract for gas:
+
+```bash
+# Send 0.1 ETH for gas
+cast send $EXECUTOR_ADDRESS --value 0.1ether --private-key $EXECUTION_PRIVATE_KEY
+```
+
+### How It Works
+
+When a liquidation opportunity is detected:
+
+1. **Backend prepares parameters**:
+   - Calculates `debtToCover` based on close factor
+   - Fetches swap calldata from 1inch API
+   - Applies slippage protection with `minOut`
+
+2. **Backend calls `executor.initiateLiquidation()`**:
+   - Passes user, collateral, debt, amounts, swap calldata
+
+3. **Contract requests Balancer flash loan**:
+   - Borrows `debtToCover` amount of debt asset
+
+4. **Contract executes in `receiveFlashLoan()` callback**:
+   - Approves Aave Pool for debt token
+   - Calls `Pool.liquidationCall()` to liquidate user
+   - Receives collateral from liquidation
+   - Approves 1inch router for collateral
+   - Swaps collateral → debt token using provided calldata
+   - Verifies output ≥ `minOut`
+   - Repays flash loan (principal + fee)
+   - Transfers profit to payout address
+
+5. **Backend receives transaction receipt**:
+   - Logs profit and gas used
+   - Updates execution metrics
+
+### Safety Checklist
+
+Before enabling real execution:
+
+- [ ] Contract deployed and verified on Base
+- [ ] Owner address is secure multisig or hardware wallet
+- [ ] All expected collateral and debt assets whitelisted
+- [ ] Executor funded with sufficient gas (0.1+ ETH)
+- [ ] 1inch API key configured and tested
+- [ ] `DRY_RUN_EXECUTION=true` tested first with real opportunities
+- [ ] Risk controls configured (`MAX_POSITION_SIZE_USD`, `DAILY_LOSS_LIMIT_USD`)
+- [ ] Gas cap set appropriately (`MAX_GAS_PRICE_GWEI`)
+- [ ] Monitoring and alerting in place
+- [ ] Emergency pause mechanism tested
+
+### Risk Controls
+
+The executor enforces multiple layers of protection:
+
+**Smart Contract:**
+- Owner-only execution
+- Asset whitelist
+- Pausable circuit breaker
+- Slippage protection
+- Atomic transaction (reverts on failure)
+
+**Backend:**
+- Token blacklist
+- Position size limits
+- Daily loss limits
+- After-gas profit threshold
+- Gas price gating
+
+### Monitoring
+
+Monitor executor activity:
+
+```bash
+# Watch executor logs
+tail -f logs/executor.log
+
+# Check executor balance
+cast balance $EXECUTOR_ADDRESS
+
+# View recent transactions
+cast tx --rpc-url $RPC_URL <txhash>
+```
+
+### Contract Testing
+
+Run Solidity tests:
+
+```bash
+cd contracts
+npm run test:contracts
+```
+
+The test suite validates:
+- Access control (only owner can execute)
+- Whitelist enforcement
+- Pause functionality
+- Configuration setters
+- Ownership transfer
+
+### Configuration Reference
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EXECUTOR_ADDRESS` | - | Deployed contract address |
+| `EXECUTION_PRIVATE_KEY` | - | Private key for signing txs |
+| `RPC_URL` | - | Base RPC endpoint |
+| `CHAIN_ID` | 8453 | Base chain ID |
+| `ONEINCH_API_KEY` | - | 1inch API key |
+| `ONEINCH_BASE_URL` | `https://api.1inch.dev/swap/v6.0/8453` | 1inch API URL |
+| `MAX_SLIPPAGE_BPS` | 100 | Max slippage (1%) |
+| `CLOSE_FACTOR_MODE` | auto | Close factor: auto or fixed |
+| `PRIVATE_BUNDLE_RPC` | - | Optional MEV relay URL |
+
+### Notes
+
+- Balancer flash loans have 0% fee on most networks including Base
+- Close factor auto mode uses full debt amount from opportunity
+- Close factor fixed mode uses 50% of total debt
+- Private bundle RPC support is a placeholder (not fully implemented)
+- 1inch API key can be obtained from https://portal.1inch.dev/
+- Always test in dry-run mode first before enabling real execution
+
 ## At-Risk Position Scanner
 
 The bot includes an at-risk scanner that proactively detects users approaching liquidation by computing health factors locally.
