@@ -175,7 +175,6 @@ async function main() {
   console.log("   User:", parsedEvent?.args.user);
   console.log("   Collateral:", parsedEvent?.args.collateralAsset);
   console.log("   Debt:", parsedEvent?.args.debtAsset);
-  console.log("   Debt covered:", ethers.formatUnits(parsedEvent?.args.debtToCover, 6), "USDC");
   console.log("   Profit:", ethers.formatUnits(parsedEvent?.args.profit, 6), "USDC");
   console.log();
   
