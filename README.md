@@ -146,17 +146,63 @@ HF = (Σ collateral_value × liquidationThreshold) / Σ debt_value
 ```bash
 # Clone the repository
 git clone https://github.com/anassgono3-ctrl/LiquidBot.git
-cd LiquidBot
+cd LiquidBot/backend
 
-# Install dependencies (future)
+# Install dependencies
 npm install
 
 # Set up environment variables
 cp .env.example .env
 
-# Run tests (future)
+# Build the project
+npm run build
+
+# Run tests
 npm test
 ```
+
+## At-Risk Position Scanner
+
+The bot includes an at-risk scanner that proactively detects users approaching liquidation by computing health factors locally.
+
+### How It Works
+
+The scanner:
+- Queries a configurable number of users from the Aave V3 Base subgraph
+- Computes health factors locally (no dependency on subgraph `healthFactor` field)
+- Classifies users into risk tiers: NO_DEBT, DUST, OK, WARN, CRITICAL
+- Optionally sends Telegram notifications for at-risk users
+
+**Important:** `AT_RISK_SCAN_LIMIT` controls how many users the bot requests from the subgraph `users(...)` query each poll. It is **not** a filter for "recent users" — ordering is not guaranteed without an explicit `orderBy` clause. We keep it as a small, fixed sample per poll to stay rate-limit friendly since we compute health factors locally.
+
+### Running Modes
+
+#### 1. Continuous Monitoring (Recommended)
+```bash
+npm start
+```
+When `AT_RISK_SCAN_LIMIT > 0`, the bot automatically scans for at-risk users during each poll cycle. This is the **normal operation mode** for production use.
+
+Configuration in `.env`:
+```bash
+AT_RISK_SCAN_LIMIT=50              # Number of users to scan per poll (0 disables)
+AT_RISK_WARN_THRESHOLD=1.05        # HF threshold for warning tier
+AT_RISK_LIQ_THRESHOLD=1.0          # HF threshold for critical tier
+AT_RISK_NOTIFY_CRITICAL=true       # Send alerts for CRITICAL users
+AT_RISK_NOTIFY_WARN=false          # Send alerts for WARN users (usually false)
+```
+
+#### 2. One-Off Manual Scan
+```bash
+npm run risk:scan                  # Display results only
+npm run risk:scan -- --notify      # Display results + send Telegram alerts
+```
+This is a **standalone diagnostic script** useful for:
+- Manual health checks outside the main bot
+- Testing the scanner configuration
+- Ad-hoc risk assessments
+
+**Not required for normal operation** — the main bot (`npm start`) already scans when configured.
 
 ## Documentation
 

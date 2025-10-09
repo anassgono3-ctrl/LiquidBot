@@ -124,6 +124,7 @@ export const config = {
   get atRiskLiqThreshold() { return env.atRiskLiqThreshold; },
   get atRiskDustEpsilon() { return env.atRiskDustEpsilon; },
   get atRiskNotifyWarn() { return env.atRiskNotifyWarn; },
+  get atRiskNotifyCritical() { return env.atRiskNotifyCritical; },
 
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute

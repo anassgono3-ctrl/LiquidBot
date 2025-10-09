@@ -71,7 +71,7 @@ describe("verify-data validation functions", () => {
               decimals: 18,
               reserveLiquidationThreshold: 8000,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: "1.0" },
+              price: { priceInEth: "1000000000000000000" },
             },
           },
           {
@@ -184,7 +184,7 @@ describe("verify-data validation functions", () => {
               decimals: 18,
               reserveLiquidationThreshold: 8000, // 80%
               usageAsCollateralEnabled: true,
-              price: { priceInEth: "1.0" },
+              price: { priceInEth: "1000000000000000000" },
             },
           },
         ],
@@ -193,14 +193,15 @@ describe("verify-data validation functions", () => {
       const healthCalculator = new HealthCalculator();
       const calcResult = healthCalculator.calculateHealthFactor(user);
 
-      // Independent calculation
+      // Independent calculation (matching HealthCalculator normalization)
       let weightedCollateralETH = 0;
       let totalDebtETH = 0;
 
       for (const userReserve of user.reserves) {
         const reserve = userReserve.reserve;
         const decimals = reserve.decimals;
-        const priceInEth = parseFloat(reserve.price.priceInEth);
+        // Normalize priceInEth same as HealthCalculator (subgraph returns scaled by 1e18)
+        const priceInEth = parseFloat(reserve.price.priceInEth) / 1e18;
 
         if (reserve.usageAsCollateralEnabled) {
           const collateralBalance =
@@ -239,7 +240,7 @@ describe("verify-data validation functions", () => {
               decimals: 18,
               reserveLiquidationThreshold: 8000,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: "1.0" },
+              price: { priceInEth: "1000000000000000000" },
             },
           },
         ],

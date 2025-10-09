@@ -57,7 +57,7 @@ describe('AtRiskScanner', () => {
               decimals: 6,
               reserveLiquidationThreshold: 8500,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '0.0005' }
+              price: { priceInEth: '500000000000000' }
             }
           }
         ]
@@ -97,7 +97,7 @@ describe('AtRiskScanner', () => {
               decimals: 6,
               reserveLiquidationThreshold: 8500,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '0.0005' }
+              price: { priceInEth: '500000000000000' }
             }
           }
         ]
@@ -136,7 +136,7 @@ describe('AtRiskScanner', () => {
               decimals: 6,
               reserveLiquidationThreshold: 8500, // 85%
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '0.0005' }
+              price: { priceInEth: '500000000000000' }
             }
           }
         ]
@@ -182,7 +182,7 @@ describe('AtRiskScanner', () => {
               decimals: 6,
               reserveLiquidationThreshold: 8500, // 85%
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '0.0005' }
+              price: { priceInEth: '500000000000000' }
             }
           }
         ]
@@ -229,7 +229,7 @@ describe('AtRiskScanner', () => {
               decimals: 6,
               reserveLiquidationThreshold: 8500,
               usageAsCollateralEnabled: true,
-              price: { priceInEth: '0.0005' }
+              price: { priceInEth: '500000000000000' }
             }
           }
         ]
@@ -272,7 +272,7 @@ describe('AtRiskScanner', () => {
                 decimals: 6,
                 reserveLiquidationThreshold: 8500,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '0.0005' }
+                price: { priceInEth: '500000000000000' }
               }
             }
           ]
@@ -293,7 +293,7 @@ describe('AtRiskScanner', () => {
                 decimals: 6,
                 reserveLiquidationThreshold: 8500,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '0.0005' }
+                price: { priceInEth: '500000000000000' }
               }
             }
           ]
@@ -314,7 +314,7 @@ describe('AtRiskScanner', () => {
                 decimals: 6,
                 reserveLiquidationThreshold: 8500,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '0.0005' }
+                price: { priceInEth: '500000000000000' }
               }
             }
           ]
@@ -335,7 +335,7 @@ describe('AtRiskScanner', () => {
                 decimals: 6,
                 reserveLiquidationThreshold: 8500,
                 usageAsCollateralEnabled: true,
-                price: { priceInEth: '0.0005' }
+                price: { priceInEth: '500000000000000' }
               }
             }
           ]
@@ -380,7 +380,7 @@ describe('AtRiskScanner', () => {
   });
 
   describe('notifyAtRiskUsers', () => {
-    it('should notify CRITICAL users', async () => {
+    it('should notify CRITICAL users by default', async () => {
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,
         healthCalculator,
@@ -407,6 +407,58 @@ describe('AtRiskScanner', () => {
           threshold: 1.0
         })
       );
+    });
+
+    it('should notify CRITICAL users when notifyCritical is true', async () => {
+      const scanner = new AtRiskScanner(
+        mockSubgraphService as SubgraphService,
+        healthCalculator,
+        { warnThreshold: 1.05, liqThreshold: 1.0, dustEpsilon: 1e-9, notifyWarn: false, notifyCritical: true },
+        mockNotificationService as NotificationService
+      );
+
+      const users = [
+        {
+          userId: '0x1',
+          healthFactor: 0.95,
+          classification: 'CRITICAL' as const,
+          totalDebtETH: 0.5,
+          totalCollateralETH: 0.55
+        }
+      ];
+
+      await scanner.notifyAtRiskUsers(users);
+
+      expect(mockNotificationService.notifyHealthBreach).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user: '0x1',
+          healthFactor: 0.95,
+          threshold: 1.0
+        })
+      );
+    });
+
+    it('should not notify CRITICAL users when notifyCritical is false', async () => {
+      const scanner = new AtRiskScanner(
+        mockSubgraphService as SubgraphService,
+        healthCalculator,
+        { warnThreshold: 1.05, liqThreshold: 1.0, dustEpsilon: 1e-9, notifyWarn: false, notifyCritical: false },
+        mockNotificationService as NotificationService
+      );
+
+      const users = [
+        {
+          userId: '0x1',
+          healthFactor: 0.95,
+          classification: 'CRITICAL' as const,
+          totalDebtETH: 0.5,
+          totalCollateralETH: 0.55
+        }
+      ];
+
+      await scanner.notifyAtRiskUsers(users);
+
+      expect(mockNotificationService.notifyHealthBreach).not.toHaveBeenCalled();
     });
 
     it('should not notify WARN users when notifyWarn is false', async () => {

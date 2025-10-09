@@ -23,7 +23,10 @@ export class HealthCalculator {
     for (const userReserve of user.reserves) {
       const reserve = userReserve.reserve;
       const decimals = reserve.decimals;
-      const priceInEth = parseFloat(reserve.price.priceInEth);
+      // Normalize priceInEth: subgraph returns values scaled by 1e18
+      // Dividing by 1e18 gives the actual ETH price for human-readable totals
+      // This doesn't affect HF calculation (ratio is invariant to scaling)
+      const priceInEth = parseFloat(reserve.price.priceInEth) / 1e18;
 
       // Calculate collateral value in ETH
       if (reserve.usageAsCollateralEnabled) {

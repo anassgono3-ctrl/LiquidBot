@@ -15,10 +15,26 @@ process.env.NODE_ENV = 'development';
 import { SubgraphService } from '../src/services/SubgraphService.js';
 import { HealthCalculator } from '../src/services/HealthCalculator.js';
 import { AtRiskScanner } from '../src/services/AtRiskScanner.js';
+import { NotificationService } from '../src/services/NotificationService.js';
 import { config } from '../src/config/index.js';
+
+// Parse CLI arguments
+const args = process.argv.slice(2);
+const enableNotifications = args.includes('--notify');
 
 const subgraphService = new SubgraphService();
 const healthCalculator = new HealthCalculator();
+
+// Initialize notification service only if --notify flag is present
+let notificationService: NotificationService | undefined;
+if (enableNotifications) {
+  notificationService = new NotificationService();
+  if (notificationService.isEnabled()) {
+    console.log('📱 Telegram notifications enabled');
+  } else {
+    console.log('⚠️  Telegram notifications requested but not configured (TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID missing)');
+  }
+}
 
 // Configure scanner with environment variables or defaults
 const scanner = new AtRiskScanner(
@@ -28,8 +44,10 @@ const scanner = new AtRiskScanner(
     warnThreshold: config.atRiskWarnThreshold || 1.05,
     liqThreshold: config.atRiskLiqThreshold || 1.0,
     dustEpsilon: config.atRiskDustEpsilon || 1e-9,
-    notifyWarn: false // No notifications in script mode
-  }
+    notifyWarn: false, // WARN notifications disabled in script mode
+    notifyCritical: enableNotifications // CRITICAL notifications only if --notify flag is present
+  },
+  notificationService
 );
 
 async function main() {
@@ -37,6 +55,7 @@ async function main() {
   console.log(`📊 Warning threshold: HF < ${config.atRiskWarnThreshold || 1.05}`);
   console.log(`⚠️  Liquidation threshold: HF < ${config.atRiskLiqThreshold || 1.0}`);
   console.log(`🔢 Scan limit: ${config.atRiskScanLimit || 100} users`);
+  console.log(`📱 Notifications: ${enableNotifications ? 'enabled' : 'disabled'}`);
   console.log('');
 
   try {
@@ -82,6 +101,14 @@ async function main() {
 
     if (criticalUsers.length === 0 && warnUsers.length === 0) {
       console.log('✅ No at-risk positions found - all scanned users are healthy!');
+      console.log('');
+    }
+
+    // Send notifications if --notify flag is present
+    if (enableNotifications && result.users.length > 0) {
+      console.log('📱 Sending Telegram notifications...');
+      await scanner.notifyAtRiskUsers(result.users);
+      console.log('✅ Notifications sent');
       console.log('');
     }
 

@@ -79,7 +79,8 @@ export const rawEnvSchema = z.object({
   AT_RISK_WARN_THRESHOLD: z.string().optional(),
   AT_RISK_LIQ_THRESHOLD: z.string().optional(),
   AT_RISK_DUST_EPSILON: z.string().optional(),
-  AT_RISK_NOTIFY_WARN: z.string().optional()
+  AT_RISK_NOTIFY_WARN: z.string().optional(),
+  AT_RISK_NOTIFY_CRITICAL: z.string().optional()
 });
 
 export const env = (() => {
@@ -159,6 +160,7 @@ export const env = (() => {
     atRiskWarnThreshold: Number(parsed.AT_RISK_WARN_THRESHOLD || 1.05),
     atRiskLiqThreshold: Number(parsed.AT_RISK_LIQ_THRESHOLD || 1.0),
     atRiskDustEpsilon: Number(parsed.AT_RISK_DUST_EPSILON || 1e-9),
-    atRiskNotifyWarn: (parsed.AT_RISK_NOTIFY_WARN || 'false').toLowerCase() === 'true'
+    atRiskNotifyWarn: (parsed.AT_RISK_NOTIFY_WARN || 'false').toLowerCase() === 'true',
+    atRiskNotifyCritical: (parsed.AT_RISK_NOTIFY_CRITICAL || 'true').toLowerCase() === 'true'
   };
 })();
