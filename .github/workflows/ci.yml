@@ -8,6 +8,40 @@ on:
     branches: [main, develop]
 
 jobs:
+  contracts:
+    name: Contract Tests
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Setup Node.js 18.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 18.x
+          cache: 'npm'
+          cache-dependency-path: contracts/package-lock.json
+      
+      - name: Install dependencies
+        working-directory: ./contracts
+        run: npm ci
+      
+      - name: Compile contracts
+        working-directory: ./contracts
+        run: npm run build
+      
+      - name: Run unit tests
+        working-directory: ./contracts
+        run: npm run test
+      
+      - name: Run fork tests (if BASE_FORK_URL available)
+        if: secrets.BASE_FORK_URL != ''
+        working-directory: ./contracts
+        env:
+          RPC_URL: ${{ secrets.BASE_FORK_URL }}
+        run: npm run test:fork
+
   backend:
     name: Backend Tests
     runs-on: ubuntu-latest
