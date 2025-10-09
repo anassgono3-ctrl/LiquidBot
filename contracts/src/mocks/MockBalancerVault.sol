@@ -2,6 +2,7 @@
 pragma solidity ^0.8.19;
 
 import "../interfaces/IFlashLoanRecipient.sol";
+import "../interfaces/IERC20.sol";
 
 /**
  * @title MockBalancerVault
@@ -23,7 +24,7 @@ contract MockBalancerVault {
     ) external {
         // Transfer tokens to recipient
         for (uint256 i = 0; i < tokens.length; i++) {
-            MockERC20(tokens[i]).transfer(recipient, amounts[i]);
+            IERC20(tokens[i]).transfer(recipient, amounts[i]);
         }
         
         // Call receiveFlashLoan on recipient (with zero fees for Balancer)
@@ -39,7 +40,7 @@ contract MockBalancerVault {
         for (uint256 i = 0; i < tokens.length; i++) {
             uint256 expectedRepayment = amounts[i] + feeAmounts[i];
             require(
-                MockERC20(tokens[i]).balanceOf(address(this)) >= expectedRepayment,
+                IERC20(tokens[i]).balanceOf(address(this)) >= expectedRepayment,
                 "Flash loan not repaid"
             );
         }
@@ -47,12 +48,6 @@ contract MockBalancerVault {
     
     // Helper to check balance
     function getBalance(address token) external view returns (uint256) {
-        return MockERC20(token).balanceOf(address(this));
+        return IERC20(token).balanceOf(address(this));
     }
-}
-
-// Import MockERC20 interface for calls
-interface MockERC20 {
-    function transfer(address to, uint256 amount) external returns (bool);
-    function balanceOf(address account) external view returns (uint256);
 }
