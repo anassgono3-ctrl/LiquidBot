@@ -1,0 +1,19 @@
+{
+  "name": "liquidbot-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Smart contracts for LiquidBot liquidation executor",
+  "license": "MIT",
+  "scripts": {
+    "build:contracts": "hardhat compile",
+    "test:contracts": "hardhat test",
+    "deploy:executor": "hardhat run scripts/deploy-executor.ts --network base"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@types/node": "^20.16.5",
+    "hardhat": "^2.19.5",
+    "ts-node": "^10.9.2",
+    "typescript": "5.5.4"
+  }
+}
