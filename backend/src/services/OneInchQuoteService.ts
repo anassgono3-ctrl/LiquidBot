@@ -1,5 +1,14 @@
 // OneInchQuoteService: 1inch API integration for swap calldata generation
 
+import { resolveTokenAddress } from '../config/tokens.js';
+
+/**
+ * Check if a string is a valid Ethereum address
+ */
+function isAddress(value: string): boolean {
+  return /^0x[0-9a-fA-F]{40}$/.test(value);
+}
+
 export interface SwapQuoteRequest {
   fromToken: string;
   toToken: string;
@@ -66,6 +75,23 @@ export class OneInchQuoteService {
       throw new Error('slippageBps must be between 0 and 5000 (0-50%)');
     }
 
+    // Validate fromAddress is an Ethereum address
+    if (!isAddress(request.fromAddress)) {
+      throw new Error(`fromAddress must be a valid Ethereum address: ${request.fromAddress}`);
+    }
+
+    // Resolve token symbols to addresses
+    const srcAddress = resolveTokenAddress(request.fromToken);
+    const dstAddress = resolveTokenAddress(request.toToken);
+
+    // Validate that resolved tokens are valid Ethereum addresses
+    if (!isAddress(srcAddress)) {
+      throw new Error(`fromToken must resolve to an Ethereum address: ${request.fromToken} -> ${srcAddress}`);
+    }
+    if (!isAddress(dstAddress)) {
+      throw new Error(`toToken must resolve to an Ethereum address: ${request.toToken} -> ${dstAddress}`);
+    }
+
     // Build query parameters based on API version
     let params: URLSearchParams;
     const headers: Record<string, string> = {
@@ -75,8 +101,8 @@ export class OneInchQuoteService {
     if (this.apiKey) {
       // v6 endpoint with API key - uses src/dst/amount/from/slippage
       params = new URLSearchParams({
-        src: request.fromToken,
-        dst: request.toToken,
+        src: srcAddress,
+        dst: dstAddress,
         amount: request.amount,
         from: request.fromAddress,
         slippage: (request.slippageBps / 100).toString(), // Convert bps to percentage
@@ -87,8 +113,8 @@ export class OneInchQuoteService {
     } else {
       // v5 public endpoint - uses fromTokenAddress/toTokenAddress/amount/fromAddress/slippage
       params = new URLSearchParams({
-        fromTokenAddress: request.fromToken,
-        toTokenAddress: request.toToken,
+        fromTokenAddress: srcAddress,
+        toTokenAddress: dstAddress,
         amount: request.amount,
         fromAddress: request.fromAddress,
         slippage: (request.slippageBps / 100).toString(), // Convert bps to percentage

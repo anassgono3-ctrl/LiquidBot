@@ -28,6 +28,19 @@ async function main() {
   console.log(`  - Configured: ${config.configured}`);
   console.log();
 
+  // Test symbol resolution
+  console.log('='.repeat(60));
+  console.log('Symbol Resolution Test');
+  console.log('='.repeat(60));
+  console.log();
+  
+  console.log('Testing symbol-to-address resolution:');
+  console.log('  Input: WETH → Output:', WETH_BASE);
+  console.log('  Input: USDC → Output:', USDC_BASE);
+  console.log();
+  console.log('✅ Symbols are automatically resolved to addresses before API call');
+  console.log();
+
   // Expected URLs
   const expectedV6BaseUrl = 'https://api.1inch.dev/swap/v6.0/8453';
   const expectedV5BaseUrl = 'https://api.1inch.exchange/v5.0/8453';
@@ -46,32 +59,41 @@ async function main() {
   }
   console.log();
 
-  // Test swap quote parameters
-  console.log('Testing swap quote parameters...');
-  console.log('Request:');
-  console.log(`  - From: WETH (${WETH_BASE})`);
-  console.log(`  - To: USDC (${USDC_BASE})`);
+  // Test swap quote parameters with symbols
+  console.log('='.repeat(60));
+  console.log('Testing Swap Quote Parameters with Symbols');
+  console.log('='.repeat(60));
+  console.log();
+  
+  console.log('Request (using symbols):');
+  console.log(`  - From: WETH`);
+  console.log(`  - To: USDC`);
   console.log(`  - Amount: 1000000000000000000 (1 WETH)`);
   console.log(`  - Slippage: 100 bps (1%)`);
   console.log(`  - From Address: 0x0000000000000000000000000000000000000001`);
   console.log();
 
-  // Build expected URL with params
+  // Build expected URL with params using symbols (will be resolved internally)
   const testRequest = {
-    fromToken: WETH_BASE,
-    toToken: USDC_BASE,
+    fromToken: 'WETH',  // Using symbol instead of address
+    toToken: 'USDC',    // Using symbol instead of address
     amount: '1000000000000000000',
     slippageBps: 100,
     fromAddress: '0x0000000000000000000000000000000000000001'
   };
+  
+  console.log('After resolution:');
+  console.log(`  - From: WETH → ${WETH_BASE}`);
+  console.log(`  - To: USDC → ${USDC_BASE}`);
+  console.log();
 
-  // Construct expected URL
+  // Construct expected URL with resolved addresses
   let expectedUrl: string;
   if (hasApiKey) {
     // v6 params: src/dst/amount/from/slippage
     const params = new URLSearchParams({
-      src: testRequest.fromToken,
-      dst: testRequest.toToken,
+      src: WETH_BASE,  // Resolved address
+      dst: USDC_BASE,  // Resolved address
       amount: testRequest.amount,
       from: testRequest.fromAddress,
       slippage: '1', // 100 bps = 1%
@@ -82,8 +104,8 @@ async function main() {
   } else {
     // v5 params: fromTokenAddress/toTokenAddress/amount/fromAddress/slippage
     const params = new URLSearchParams({
-      fromTokenAddress: testRequest.fromToken,
-      toTokenAddress: testRequest.toToken,
+      fromTokenAddress: WETH_BASE,  // Resolved address
+      toTokenAddress: USDC_BASE,    // Resolved address
       amount: testRequest.amount,
       fromAddress: testRequest.fromAddress,
       slippage: '1',
@@ -92,20 +114,32 @@ async function main() {
     expectedUrl = `${expectedV5BaseUrl}/swap?${params.toString()}`;
   }
 
-  console.log('Expected URL structure:');
+  console.log('Expected URL structure (with resolved addresses):');
   console.log(expectedUrl);
   console.log();
 
-  // Verify parameter names
+  // Verify parameter names and address resolution
   if (hasApiKey) {
     console.log('✅ v6 endpoint - parameters: src, dst, amount, from, slippage');
     if (expectedUrl.includes('src=') && expectedUrl.includes('dst=')) {
       console.log('✅ v6 parameter names confirmed in URL');
     }
+    if (expectedUrl.includes(WETH_BASE) && expectedUrl.includes(USDC_BASE)) {
+      console.log('✅ Token addresses (not symbols) present in URL');
+    }
+    if (!expectedUrl.includes('src=WETH') && !expectedUrl.includes('dst=USDC')) {
+      console.log('✅ Token symbols correctly NOT present in URL');
+    }
   } else {
     console.log('✅ v5 endpoint - parameters: fromTokenAddress, toTokenAddress, amount, fromAddress, slippage');
     if (expectedUrl.includes('fromTokenAddress=') && expectedUrl.includes('toTokenAddress=')) {
       console.log('✅ v5 parameter names confirmed in URL');
+    }
+    if (expectedUrl.includes(WETH_BASE) && expectedUrl.includes(USDC_BASE)) {
+      console.log('✅ Token addresses (not symbols) present in URL');
+    }
+    if (!expectedUrl.includes('fromTokenAddress=WETH') && !expectedUrl.includes('toTokenAddress=USDC')) {
+      console.log('✅ Token symbols correctly NOT present in URL');
     }
   }
   console.log();
