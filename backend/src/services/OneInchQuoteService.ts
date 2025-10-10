@@ -68,7 +68,7 @@ export class OneInchQuoteService {
 
     // Build query parameters based on API version
     let params: URLSearchParams;
-    let headers: Record<string, string> = {
+    const headers: Record<string, string> = {
       'Accept': 'application/json'
     };
 

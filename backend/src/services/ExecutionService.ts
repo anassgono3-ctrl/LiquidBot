@@ -1,7 +1,9 @@
 // ExecutionService: Execution pipeline with MEV/gas controls
 import { ethers } from 'ethers';
+
 import type { Opportunity } from '../types/index.js';
 import { executionConfig } from '../config/executionConfig.js';
+
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 
 export interface ExecutionResult {
@@ -188,7 +190,7 @@ export class ExecutionService {
         // Use private bundle RPC if configured
         // eslint-disable-next-line no-console
         console.log('[execution] Using private bundle RPC:', privateBundleRpc);
-        tx = await this.submitPrivateTransaction(executor, liquidationParams, privateBundleRpc);
+        tx = await this.submitPrivateTransaction(executor, liquidationParams);
       } else {
         // Standard transaction
         tx = await executor.initiateLiquidation(liquidationParams);
@@ -263,12 +265,10 @@ export class ExecutionService {
    * Submit transaction via private bundle RPC
    * @param executor Contract instance
    * @param params Liquidation parameters
-   * @param privateBundleRpc Private RPC URL
    */
   private async submitPrivateTransaction(
     executor: ethers.Contract,
-    params: unknown,
-    privateBundleRpc: string
+    params: unknown
   ): Promise<ethers.ContractTransactionResponse> {
     // For now, fall back to standard transaction
     // Full private bundle implementation would require specific bundle RPC protocols

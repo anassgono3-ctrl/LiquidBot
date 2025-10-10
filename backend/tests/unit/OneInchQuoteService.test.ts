@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { OneInchQuoteService } from '../../src/services/OneInchQuoteService.js';
 
 describe('OneInchQuoteService', () => {
@@ -206,7 +207,7 @@ describe('OneInchQuoteService', () => {
         fromAddress: '0x3'
       });
 
-      const callUrl = (fetch as any).mock.calls[0][0];
+      const callUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(callUrl).toContain('slippage=1.5');
     });
   });

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+
 import { OneInchQuoteService } from '../../src/services/OneInchQuoteService.js';
 
 describe('OneInchQuoteService URL Construction', () => {
@@ -10,7 +11,7 @@ describe('OneInchQuoteService URL Construction', () => {
   beforeEach(() => {
     // Setup fetch mock
     fetchMock = vi.fn();
-    global.fetch = fetchMock;
+    global.fetch = fetchMock as unknown as typeof fetch;
   });
 
   afterEach(() => {
