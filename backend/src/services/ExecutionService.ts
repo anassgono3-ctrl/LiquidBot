@@ -2,7 +2,7 @@
 import { ethers } from 'ethers';
 import type { Opportunity } from '../types/index.js';
 import { executionConfig } from '../config/executionConfig.js';
-import { OneInchQuoteService } from './OneInchQuoteService.js';
+import { AggregatorService } from './AggregatorService.js';
 
 export interface ExecutionResult {
   success: boolean;
@@ -23,14 +23,14 @@ export interface GasEstimator {
  */
 export class ExecutionService {
   private gasEstimator?: GasEstimator;
-  private oneInchService: OneInchQuoteService;
+  private aggregatorService: AggregatorService;
   private provider?: ethers.JsonRpcProvider;
   private wallet?: ethers.Wallet;
   private executorAddress?: string;
 
-  constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService) {
+  constructor(gasEstimator?: GasEstimator, aggregatorService?: AggregatorService) {
     this.gasEstimator = gasEstimator;
-    this.oneInchService = oneInchService || new OneInchQuoteService();
+    this.aggregatorService = aggregatorService || new AggregatorService();
     
     // Initialize provider and wallet if configured
     const rpcUrl = process.env.RPC_URL;
@@ -121,11 +121,11 @@ export class ExecutionService {
       };
     }
 
-    if (!this.oneInchService.isConfigured()) {
+    if (!this.aggregatorService.isConfigured()) {
       return {
         success: false,
         simulated: false,
-        reason: 'oneinch_not_configured: missing ONEINCH_API_KEY'
+        reason: 'aggregator_not_configured: no DEX aggregator available (1inch or 0x)'
       };
     }
 
@@ -141,16 +141,19 @@ export class ExecutionService {
       // Step 1: Calculate debt to cover (respecting close factor)
       const debtToCover = await this.calculateDebtToCover(opportunity);
       
-      // Step 2: Get 1inch swap quote
+      // Step 2: Get DEX aggregator swap quote (with automatic fallback)
       const slippageBps = Number(process.env.MAX_SLIPPAGE_BPS || 100); // 1% default
       
-      const swapQuote = await this.oneInchService.getSwapCalldata({
-        fromToken: opportunity.collateralReserve.id,
-        toToken: opportunity.principalReserve.id,
+      const swapQuote = await this.aggregatorService.getSwapCalldata({
+        fromToken: opportunity.collateralReserve.id, // Already an address from subgraph
+        toToken: opportunity.principalReserve.id, // Already an address from subgraph
         amount: opportunity.collateralAmountRaw, // Use full collateral amount
         slippageBps: slippageBps,
         fromAddress: this.executorAddress
       });
+      
+      // eslint-disable-next-line no-console
+      console.log(`[execution] Using ${swapQuote.aggregator} for swap`);
 
       // Step 3: Build liquidation parameters
       const liquidationParams = {

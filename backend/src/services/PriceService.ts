@@ -2,6 +2,7 @@
 import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
+import { isStablecoin } from '../config/tokens.js';
 
 // Chainlink Aggregator V3 Interface ABI (minimal)
 const AGGREGATOR_V3_ABI = [
@@ -144,12 +145,30 @@ export class PriceService {
         return null;
       }
       
-      // Check freshness (warn if older than 1 hour, but still use it)
+      // Check freshness (warn if older than 1 hour)
       const now = Math.floor(Date.now() / 1000);
       const age = now - Number(updatedAt);
       if (age > 3600) {
         // eslint-disable-next-line no-console
         console.warn(`[price] Chainlink price for ${symbol} is ${age}s old (threshold: 3600s)`);
+        
+        // For stablecoins, accept the price if it's close to $1 (within 5% deviation)
+        // This prevents blocking execution when Chainlink feeds are stale but price is stable
+        if (isStablecoin(symbol)) {
+          const deviation = Math.abs(price - 1.0);
+          const deviationPct = (deviation / 1.0) * 100;
+          
+          if (deviationPct <= 5) {
+            // eslint-disable-next-line no-console
+            console.log(`[price] Accepting stale ${symbol} price: $${price.toFixed(4)} (deviation: ${deviationPct.toFixed(2)}%)`);
+            return price;
+          } else {
+            // eslint-disable-next-line no-console
+            console.warn(`[price] Stablecoin ${symbol} price deviation too high: ${deviationPct.toFixed(2)}%, using fallback`);
+            // Return $1 as fallback for stablecoins with high deviation
+            return 1.0;
+          }
+        }
       }
 
       return price;
