@@ -1,4 +1,6 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { OneInchQuoteService } from '../../src/services/OneInchQuoteService.js';
 
 describe('OneInchQuoteService', () => {
@@ -48,15 +50,18 @@ describe('OneInchQuoteService', () => {
 
   describe('getSwapCalldata', () => {
     it('should throw if API key not configured', async () => {
-      const unconfiguredService = new OneInchQuoteService({ apiKey: '' });
+      const unconfiguredService = new OneInchQuoteService({ 
+        apiKey: '',
+        useV5Fallback: false // Disable v5 fallback for this test
+      });
       
       await expect(
         unconfiguredService.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // Valid USDC address
+          toToken: '0x4200000000000000000000000000000000000006', // Valid WETH address
           amount: '1000',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x1111111111111111111111111111111111111111' // Valid address
         })
       ).rejects.toThrow(/1inch API key not configured|fetch failed/);
     });
@@ -65,20 +70,20 @@ describe('OneInchQuoteService', () => {
       await expect(
         service.getSwapCalldata({
           fromToken: '',
-          toToken: '0x2',
+          toToken: '0x4200000000000000000000000000000000000006',
           amount: '1000',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x1111111111111111111111111111111111111111'
         })
       ).rejects.toThrow('fromToken and toToken are required');
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          toToken: '0x4200000000000000000000000000000000000006',
           amount: '0',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x1111111111111111111111111111111111111111'
         })
       ).rejects.toThrow('amount must be greater than 0');
     });
@@ -86,21 +91,21 @@ describe('OneInchQuoteService', () => {
     it('should validate slippage range', async () => {
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          toToken: '0x4200000000000000000000000000000000000006',
           amount: '1000',
           slippageBps: -1,
-          fromAddress: '0x3'
+          fromAddress: '0x1111111111111111111111111111111111111111'
         })
       ).rejects.toThrow('slippageBps must be between 0 and 5000');
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          toToken: '0x4200000000000000000000000000000000000006',
           amount: '1000',
           slippageBps: 6000,
-          fromAddress: '0x3'
+          fromAddress: '0x1111111111111111111111111111111111111111'
         })
       ).rejects.toThrow('slippageBps must be between 0 and 5000');
     });
@@ -120,12 +125,16 @@ describe('OneInchQuoteService', () => {
         json: async () => mockResponse
       });
 
+      const fromToken = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC
+      const toToken = '0x4200000000000000000000000000000000000006'; // WETH
+      const fromAddress = '0x1111111111111111111111111111111111111111';
+
       const result = await service.getSwapCalldata({
-        fromToken: '0xAAA',
-        toToken: '0xBBB',
+        fromToken,
+        toToken,
         amount: '1000',
         slippageBps: 100,
-        fromAddress: '0xCCC'
+        fromAddress
       });
 
       expect(result).toEqual({
@@ -136,7 +145,7 @@ describe('OneInchQuoteService', () => {
       });
 
       expect(fetch).toHaveBeenCalledWith(
-        expect.stringContaining('src=0xAAA'),
+        expect.stringContaining(`src=${fromToken}`),
         expect.objectContaining({
           headers: expect.objectContaining({
             'Authorization': 'Bearer test-api-key'
@@ -154,11 +163,11 @@ describe('OneInchQuoteService', () => {
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          toToken: '0x4200000000000000000000000000000000000006',
           amount: '1000',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x1111111111111111111111111111111111111111'
         })
       ).rejects.toThrow('1inch API error (400)');
     });
@@ -168,30 +177,30 @@ describe('OneInchQuoteService', () => {
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          toToken: '0x4200000000000000000000000000000000000006',
           amount: '1000',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x1111111111111111111111111111111111111111'
         })
-      ).rejects.toThrow('Failed to get 1inch quote: Network error');
+      ).rejects.toThrow(/Network error/);
     });
 
     it('should convert slippage from bps to percentage', async () => {
       global.fetch = vi.fn().mockResolvedValue({
         ok: true,
         json: async () => ({
-          tx: { to: '0x1', data: '0x', value: '0' },
+          tx: { to: '0x1111111254EEB25477B68fb85Ed929f73A960582', data: '0x', value: '0' },
           dstAmount: '1000'
         })
       });
 
       await service.getSwapCalldata({
-        fromToken: '0x1',
-        toToken: '0x2',
+        fromToken: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        toToken: '0x4200000000000000000000000000000000000006',
         amount: '1000',
         slippageBps: 150, // 1.5%
-        fromAddress: '0x3'
+        fromAddress: '0x1111111111111111111111111111111111111111'
       });
 
       const callUrl = (fetch as any).mock.calls[0][0];

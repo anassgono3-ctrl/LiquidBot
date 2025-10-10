@@ -99,6 +99,7 @@ export const rawEnvSchema = z.object({
   CHAIN_ID: z.string().optional(),
   ONEINCH_API_KEY: z.string().optional(),
   ONEINCH_BASE_URL: z.string().optional(),
+  ZEROX_API_KEY: z.string().optional(),
   MAX_SLIPPAGE_BPS: z.string().optional(),
   CLOSE_FACTOR_MODE: z.string().optional()
 });
@@ -203,6 +204,7 @@ export const env = (() => {
     chainId: Number(parsed.CHAIN_ID || 8453),
     oneInchApiKey: parsed.ONEINCH_API_KEY,
     oneInchBaseUrl: parsed.ONEINCH_BASE_URL || 'https://api.1inch.dev/swap/v6.0/8453',
+    zeroXApiKey: parsed.ZEROX_API_KEY,
     maxSlippageBps: Number(parsed.MAX_SLIPPAGE_BPS || 100),
     closeFactorMode: parsed.CLOSE_FACTOR_MODE || 'auto'
   };
