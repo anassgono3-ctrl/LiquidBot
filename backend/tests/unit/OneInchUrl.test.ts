@@ -50,7 +50,7 @@ describe('OneInchQuoteService URL Construction', () => {
         toToken: USDC_BASE,
         amount: '1000000000000000000',
         slippageBps: 100,
-        fromAddress: '0xTest'
+        fromAddress: '0x0000000000000000000000000000000000000001'
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -76,7 +76,7 @@ describe('OneInchQuoteService URL Construction', () => {
       expect(callUrl).toContain(`src=${WETH_BASE}`);
       expect(callUrl).toContain(`dst=${USDC_BASE}`);
       expect(callUrl).toContain('amount=1000000000000000000');
-      expect(callUrl).toContain('from=0xTest');
+      expect(callUrl).toContain('from=0x0000000000000000000000000000000000000001');
       expect(callUrl).toContain('slippage=1'); // 100 bps = 1%
       
       // Verify Authorization header
@@ -133,7 +133,7 @@ describe('OneInchQuoteService URL Construction', () => {
         toToken: USDC_BASE,
         amount: '1000000000000000000',
         slippageBps: 100,
-        fromAddress: '0xTest'
+        fromAddress: '0x0000000000000000000000000000000000000001'
       });
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -159,7 +159,7 @@ describe('OneInchQuoteService URL Construction', () => {
       expect(callUrl).toContain(`fromTokenAddress=${WETH_BASE}`);
       expect(callUrl).toContain(`toTokenAddress=${USDC_BASE}`);
       expect(callUrl).toContain('amount=1000000000000000000');
-      expect(callUrl).toContain('fromAddress=0xTest');
+      expect(callUrl).toContain('fromAddress=0x0000000000000000000000000000000000000001');
       expect(callUrl).toContain('slippage=1'); // 100 bps = 1%
       
       // Verify NO Authorization header for v5
@@ -244,7 +244,7 @@ describe('OneInchQuoteService URL Construction', () => {
         toToken: USDC_BASE,
         amount: '1000',
         slippageBps: 250, // 2.5%
-        fromAddress: '0xTest'
+        fromAddress: '0x0000000000000000000000000000000000000001'
       });
 
       const callUrl = fetchMock.mock.calls[0][0] as string;
@@ -279,6 +279,157 @@ describe('OneInchQuoteService URL Construction', () => {
         chainId: 8453
       });
       expect(serviceWithoutKey.isUsingV6()).toBe(false);
+    });
+  });
+
+  describe('symbol resolution', () => {
+    it('should resolve WETH symbol to address in v6 endpoint', async () => {
+      const service = new OneInchQuoteService({
+        apiKey: 'test-key',
+        chainId: 8453
+      });
+
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          tx: { to: '0x1111111254EEB25477B68fb85Ed929f73A960582', data: '0xabc', value: '0' },
+          dstAmount: '1000000'
+        })
+      });
+
+      await service.getSwapCalldata({
+        fromToken: 'WETH',  // Symbol instead of address
+        toToken: 'USDC',    // Symbol instead of address
+        amount: '1000000000000000000',
+        slippageBps: 100,
+        fromAddress: '0x0000000000000000000000000000000000000001'
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const callUrl = fetchMock.mock.calls[0][0] as string;
+
+      // Verify that symbols were resolved to addresses
+      expect(callUrl).toContain(`src=${WETH_BASE}`);
+      expect(callUrl).toContain(`dst=${USDC_BASE}`);
+      
+      // Verify symbols are NOT in URL
+      expect(callUrl).not.toContain('src=WETH');
+      expect(callUrl).not.toContain('dst=USDC');
+    });
+
+    it('should resolve WETH symbol to address in v5 endpoint', async () => {
+      const service = new OneInchQuoteService({
+        apiKey: '',
+        chainId: 8453
+      });
+
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          tx: { to: '0x1111111254EEB25477B68fb85Ed929f73A960582', data: '0xdef', value: '0' },
+          toAmount: '2000000'
+        })
+      });
+
+      await service.getSwapCalldata({
+        fromToken: 'WETH',  // Symbol instead of address
+        toToken: 'USDC',    // Symbol instead of address
+        amount: '1000000000000000000',
+        slippageBps: 100,
+        fromAddress: '0x0000000000000000000000000000000000000001'
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const callUrl = fetchMock.mock.calls[0][0] as string;
+
+      // Verify that symbols were resolved to addresses
+      expect(callUrl).toContain(`fromTokenAddress=${WETH_BASE}`);
+      expect(callUrl).toContain(`toTokenAddress=${USDC_BASE}`);
+      
+      // Verify symbols are NOT in URL
+      expect(callUrl).not.toContain('fromTokenAddress=WETH');
+      expect(callUrl).not.toContain('toTokenAddress=USDC');
+    });
+
+    it('should accept addresses directly without modification', async () => {
+      const service = new OneInchQuoteService({
+        apiKey: 'test-key',
+        chainId: 8453
+      });
+
+      fetchMock.mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          tx: { to: '0x1111111254EEB25477B68fb85Ed929f73A960582', data: '0xabc', value: '0' },
+          dstAmount: '1000000'
+        })
+      });
+
+      await service.getSwapCalldata({
+        fromToken: WETH_BASE,  // Already an address
+        toToken: USDC_BASE,    // Already an address
+        amount: '1000000000000000000',
+        slippageBps: 100,
+        fromAddress: '0x0000000000000000000000000000000000000001'
+      });
+
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const callUrl = fetchMock.mock.calls[0][0] as string;
+
+      // Verify addresses are used as-is
+      expect(callUrl).toContain(`src=${WETH_BASE}`);
+      expect(callUrl).toContain(`dst=${USDC_BASE}`);
+    });
+
+    it('should throw error for invalid fromToken symbol', async () => {
+      const service = new OneInchQuoteService({
+        apiKey: 'test-key',
+        chainId: 8453
+      });
+
+      await expect(
+        service.getSwapCalldata({
+          fromToken: 'INVALID_TOKEN',  // Unknown symbol
+          toToken: 'USDC',
+          amount: '1000000000000000000',
+          slippageBps: 100,
+          fromAddress: '0x0000000000000000000000000000000000000001'
+        })
+      ).rejects.toThrow('fromToken must resolve to an Ethereum address: INVALID_TOKEN -> INVALID_TOKEN');
+    });
+
+    it('should throw error for invalid toToken symbol', async () => {
+      const service = new OneInchQuoteService({
+        apiKey: 'test-key',
+        chainId: 8453
+      });
+
+      await expect(
+        service.getSwapCalldata({
+          fromToken: 'WETH',
+          toToken: 'INVALID_TOKEN',  // Unknown symbol
+          amount: '1000000000000000000',
+          slippageBps: 100,
+          fromAddress: '0x0000000000000000000000000000000000000001'
+        })
+      ).rejects.toThrow('toToken must resolve to an Ethereum address: INVALID_TOKEN -> INVALID_TOKEN');
+    });
+
+    it('should throw error for invalid fromAddress', async () => {
+      const service = new OneInchQuoteService({
+        apiKey: 'test-key',
+        chainId: 8453
+      });
+
+      await expect(
+        service.getSwapCalldata({
+          fromToken: 'WETH',
+          toToken: 'USDC',
+          amount: '1000000000000000000',
+          slippageBps: 100,
+          fromAddress: '0xInvalidAddress'  // Invalid address format
+        })
+      ).rejects.toThrow('fromAddress must be a valid Ethereum address: 0xInvalidAddress');
     });
   });
 });

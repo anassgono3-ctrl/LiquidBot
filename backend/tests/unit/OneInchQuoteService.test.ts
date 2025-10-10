@@ -63,11 +63,11 @@ describe('OneInchQuoteService', () => {
       });
 
       const result = await unconfiguredService.getSwapCalldata({
-        fromToken: '0x1',
-        toToken: '0x2',
+        fromToken: '0x0000000000000000000000000000000000000001',
+        toToken: '0x0000000000000000000000000000000000000002',
         amount: '1000',
         slippageBps: 100,
-        fromAddress: '0x3'
+        fromAddress: '0x0000000000000000000000000000000000000003'
       });
 
       expect(result).toBeDefined();
@@ -78,20 +78,20 @@ describe('OneInchQuoteService', () => {
       await expect(
         service.getSwapCalldata({
           fromToken: '',
-          toToken: '0x2',
+          toToken: '0x0000000000000000000000000000000000000002',
           amount: '1000',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x0000000000000000000000000000000000000003'
         })
       ).rejects.toThrow('fromToken and toToken are required');
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x0000000000000000000000000000000000000001',
+          toToken: '0x0000000000000000000000000000000000000002',
           amount: '0',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x0000000000000000000000000000000000000003'
         })
       ).rejects.toThrow('amount must be greater than 0');
     });
@@ -99,21 +99,21 @@ describe('OneInchQuoteService', () => {
     it('should validate slippage range', async () => {
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x0000000000000000000000000000000000000001',
+          toToken: '0x0000000000000000000000000000000000000002',
           amount: '1000',
           slippageBps: -1,
-          fromAddress: '0x3'
+          fromAddress: '0x0000000000000000000000000000000000000003'
         })
       ).rejects.toThrow('slippageBps must be between 0 and 5000');
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x0000000000000000000000000000000000000001',
+          toToken: '0x0000000000000000000000000000000000000002',
           amount: '1000',
           slippageBps: 6000,
-          fromAddress: '0x3'
+          fromAddress: '0x0000000000000000000000000000000000000003'
         })
       ).rejects.toThrow('slippageBps must be between 0 and 5000');
     });
@@ -134,11 +134,11 @@ describe('OneInchQuoteService', () => {
       });
 
       const result = await service.getSwapCalldata({
-        fromToken: '0xAAA',
-        toToken: '0xBBB',
+        fromToken: '0x000000000000000000000000000000000000000A',
+        toToken: '0x000000000000000000000000000000000000000B',
         amount: '1000',
         slippageBps: 100,
-        fromAddress: '0xCCC'
+        fromAddress: '0x000000000000000000000000000000000000000C'
       });
 
       expect(result).toEqual({
@@ -149,7 +149,7 @@ describe('OneInchQuoteService', () => {
       });
 
       expect(fetch).toHaveBeenCalledWith(
-        expect.stringContaining('src=0xAAA'),
+        expect.stringContaining('src=0x000000000000000000000000000000000000000A'),
         expect.objectContaining({
           headers: expect.objectContaining({
             'Authorization': 'Bearer test-api-key'
@@ -167,11 +167,11 @@ describe('OneInchQuoteService', () => {
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x0000000000000000000000000000000000000001',
+          toToken: '0x0000000000000000000000000000000000000002',
           amount: '1000',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x0000000000000000000000000000000000000003'
         })
       ).rejects.toThrow('1inch API error (400)');
     });
@@ -181,11 +181,11 @@ describe('OneInchQuoteService', () => {
 
       await expect(
         service.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
+          fromToken: '0x0000000000000000000000000000000000000001',
+          toToken: '0x0000000000000000000000000000000000000002',
           amount: '1000',
           slippageBps: 100,
-          fromAddress: '0x3'
+          fromAddress: '0x0000000000000000000000000000000000000003'
         })
       ).rejects.toThrow('Failed to get 1inch quote: Network error');
     });
@@ -200,11 +200,11 @@ describe('OneInchQuoteService', () => {
       });
 
       await service.getSwapCalldata({
-        fromToken: '0x1',
-        toToken: '0x2',
+        fromToken: '0x0000000000000000000000000000000000000001',
+        toToken: '0x0000000000000000000000000000000000000002',
         amount: '1000',
         slippageBps: 150, // 1.5%
-        fromAddress: '0x3'
+        fromAddress: '0x0000000000000000000000000000000000000003'
       });
 
       const callUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
