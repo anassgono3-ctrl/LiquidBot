@@ -1,7 +1,9 @@
 // ExecutionService: Execution pipeline with MEV/gas controls
 import { ethers } from 'ethers';
+
 import type { Opportunity } from '../types/index.js';
 import { executionConfig } from '../config/executionConfig.js';
+
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 
 export interface ExecutionResult {
@@ -121,12 +123,11 @@ export class ExecutionService {
       };
     }
 
-    if (!this.oneInchService.isConfigured()) {
-      return {
-        success: false,
-        simulated: false,
-        reason: 'oneinch_not_configured: missing ONEINCH_API_KEY'
-      };
+    // 1inch service is always available (v6 with key or v5 public fallback)
+    // Log a warning if using v5 public API
+    if (!this.oneInchService.isUsingV6?.()) {
+      // eslint-disable-next-line no-console
+      console.warn('[execution] Using 1inch v5 public API - consider setting ONEINCH_API_KEY for v6');
     }
 
     try {
@@ -189,7 +190,7 @@ export class ExecutionService {
         // Use private bundle RPC if configured
         // eslint-disable-next-line no-console
         console.log('[execution] Using private bundle RPC:', privateBundleRpc);
-        tx = await this.submitPrivateTransaction(executor, liquidationParams, privateBundleRpc);
+        tx = await this.submitPrivateTransaction(executor, liquidationParams);
       } else {
         // Standard transaction
         tx = await executor.initiateLiquidation(liquidationParams);
@@ -264,12 +265,10 @@ export class ExecutionService {
    * Submit transaction via private bundle RPC
    * @param executor Contract instance
    * @param params Liquidation parameters
-   * @param privateBundleRpc Private RPC URL
    */
   private async submitPrivateTransaction(
     executor: ethers.Contract,
-    params: unknown,
-    privateBundleRpc: string
+    params: unknown
   ): Promise<ethers.ContractTransactionResponse> {
     // For now, fall back to standard transaction
     // Full private bundle implementation would require specific bundle RPC protocols

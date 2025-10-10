@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+
 import { OneInchQuoteService } from '../../src/services/OneInchQuoteService.js';
 
 describe('OneInchQuoteService', () => {
@@ -29,7 +30,9 @@ describe('OneInchQuoteService', () => {
       expect(consoleWarnSpy).toHaveBeenCalledWith(
         expect.stringContaining('[1inch] API key not configured')
       );
-      expect(service.isConfigured()).toBe(false);
+      // Service is always configured (v6 with key or v5 public fallback)
+      expect(service.isConfigured()).toBe(true);
+      expect(service.isUsingV6()).toBe(false);
     });
 
     it('should accept custom options', () => {
@@ -47,18 +50,28 @@ describe('OneInchQuoteService', () => {
   });
 
   describe('getSwapCalldata', () => {
-    it('should throw if API key not configured', async () => {
+    it('should work without API key (v5 fallback)', async () => {
       const unconfiguredService = new OneInchQuoteService({ apiKey: '' });
       
-      await expect(
-        unconfiguredService.getSwapCalldata({
-          fromToken: '0x1',
-          toToken: '0x2',
-          amount: '1000',
-          slippageBps: 100,
-          fromAddress: '0x3'
+      // Mock successful v5 response
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          tx: { to: '0x1111111254EEB25477B68fb85Ed929f73A960582', data: '0xabc', value: '0' },
+          toAmount: '1000'
         })
-      ).rejects.toThrow(/1inch API key not configured|fetch failed/);
+      });
+
+      const result = await unconfiguredService.getSwapCalldata({
+        fromToken: '0x1',
+        toToken: '0x2',
+        amount: '1000',
+        slippageBps: 100,
+        fromAddress: '0x3'
+      });
+
+      expect(result).toBeDefined();
+      expect(result.to).toBe('0x1111111254EEB25477B68fb85Ed929f73A960582');
     });
 
     it('should validate required parameters', async () => {
@@ -194,7 +207,7 @@ describe('OneInchQuoteService', () => {
         fromAddress: '0x3'
       });
 
-      const callUrl = (fetch as any).mock.calls[0][0];
+      const callUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
       expect(callUrl).toContain('slippage=1.5');
     });
   });
@@ -202,15 +215,18 @@ describe('OneInchQuoteService', () => {
   describe('isConfigured', () => {
     it('should return true when API key is set', () => {
       expect(service.isConfigured()).toBe(true);
+      expect(service.isUsingV6()).toBe(true);
     });
 
-    it('should return false when API key is empty string', () => {
+    it('should return true even without API key (v5 fallback)', () => {
       const unconfiguredService = new OneInchQuoteService({ 
         apiKey: '',
         baseUrl: 'https://test.com',
         chainId: 8453
       });
-      expect(unconfiguredService.isConfigured()).toBe(false);
+      // Service is always configured (v6 with key or v5 public fallback)
+      expect(unconfiguredService.isConfigured()).toBe(true);
+      expect(unconfiguredService.isUsingV6()).toBe(false);
     });
   });
 });

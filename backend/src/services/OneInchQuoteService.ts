@@ -17,6 +17,7 @@ export interface SwapQuoteResponse {
 
 /**
  * OneInchQuoteService provides swap calldata generation via 1inch API
+ * Supports both v6 (with API key) and v5 (public fallback) endpoints
  */
 export class OneInchQuoteService {
   private apiKey: string;
@@ -29,24 +30,31 @@ export class OneInchQuoteService {
     chainId?: number;
   }) {
     this.apiKey = options?.apiKey !== undefined ? options.apiKey : (process.env.ONEINCH_API_KEY || '');
-    this.baseUrl = options?.baseUrl !== undefined ? options.baseUrl : (process.env.ONEINCH_BASE_URL || 'https://api.1inch.dev/swap/v6.0/8453');
     this.chainId = options?.chainId !== undefined ? options.chainId : Number(process.env.CHAIN_ID || 8453);
+    
+    // Determine baseUrl based on API key presence
+    if (options?.baseUrl !== undefined) {
+      this.baseUrl = options.baseUrl;
+    } else if (this.apiKey) {
+      // v6 endpoint with API key
+      this.baseUrl = process.env.ONEINCH_BASE_URL || `https://api.1inch.dev/swap/v6.0/${this.chainId}`;
+    } else {
+      // v5 public fallback
+      this.baseUrl = `https://api.1inch.exchange/v5.0/${this.chainId}`;
+    }
 
     if (!this.apiKey) {
-      console.warn('[1inch] API key not configured - service will not work');
+      console.warn('[1inch] API key not configured - using public v5 API (may have rate limits)');
     }
   }
 
   /**
    * Get swap calldata from 1inch API
+   * Automatically uses v6 (with API key) or v5 (public) endpoints
    * @param request Swap parameters
    * @returns Swap calldata and metadata
    */
   async getSwapCalldata(request: SwapQuoteRequest): Promise<SwapQuoteResponse> {
-    if (!this.apiKey) {
-      throw new Error('1inch API key not configured');
-    }
-
     // Validate inputs
     if (!request.fromToken || !request.toToken) {
       throw new Error('fromToken and toToken are required');
@@ -58,26 +66,42 @@ export class OneInchQuoteService {
       throw new Error('slippageBps must be between 0 and 5000 (0-50%)');
     }
 
-    // Build query parameters
-    const params = new URLSearchParams({
-      src: request.fromToken,
-      dst: request.toToken,
-      amount: request.amount,
-      from: request.fromAddress,
-      slippage: (request.slippageBps / 100).toString(), // Convert bps to percentage
-      disableEstimate: 'true',
-      allowPartialFill: 'false'
-    });
+    // Build query parameters based on API version
+    let params: URLSearchParams;
+    const headers: Record<string, string> = {
+      'Accept': 'application/json'
+    };
+
+    if (this.apiKey) {
+      // v6 endpoint with API key - uses src/dst/amount/from/slippage
+      params = new URLSearchParams({
+        src: request.fromToken,
+        dst: request.toToken,
+        amount: request.amount,
+        from: request.fromAddress,
+        slippage: (request.slippageBps / 100).toString(), // Convert bps to percentage
+        disableEstimate: 'true',
+        allowPartialFill: 'false'
+      });
+      headers['Authorization'] = `Bearer ${this.apiKey}`;
+    } else {
+      // v5 public endpoint - uses fromTokenAddress/toTokenAddress/amount/fromAddress/slippage
+      params = new URLSearchParams({
+        fromTokenAddress: request.fromToken,
+        toTokenAddress: request.toToken,
+        amount: request.amount,
+        fromAddress: request.fromAddress,
+        slippage: (request.slippageBps / 100).toString(), // Convert bps to percentage
+        disableEstimate: 'true'
+      });
+    }
 
     const url = `${this.baseUrl}/swap?${params.toString()}`;
 
     try {
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${this.apiKey}`,
-          'Accept': 'application/json'
-        }
+        headers
       });
 
       if (!response.ok) {
@@ -87,7 +111,7 @@ export class OneInchQuoteService {
 
       const data = await response.json();
 
-      // Parse response
+      // Parse response (format is similar for both v5 and v6)
       return {
         to: data.tx?.to || data.to,
         data: data.tx?.data || data.data,
@@ -104,8 +128,17 @@ export class OneInchQuoteService {
 
   /**
    * Check if service is configured and available
+   * Returns true if API key is configured (v6) or always true for v5 fallback
    */
   isConfigured(): boolean {
+    // Service is always available - either with v6 (if API key) or v5 (public)
+    return true;
+  }
+
+  /**
+   * Check if using v6 endpoint (with API key)
+   */
+  isUsingV6(): boolean {
     return !!this.apiKey && this.apiKey.length > 0;
   }
 
