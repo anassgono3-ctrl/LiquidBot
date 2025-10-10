@@ -121,12 +121,11 @@ export class ExecutionService {
       };
     }
 
-    if (!this.oneInchService.isConfigured()) {
-      return {
-        success: false,
-        simulated: false,
-        reason: 'oneinch_not_configured: missing ONEINCH_API_KEY'
-      };
+    // 1inch service is always available (v6 with key or v5 public fallback)
+    // Log a warning if using v5 public API
+    if (!this.oneInchService.isUsingV6?.()) {
+      // eslint-disable-next-line no-console
+      console.warn('[execution] Using 1inch v5 public API - consider setting ONEINCH_API_KEY for v6');
     }
 
     try {
