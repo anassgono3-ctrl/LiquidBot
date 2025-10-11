@@ -144,6 +144,93 @@ MAX_SLIPPAGE_BPS=100
 
 The service will automatically use v5 public endpoint when no API key is configured.
 
+## Asset Whitelisting
+
+Before the LiquidationExecutor can process liquidations, assets must be whitelisted on-chain. The backend provides a script to whitelist the core Base assets (WETH and USDC).
+
+### Prerequisites
+
+The following environment variables must be set in `.env`:
+
+```bash
+# Deployed LiquidationExecutor contract address
+EXECUTOR_ADDRESS=0x...
+
+# Private key for execution (must be contract owner)
+EXECUTION_PRIVATE_KEY=0x...
+
+# Base network RPC endpoint
+RPC_URL=https://mainnet.base.org
+```
+
+### Whitelist Script
+
+The script whitelists two core assets on Base:
+- **WETH:** `0x4200000000000000000000000000000000000006`
+- **USDC:** `0x833589fCD6eDb6E08f4c7C32D4f61A6B2fcEca34`
+
+### Usage
+
+```bash
+cd backend
+npm run whitelist:base
+```
+
+The script will:
+1. Validate required environment variables
+2. Connect to Base network via RPC_URL
+3. Call `setWhitelist(asset, true)` for WETH and USDC
+4. Verify whitelisting by reading `whitelistedAssets(address)`
+5. Print confirmation and exit
+
+### Expected Output
+
+```
+================================================================================
+Whitelist Base Assets Script
+================================================================================
+
+Configuration:
+  Executor Address: 0x...
+  RPC URL: https://mainnet.base.org
+  WETH (Base): 0x4200000000000000000000000000000000000006
+  USDC (Base): 0x833589fCD6eDb6E08f4c7C32D4f61A6B2fcEca34
+
+📡 Connecting to Base network...
+✅ Connected as: 0x...
+
+Processing WETH...
+  Current status: false
+  Sending setWhitelist transaction...
+  Transaction hash: 0x...
+  Waiting for confirmation...
+  ✅ Transaction confirmed
+  WETH whitelisted: true
+
+Processing USDC...
+  Current status: false
+  Sending setWhitelist transaction...
+  Transaction hash: 0x...
+  Waiting for confirmation...
+  ✅ Transaction confirmed
+  USDC whitelisted: true
+
+================================================================================
+✅ Whitelisting Complete
+================================================================================
+  WETH whitelisted: true
+  USDC whitelisted: true
+
+The LiquidationExecutor is now ready to process liquidations with WETH and USDC.
+```
+
+### Notes
+
+- The script is **idempotent** - it will skip already-whitelisted assets
+- You must be the contract owner to whitelist assets
+- Both transactions require gas fees on Base
+- The script exits with code 1 on any error
+
 ## Benefits of This Implementation
 
 1. **Simplified Architecture**: Single aggregator integration point (1inch only)
