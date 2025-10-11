@@ -16,6 +16,31 @@ import {
 // Helper for numeric fields that may come as strings
 const numericString = z.string().regex(/^\d+$/).transform(v => Number(v));
 
+/**
+ * Extract a valid Ethereum address from a potentially composite ID.
+ * Aave subgraph reserve.id may be composite (underlyingAsset + PoolAddressesProvider).
+ * This extracts the first valid 0x[a-fA-F0-9]{40} substring.
+ * @param value The value to extract address from
+ * @returns The extracted address or original value if no valid address found
+ */
+function extractAddress(value: string): string {
+  if (!value) return value;
+  
+  // If it's already a valid address (0x + 40 hex chars), return as-is
+  if (/^0x[0-9a-fA-F]{40}$/.test(value)) {
+    return value;
+  }
+  
+  // Try to extract first valid address from composite string
+  const match = value.match(/0x[0-9a-fA-F]{40}/);
+  if (match) {
+    return match[0];
+  }
+  
+  // Return original value if no valid address found
+  return value;
+}
+
 const ReserveSchema = z.object({
   id: z.string(),
   symbol: z.string(),
@@ -43,6 +68,7 @@ const UserSchema = z.object({
 
 const LiquidationReserveSchema = z.object({
   id: z.string(),
+  underlyingAsset: z.string().optional(),
   symbol: z.string().optional(),
   decimals: z.union([
     z.number(),
@@ -73,7 +99,9 @@ const LiquidationCallSchema = LiquidationCallRawSchema.transform(raw => {
     collateralAmount: raw.collateralAmount,
     txHash: raw.txHash || null,
     principalReserve: raw.principalReserve ? {
-      id: raw.principalReserve.id,
+      id: raw.principalReserve.underlyingAsset 
+        ? raw.principalReserve.underlyingAsset 
+        : extractAddress(raw.principalReserve.id),
       symbol: raw.principalReserve.symbol || null,
       decimals: raw.principalReserve.decimals !== undefined
         ? (typeof raw.principalReserve.decimals === 'number'
@@ -82,7 +110,9 @@ const LiquidationCallSchema = LiquidationCallRawSchema.transform(raw => {
         : null
     } : null,
     collateralReserve: raw.collateralReserve ? {
-      id: raw.collateralReserve.id,
+      id: raw.collateralReserve.underlyingAsset 
+        ? raw.collateralReserve.underlyingAsset 
+        : extractAddress(raw.collateralReserve.id),
       symbol: raw.collateralReserve.symbol || null,
       decimals: raw.collateralReserve.decimals !== undefined
         ? (typeof raw.collateralReserve.decimals === 'number'
@@ -305,8 +335,8 @@ export class SubgraphService {
             timestamp
             user { id }
             liquidator
-            collateralReserve { id symbol decimals }
-            principalReserve { id symbol decimals }
+            collateralReserve { id underlyingAsset symbol decimals }
+            principalReserve { id underlyingAsset symbol decimals }
             collateralAmount
             principalAmount
             txHash
