@@ -127,6 +127,101 @@ describe('SubgraphService', () => {
       const result = await service.getLiquidationCalls(5);
       expect(result).toHaveLength(0);
     });
+
+    it('should extract address from composite reserve ID when underlyingAsset is missing', async () => {
+      const service = liveServiceWith({
+        liquidationCalls: [
+          {
+            id: '0xcomp1',
+            timestamp: 1234567890,
+            liquidator: '0xabc',
+            user: { id: '0xdef' },
+            principalAmount: '1000000',
+            collateralAmount: '2000000',
+            txHash: '0xtxhash',
+            // Composite IDs without underlyingAsset field
+            principalReserve: { 
+              id: '0x4200000000000000000000000000000000000006e20fcbf85d413f1d3e3f9da58364d', 
+              symbol: 'WETH', 
+              decimals: 18 
+            },
+            collateralReserve: { 
+              id: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA029130xe20fcbf85d413f1d3e3f9da58364d', 
+              symbol: 'USDC', 
+              decimals: 6 
+            },
+          },
+        ],
+      });
+      const result = await service.getLiquidationCalls(10);
+      expect(result).toHaveLength(1);
+      expect(result[0].principalReserve?.id).toBe('0x4200000000000000000000000000000000000006');
+      expect(result[0].collateralReserve?.id).toBe('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+    });
+
+    it('should use underlyingAsset when available instead of composite ID', async () => {
+      const service = liveServiceWith({
+        liquidationCalls: [
+          {
+            id: '0xunder1',
+            timestamp: 1234567890,
+            liquidator: '0xabc',
+            user: { id: '0xdef' },
+            principalAmount: '1000000',
+            collateralAmount: '2000000',
+            txHash: '0xtxhash',
+            // With underlyingAsset field (preferred)
+            principalReserve: { 
+              id: '0x4200000000000000000000000000000000000006e20fcbf85d413f1d3e3f9da58364d',
+              underlyingAsset: '0x4200000000000000000000000000000000000006',
+              symbol: 'WETH', 
+              decimals: 18 
+            },
+            collateralReserve: { 
+              id: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA029130xe20fcbf85d413f1d3e3f9da58364d',
+              underlyingAsset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+              symbol: 'USDC', 
+              decimals: 6 
+            },
+          },
+        ],
+      });
+      const result = await service.getLiquidationCalls(10);
+      expect(result).toHaveLength(1);
+      expect(result[0].principalReserve?.id).toBe('0x4200000000000000000000000000000000000006');
+      expect(result[0].collateralReserve?.id).toBe('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+    });
+
+    it('should handle already-valid addresses in ID field', async () => {
+      const service = liveServiceWith({
+        liquidationCalls: [
+          {
+            id: '0xvalid1',
+            timestamp: 1234567890,
+            liquidator: '0xabc',
+            user: { id: '0xdef' },
+            principalAmount: '1000000',
+            collateralAmount: '2000000',
+            txHash: '0xtxhash',
+            // Already valid addresses (no composite)
+            principalReserve: { 
+              id: '0x4200000000000000000000000000000000000006',
+              symbol: 'WETH', 
+              decimals: 18 
+            },
+            collateralReserve: { 
+              id: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+              symbol: 'USDC', 
+              decimals: 6 
+            },
+          },
+        ],
+      });
+      const result = await service.getLiquidationCalls(10);
+      expect(result).toHaveLength(1);
+      expect(result[0].principalReserve?.id).toBe('0x4200000000000000000000000000000000000006');
+      expect(result[0].collateralReserve?.id).toBe('0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913');
+    });
   });
 
   describe('getReserves', () => {
