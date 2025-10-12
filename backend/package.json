@@ -30,7 +30,8 @@
     "gen:types": "tsx scripts/generate-types.ts",
     "test:1inch-url": "tsx scripts/test-1inch-url.ts",
     "verify:hf": "node -r dotenv/config dist/scripts/verify-data.js --recent=10 --show-hf",
-    "diagnose": "tsx scripts/diagnose-all.ts"
+    "diagnose": "tsx scripts/diagnose-all.ts",
+    "hf:harness": "tsx -r dotenv/config scripts/hf-realtime-harness.ts"
   },
   "dependencies": {
     "@apollo/client": "^3.10.0",
