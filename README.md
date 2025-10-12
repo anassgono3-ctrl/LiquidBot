@@ -667,6 +667,7 @@ The test suite validates:
 | `MAX_SLIPPAGE_BPS` | 100 | Max slippage (1%) |
 | `CLOSE_FACTOR_MODE` | auto | Close factor: auto or fixed |
 | `PRIVATE_BUNDLE_RPC` | - | Optional MEV relay URL |
+| `AAVE_POOL` | `0xA238Dd80C259a72e81d7e4664a9801593F98d1c5` | Aave V3 Pool for HF checks |
 
 ### Notes
 
