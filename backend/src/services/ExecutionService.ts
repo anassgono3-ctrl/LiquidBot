@@ -46,6 +46,57 @@ export class ExecutionService {
   }
 
   /**
+   * Check if user is currently liquidatable by querying Aave health factor
+   * @param userAddress The user address to check
+   * @returns Health factor check result
+   */
+  private async checkAaveHealthFactor(userAddress: string): Promise<{ liquidatable: boolean; healthFactor: string; reason?: string }> {
+    if (!this.provider) {
+      // No provider configured, skip check
+      return { liquidatable: true, healthFactor: 'unknown' };
+    }
+
+    try {
+      // Aave V3 Pool address on Base (default if not specified)
+      const aavePoolAddress = process.env.AAVE_POOL || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5';
+      
+      // ABI for getUserAccountData
+      const aavePoolAbi = [
+        'function getUserAccountData(address user) external view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)'
+      ];
+      
+      const aavePool = new ethers.Contract(aavePoolAddress, aavePoolAbi, this.provider);
+      
+      // Query user account data
+      const accountData = await aavePool.getUserAccountData(userAddress);
+      const healthFactor = accountData.healthFactor;
+      
+      // Health factor >= 1e18 means user is not liquidatable
+      const threshold = BigInt('1000000000000000000'); // 1e18
+      
+      if (healthFactor >= threshold) {
+        const hfFormatted = (Number(healthFactor) / 1e18).toFixed(4);
+        return {
+          liquidatable: false,
+          healthFactor: hfFormatted,
+          reason: `user_not_liquidatable: HF=${hfFormatted}`
+        };
+      }
+      
+      return {
+        liquidatable: true,
+        healthFactor: (Number(healthFactor) / 1e18).toFixed(4)
+      };
+      
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[execution] Failed to check Aave health factor, continuing:', error instanceof Error ? error.message : error);
+      // On error, assume liquidatable (don't block execution on HF check failure)
+      return { liquidatable: true, healthFactor: 'error' };
+    }
+  }
+
+  /**
    * Execute a liquidation opportunity with all safety checks
    * @param opportunity The opportunity to execute
    * @returns Execution result (simulated or real)
@@ -139,10 +190,26 @@ export class ExecutionService {
         debt: opportunity.principalReserve.symbol
       });
 
-      // Step 1: Calculate debt to cover (respecting close factor)
+      // Step 1: Preflight check - verify user is currently liquidatable
+      const hfCheck = await this.checkAaveHealthFactor(opportunity.user);
+      
+      if (!hfCheck.liquidatable) {
+        // eslint-disable-next-line no-console
+        console.log('[execution] Skipping execution - user not liquidatable:', hfCheck.reason);
+        return {
+          success: false,
+          simulated: false,
+          reason: hfCheck.reason
+        };
+      }
+      
+      // eslint-disable-next-line no-console
+      console.log('[execution] Health factor check passed:', { healthFactor: hfCheck.healthFactor });
+
+      // Step 2: Calculate debt to cover (respecting close factor)
       const debtToCover = await this.calculateDebtToCover(opportunity);
       
-      // Step 2: Get 1inch swap quote
+      // Step 3: Get 1inch swap quote
       const slippageBps = Number(process.env.MAX_SLIPPAGE_BPS || 100); // 1% default
       
       const swapQuote = await this.oneInchService.getSwapCalldata({
@@ -153,7 +220,7 @@ export class ExecutionService {
         fromAddress: this.executorAddress
       });
 
-      // Step 3: Build liquidation parameters
+      // Step 4: Build liquidation parameters
       const liquidationParams = {
         user: opportunity.user,
         collateralAsset: opportunity.collateralReserve.id,
@@ -164,9 +231,12 @@ export class ExecutionService {
         payout: this.wallet.address // Send profit to executor wallet
       };
 
-      // Step 4: Prepare executor contract call
+      // Step 5: Prepare executor contract call with custom errors for better logging
       const executorAbi = [
-        'function initiateLiquidation((address user, address collateralAsset, address debtAsset, uint256 debtToCover, bytes oneInchCalldata, uint256 minOut, address payout) params) external'
+        'function initiateLiquidation((address user, address collateralAsset, address debtAsset, uint256 debtToCover, bytes oneInchCalldata, uint256 minOut, address payout) params) external',
+        'error AssetNotWhitelisted()',
+        'error ContractPaused()',
+        'error Unauthorized()'
       ];
       
       const executor = new ethers.Contract(
@@ -175,7 +245,7 @@ export class ExecutionService {
         this.wallet
       );
 
-      // Step 5: Send transaction
+      // Step 6: Send transaction
       // eslint-disable-next-line no-console
       console.log('[execution] Sending transaction to executor...', {
         executor: this.executorAddress,
@@ -199,7 +269,7 @@ export class ExecutionService {
       // eslint-disable-next-line no-console
       console.log('[execution] Transaction sent:', tx.hash);
 
-      // Step 6: Wait for confirmation
+      // Step 7: Wait for confirmation
       const receipt = await tx.wait();
       
       // eslint-disable-next-line no-console
@@ -218,7 +288,7 @@ export class ExecutionService {
         };
       }
 
-      // Step 7: Parse profit from events (optional - placeholder)
+      // Step 8: Parse profit from events (optional - placeholder)
       const realizedProfit = opportunity.profitEstimateUsd || 0;
 
       return {
