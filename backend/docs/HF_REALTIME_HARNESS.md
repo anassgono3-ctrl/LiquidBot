@@ -93,6 +93,54 @@ cd backend
 CANDIDATE_USERS=0xUser1,0xUser2 npm run hf:harness
 ```
 
+### Example Configurations
+
+#### 1. Test with Manual Candidate List (Recommended for Testing)
+
+```bash
+# Quick 30-second test with two specific addresses
+export WS_RPC_URL=wss://mainnet.base.org
+export RPC_URL=https://mainnet.base.org
+export CANDIDATE_USERS=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb,0x8BDf3F4F6F3Ff37E2A4E8AA6e9e23E7A8C4C5B3D
+export HARNESS_DURATION_SEC=30
+npm run hf:harness
+```
+
+#### 2. Production-Like Test with Subgraph Seeding
+
+```bash
+# Requires valid Graph API credentials
+export WS_RPC_URL=wss://mainnet.base.org
+export RPC_URL=https://mainnet.base.org
+export GRAPH_API_KEY=your_api_key
+export SUBGRAPH_DEPLOYMENT_ID=GQFbb95cE6d8mV989mL5figjaGaKCQB3xqYrr1bRyXqF
+export SUBGRAPH_URL=https://gateway.thegraph.com/api/subgraphs/id/GQFbb95cE6d8mV989mL5figjaGaKCQB3xqYrr1bRyXqF
+export SEED_LIMIT=30
+export HARNESS_DURATION_SEC=60
+npm run hf:harness
+```
+
+#### 3. With Chainlink Price Feed Monitoring
+
+```bash
+export WS_RPC_URL=wss://mainnet.base.org
+export RPC_URL=https://mainnet.base.org
+export CANDIDATE_USERS=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb
+export CHAINLINK_FEEDS=ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B
+export HARNESS_DURATION_SEC=120
+npm run hf:harness
+```
+
+#### 4. HTTP Fallback Mode (No WebSocket)
+
+```bash
+# Only HTTP RPC configured - will poll every 10 seconds
+export RPC_URL=https://mainnet.base.org
+export CANDIDATE_USERS=0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb
+export HARNESS_DURATION_SEC=60
+npm run hf:harness
+```
+
 ### HTTP Fallback Mode (No WebSocket)
 
 If WebSocket connection fails, the harness automatically falls back to HTTP RPC mode with periodic polling (every 10 seconds).
