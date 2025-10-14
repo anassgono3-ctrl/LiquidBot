@@ -30,7 +30,8 @@ describe('RealTimeHFService Edge Triggering', () => {
 
   describe('shouldEmit', () => {
     it('should emit on first safe->liq transition', () => {
-      // Access private method via any for testing
+      // Access private method via type assertion for testing
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // First time seeing this user, HF below threshold
@@ -41,6 +42,7 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should not emit if user is safe', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // User is safe (HF above 0.98)
@@ -50,6 +52,7 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should emit when HF worsens by hysteresis threshold', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // First check: user liquidatable at HF=0.95
@@ -63,6 +66,7 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should not emit if HF worsened but less than hysteresis', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // First check: user liquidatable at HF=0.95
@@ -75,6 +79,7 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should not emit more than once per block', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // First emission at block 1000
@@ -82,6 +87,7 @@ describe('RealTimeHFService Edge Triggering', () => {
       expect(result1.shouldEmit).toBe(true);
       
       // Update lastEmitBlock manually
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (service as any).lastEmitBlock.set('0x123', 1000);
       
       // Try to emit again at same block
@@ -90,10 +96,12 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should allow emission at new block after previous emission', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // First emission at block 1000
       shouldEmit('0x123', 0.95, 1000);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (service as any).lastEmitBlock.set('0x123', 1000);
       
       // HF worsened significantly at block 1001
@@ -104,6 +112,7 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should transition back to safe and not emit', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // User was liquidatable
@@ -116,6 +125,7 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should re-emit on safe->liq transition after recovery', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // Initial liquidatable state
@@ -134,6 +144,7 @@ describe('RealTimeHFService Edge Triggering', () => {
 
   describe('edge triggering with multiple users', () => {
     it('should handle multiple users independently', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // User A becomes liquidatable
@@ -156,6 +167,7 @@ describe('RealTimeHFService Edge Triggering', () => {
 
   describe('hysteresis calculation', () => {
     it('should calculate 0.2% hysteresis correctly', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // HF = 0.97 (below threshold), 0.2% of 0.97 = 0.00194
@@ -167,6 +179,7 @@ describe('RealTimeHFService Edge Triggering', () => {
     });
 
     it('should handle small HF values correctly', () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       
       // HF = 0.90, 0.2% of 0.90 = 0.0018
@@ -191,6 +204,7 @@ describe('RealTimeHFService Edge Triggering', () => {
       });
 
       // Manually trigger shouldEmit logic
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const shouldEmit = (service as any).shouldEmit.bind(service);
       const result = shouldEmit('0x123', 0.95, 1000);
       

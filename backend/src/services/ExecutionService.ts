@@ -176,8 +176,8 @@ export class ExecutionService {
       }
 
       // Determine collateral asset (use hint if provided, otherwise default to common collateral)
-      let collateralAsset = options?.collateralAsset || '0x4200000000000000000000000000000000000006'; // WETH on Base
-      let collateralSymbol = 'WETH';
+      const collateralAsset = options?.collateralAsset || '0x4200000000000000000000000000000000000006'; // WETH on Base
+      const collateralSymbol = 'WETH';
 
       // Fetch liquidation bonus for collateral
       let liquidationBonusPct = 0.05; // Default 5%
@@ -347,7 +347,7 @@ export class ExecutionService {
 
       // Step 2: Determine debt asset to liquidate
       // For real-time opportunities, we need to query which assets the user has borrowed
-      let debtAsset = opportunity.principalReserve.id;
+      const debtAsset = opportunity.principalReserve.id;
       
       // If debt asset is not known (real-time path), skip execution for now
       // TODO: Implement debt asset discovery via Protocol Data Provider

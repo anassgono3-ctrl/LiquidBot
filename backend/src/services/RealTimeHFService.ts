@@ -697,7 +697,6 @@ export class RealTimeHFService extends EventEmitter {
 
       const results = await this.multicallAggregate3ReadOnly(calls);
       const blockNumber = await this.provider.getBlockNumber();
-      const threshold = config.executionHfThresholdBps / 10000; // e.g., 0.98
       let minHF: number | null = null;
 
       for (let i = 0; i < results.length; i++) {
