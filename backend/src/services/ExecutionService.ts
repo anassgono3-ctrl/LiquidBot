@@ -231,7 +231,7 @@ export class ExecutionService {
 
       // Step 2: Determine debt asset to liquidate
       // For real-time opportunities, we need to query which assets the user has borrowed
-      let debtAsset = opportunity.principalReserve.id;
+      const debtAsset = opportunity.principalReserve.id;
       
       // If debt asset is not known (real-time path), skip execution for now
       // TODO: Implement debt asset discovery via Protocol Data Provider
@@ -453,9 +453,9 @@ export class ExecutionService {
     }
     
     // Get debt asset decimals and price for proper USD calculation
-    let tokenDecimals = opportunity.principalReserve.decimals || 18;
+    const tokenDecimals = opportunity.principalReserve.decimals || 18;
     let priceRaw = 0n;
-    let priceDecimals = 8; // Aave Oracle returns prices in 8 decimals USD
+    const priceDecimals = 8; // Aave Oracle returns prices in 8 decimals USD
     
     // Fetch price from Aave Oracle if available
     if (this.aaveDataService && this.aaveDataService.isInitialized()) {
