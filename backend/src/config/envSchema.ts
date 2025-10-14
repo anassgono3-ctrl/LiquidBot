@@ -100,7 +100,18 @@ export const rawEnvSchema = z.object({
   ONEINCH_API_KEY: z.string().optional(),
   ONEINCH_BASE_URL: z.string().optional(),
   MAX_SLIPPAGE_BPS: z.string().optional(),
-  CLOSE_FACTOR_MODE: z.string().optional()
+  CLOSE_FACTOR_MODE: z.string().optional(),
+
+  // Real-time HF detection
+  USE_REALTIME_HF: z.string().optional(),
+  WS_RPC_URL: z.string().optional(),
+  USE_FLASHBLOCKS: z.string().optional(),
+  FLASHBLOCKS_WS_URL: z.string().optional(),
+  MULTICALL3_ADDRESS: z.string().optional(),
+  AAVE_POOL: z.string().optional(),
+  EXECUTION_HF_THRESHOLD_BPS: z.string().optional(),
+  REALTIME_SEED_INTERVAL_SEC: z.string().optional(),
+  CANDIDATE_MAX: z.string().optional()
 });
 
 export const env = (() => {
@@ -204,6 +215,17 @@ export const env = (() => {
     oneInchApiKey: parsed.ONEINCH_API_KEY,
     oneInchBaseUrl: parsed.ONEINCH_BASE_URL || 'https://api.1inch.dev/swap/v6.0/8453',
     maxSlippageBps: Number(parsed.MAX_SLIPPAGE_BPS || 100),
-    closeFactorMode: parsed.CLOSE_FACTOR_MODE || 'auto'
+    closeFactorMode: parsed.CLOSE_FACTOR_MODE || 'auto',
+
+    // Real-time HF detection
+    useRealtimeHF: (parsed.USE_REALTIME_HF || 'false').toLowerCase() === 'true',
+    wsRpcUrl: parsed.WS_RPC_URL,
+    useFlashblocks: (parsed.USE_FLASHBLOCKS || 'false').toLowerCase() === 'true',
+    flashblocksWsUrl: parsed.FLASHBLOCKS_WS_URL,
+    multicall3Address: parsed.MULTICALL3_ADDRESS || '0xca11bde05977b3631167028862be2a173976ca11',
+    aavePool: parsed.AAVE_POOL || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
+    executionHfThresholdBps: Number(parsed.EXECUTION_HF_THRESHOLD_BPS || 9800),
+    realtimeSeedIntervalSec: Number(parsed.REALTIME_SEED_INTERVAL_SEC || 45),
+    candidateMax: Number(parsed.CANDIDATE_MAX || 300)
   };
 })();

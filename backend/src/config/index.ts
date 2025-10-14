@@ -126,6 +126,17 @@ export const config = {
   get atRiskNotifyWarn() { return env.atRiskNotifyWarn; },
   get atRiskNotifyCritical() { return env.atRiskNotifyCritical; },
 
+  // Real-time HF detection
+  get useRealtimeHF() { return env.useRealtimeHF; },
+  get wsRpcUrl() { return env.wsRpcUrl; },
+  get useFlashblocks() { return env.useFlashblocks; },
+  get flashblocksWsUrl() { return env.flashblocksWsUrl; },
+  get multicall3Address() { return env.multicall3Address; },
+  get aavePool() { return env.aavePool; },
+  get executionHfThresholdBps() { return env.executionHfThresholdBps; },
+  get realtimeSeedIntervalSec() { return env.realtimeSeedIntervalSec; },
+  get candidateMax() { return env.candidateMax; },
+
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
   rateLimitMaxRequests: 120,

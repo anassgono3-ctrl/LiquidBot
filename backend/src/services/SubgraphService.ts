@@ -433,6 +433,16 @@ export class SubgraphService {
   }
 
   /**
+   * Get users with borrowing activity for real-time candidate seeding.
+   * Alias for getUsersPage to support real-time HF service.
+   * @param limit Maximum number of users to fetch (clamped to 200)
+   * @returns Array of user data with reserve information
+   */
+  async getUsersWithBorrowing(limit: number): Promise<User[]> {
+    return this.getUsersPage(limit);
+  }
+
+  /**
    * Get a page of users with debt for at-risk scanning.
    * This performs a lightweight bulk query for proactive health monitoring.
    * @param limit Maximum number of users to fetch (clamped to 200)
