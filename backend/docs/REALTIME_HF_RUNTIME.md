@@ -101,9 +101,12 @@ USE_REALTIME_HF=false
 # Standard WebSocket RPC URL (required when USE_REALTIME_HF=true)
 WS_RPC_URL=wss://mainnet.base.org
 
-# Optional: Attempt provider-specific Flashblocks (default: false)
+# Optional: Enable Flashblocks mode for faster detection (default: false)
 USE_FLASHBLOCKS=false
 # FLASHBLOCKS_WS_URL=wss://your-flashblocks-provider.com
+
+# Flashblocks polling interval in milliseconds (default: 250)
+FLASHBLOCKS_TICK_MS=250
 ```
 
 #### Contract Addresses
@@ -149,12 +152,19 @@ When `USE_REALTIME_HF=false` (default):
 
 ### Flashblocks (Optional)
 
-Some RPC providers offer a **Flashblocks** channel for sub-block updates (mempool visibility, faster block notifications). If supported:
+**Flashblocks** provides sub-block updates for faster liquidation detection. The service implements Flashblocks via **pending block polling** (compatible with ethers v6):
 
 1. Set `USE_FLASHBLOCKS=true`
-2. Provide `FLASHBLOCKS_WS_URL`
-3. RealTimeHFService will attempt Flashblocks subscription
-4. Falls back to standard `newHeads` if unsupported
+2. Optionally provide `FLASHBLOCKS_WS_URL` (or uses `WS_RPC_URL`)
+3. Configure `FLASHBLOCKS_TICK_MS` (default: 250ms) - polling interval
+4. RealTimeHFService polls `eth_getBlockByNumber('pending', false)` at the configured interval
+5. When the pending block hash changes, triggers a Flashblock tick for faster HF checks
+6. Falls back to standard `WS_RPC_URL` if Flashblocks WebSocket fails to connect
+
+**Implementation Notes:**
+- Uses JSON-RPC polling instead of unsupported WebSocket events (ethers v6 compatible)
+- Non-blocking: polling errors are logged but don't crash the service
+- Provides a "hint" for faster detection; canonical validation still happens on `newHeads`
 
 **Note:** Flashblocks is a **hint** for faster triggers. The service **always** performs a canonical recheck on `newHeads` before signaling execution.
 
@@ -208,8 +218,20 @@ You should see:
 [realtime-hf] Using standard WebSocket
 [realtime-hf] WebSocket provider connected
 [realtime-hf] Contracts verified
-[realtime-hf] Subscribed to newHeads
+[realtime-hf] Subscribed to newHeads (block events)
 [realtime-hf] Subscribed to Aave Pool logs
+[realtime-hf] Service started successfully
+```
+
+With Flashblocks enabled (`USE_FLASHBLOCKS=true`):
+```
+[realtime-hf] Starting real-time HF detection service
+[realtime-hf] Attempting Flashblocks WebSocket connection
+[realtime-hf] Flashblocks WebSocket connected
+[realtime-hf] Contracts verified
+[realtime-hf] Subscribed to newHeads (block events)
+[realtime-hf] Subscribed to Aave Pool logs
+[realtime-hf] Starting Flashblocks pending polling (interval=250ms)
 [realtime-hf] Service started successfully
 ```
 

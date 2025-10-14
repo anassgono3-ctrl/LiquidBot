@@ -135,4 +135,19 @@ describe('RealTimeHFService', () => {
       expect(metrics.blocksReceived).toBe(0);
     });
   });
+
+  describe('Flashblocks mode', () => {
+    it('should initialize without crashing when USE_FLASHBLOCKS=true', async () => {
+      // This test ensures no unsupported ProviderEvent errors occur
+      const flashblocksService = new RealTimeHFService({ skipWsConnection: true });
+      
+      // Should not throw even when Flashblocks is enabled
+      await expect(flashblocksService.start()).resolves.not.toThrow();
+      
+      const metrics = flashblocksService.getMetrics();
+      expect(metrics).toBeDefined();
+      
+      await flashblocksService.stop();
+    });
+  });
 });

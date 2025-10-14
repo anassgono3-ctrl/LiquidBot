@@ -131,6 +131,7 @@ export const config = {
   get wsRpcUrl() { return env.wsRpcUrl; },
   get useFlashblocks() { return env.useFlashblocks; },
   get flashblocksWsUrl() { return env.flashblocksWsUrl; },
+  get flashblocksTickMs() { return env.flashblocksTickMs; },
   get multicall3Address() { return env.multicall3Address; },
   get aavePool() { return env.aavePool; },
   get executionHfThresholdBps() { return env.executionHfThresholdBps; },

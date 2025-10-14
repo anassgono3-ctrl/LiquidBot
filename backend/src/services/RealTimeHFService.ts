@@ -66,8 +66,11 @@ export class RealTimeHFService extends EventEmitter {
   private readonly maxReconnectAttempts = 10;
   private reconnectTimer?: NodeJS.Timeout;
   private seedTimer?: NodeJS.Timeout;
+  private pendingTickTimer?: NodeJS.Timeout;
   private subscriptions: string[] = [];
   private skipWsConnection: boolean;
+  private lastPendingBlockHash: string | null = null;
+  private isPendingTickRunning = false;
 
   // Metrics
   private metrics = {
@@ -102,6 +105,7 @@ export class RealTimeHFService extends EventEmitter {
     // eslint-disable-next-line no-console
     console.log('[realtime-hf] Configuration:', {
       useFlashblocks: config.useFlashblocks,
+      flashblocksTickMs: config.useFlashblocks ? config.flashblocksTickMs : undefined,
       multicall3: config.multicall3Address,
       aavePool: config.aavePool,
       hfThresholdBps: config.executionHfThresholdBps,
@@ -137,6 +141,7 @@ export class RealTimeHFService extends EventEmitter {
     // Clear timers
     if (this.seedTimer) clearInterval(this.seedTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.pendingTickTimer) clearInterval(this.pendingTickTimer);
 
     // Unsubscribe from all subscriptions
     if (this.provider instanceof WebSocketProvider) {
@@ -172,13 +177,15 @@ export class RealTimeHFService extends EventEmitter {
    */
   private async setupProvider(): Promise<void> {
     let wsUrl: string | undefined;
+    let useFlashblocksMode = config.useFlashblocks;
 
-    if (config.useFlashblocks && config.flashblocksWsUrl) {
+    if (useFlashblocksMode && config.flashblocksWsUrl) {
       wsUrl = config.flashblocksWsUrl;
       // eslint-disable-next-line no-console
-      console.log('[realtime-hf] Using Flashblocks WebSocket');
+      console.log('[realtime-hf] Attempting Flashblocks WebSocket connection');
     } else if (config.wsRpcUrl) {
       wsUrl = config.wsRpcUrl;
+      useFlashblocksMode = false;
       // eslint-disable-next-line no-console
       console.log('[realtime-hf] Using standard WebSocket');
     } else {
@@ -197,10 +204,41 @@ export class RealTimeHFService extends EventEmitter {
 
       // Wait for provider to be ready
       await this.provider.ready;
-      // eslint-disable-next-line no-console
-      console.log('[realtime-hf] WebSocket provider connected');
+      
+      if (useFlashblocksMode) {
+        // eslint-disable-next-line no-console
+        console.log('[realtime-hf] Flashblocks WebSocket connected');
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('[realtime-hf] WebSocket provider connected');
+      }
+      
       this.reconnectAttempts = 0;
     } catch (err) {
+      // If Flashblocks connection fails, fallback to standard WS
+      if (useFlashblocksMode && config.wsRpcUrl) {
+        // eslint-disable-next-line no-console
+        console.warn('[realtime-hf] Flashblocks connection failed, falling back to standard WebSocket');
+        
+        try {
+          this.provider = new WebSocketProvider(config.wsRpcUrl);
+          this.provider.on('error', (error: Error) => {
+            // eslint-disable-next-line no-console
+            console.error('[realtime-hf] Provider error:', error.message);
+            this.handleDisconnect();
+          });
+          await this.provider.ready;
+          // eslint-disable-next-line no-console
+          console.log('[realtime-hf] WebSocket provider connected (fallback)');
+          this.reconnectAttempts = 0;
+          return;
+        } catch (fallbackErr) {
+          // eslint-disable-next-line no-console
+          console.error('[realtime-hf] Fallback connection also failed:', fallbackErr);
+          throw fallbackErr;
+        }
+      }
+      
       // eslint-disable-next-line no-console
       console.error('[realtime-hf] Failed to setup provider:', err);
       throw err;
@@ -250,11 +288,22 @@ export class RealTimeHFService extends EventEmitter {
     }
 
     try {
-      // Subscribe to newHeads for canonical rechecks
-      const headsSub = await this.provider.send('eth_subscribe', ['newHeads']);
-      this.subscriptions.push(headsSub);
+      // Subscribe to newHeads for canonical rechecks using 'block' event (ethers v6 compatible)
+      this.provider.on('block', async (blockNumber: number) => {
+        if (this.isShuttingDown) return;
+        try {
+          this.metrics.blocksReceived++;
+          realtimeBlocksReceived.inc();
+          // eslint-disable-next-line no-console
+          console.log(`[realtime-hf] New block ${blockNumber}`);
+          await this.checkAllCandidates('head');
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[realtime-hf] Error handling block:', err);
+        }
+      });
       // eslint-disable-next-line no-console
-      console.log('[realtime-hf] Subscribed to newHeads');
+      console.log('[realtime-hf] Subscribed to newHeads (block events)');
 
       // Subscribe to Aave Pool logs
       // Create interface to get event signatures
@@ -301,14 +350,20 @@ export class RealTimeHFService extends EventEmitter {
         }
       }
 
-      // Setup message handler
-      this.provider.on('message', (message: { type: string; data: any }) => {
+      // Setup event handler for logs subscriptions
+      // Use internal event listener for eth_subscription messages
+      (this.provider as any)._addEventListener('eth_subscription', (message: any) => {
         if (this.isShuttingDown) return;
-        this.handleSubscriptionMessage(message).catch(err => {
+        this.handleSubscriptionLog(message).catch(err => {
           // eslint-disable-next-line no-console
-          console.error('[realtime-hf] Error handling subscription message:', err);
+          console.error('[realtime-hf] Error handling subscription log:', err);
         });
-      });
+      }, false);
+
+      // Start Flashblocks pending tick loop if enabled
+      if (config.useFlashblocks) {
+        this.startPendingTickLoop();
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[realtime-hf] Failed to setup subscriptions:', err);
@@ -317,38 +372,19 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Handle subscription messages (newHeads, logs)
+   * Handle subscription logs (Aave Pool, Chainlink)
    */
-  private async handleSubscriptionMessage(message: { type: string; data: any }): Promise<void> {
-    if (message.type === 'eth_subscription') {
-      const result = message.data?.result;
-      if (!result) return;
+  private async handleSubscriptionLog(result: any): Promise<void> {
+    if (!result) return;
 
-      // Check if it's a newHead block
-      if (result.number) {
-        this.metrics.blocksReceived++;
-        await this.handleNewHead(result);
-      }
-      // Check if it's a log
-      else if (result.topics) {
-        const log = result as EventLog;
-        await this.handleLog(log);
-      }
+    // Check if it's a log event
+    if (result.topics) {
+      const log = result as EventLog;
+      await this.handleLog(log);
     }
   }
 
-  /**
-   * Handle newHeads block notification - perform canonical recheck
-   */
-  private async handleNewHead(block: any): Promise<void> {
-    // eslint-disable-next-line no-console
-    console.log(`[realtime-hf] New block ${block.number}`);
 
-    realtimeBlocksReceived.inc();
-
-    // Perform batch check on all candidates
-    await this.checkAllCandidates('head');
-  }
 
   /**
    * Handle Aave Pool or Chainlink log event
@@ -637,6 +673,78 @@ export class RealTimeHFService extends EventEmitter {
     }
     
     return feeds;
+  }
+
+  /**
+   * Start pending block polling loop for Flashblocks tick detection
+   */
+  private startPendingTickLoop(): void {
+    if (this.pendingTickTimer) {
+      clearInterval(this.pendingTickTimer);
+    }
+
+    const tickMs = config.flashblocksTickMs;
+    // eslint-disable-next-line no-console
+    console.log(`[realtime-hf] Starting Flashblocks pending polling (interval=${tickMs}ms)`);
+
+    this.pendingTickTimer = setInterval(() => {
+      if (this.isShuttingDown) return;
+      this.checkPendingBlock().catch(err => {
+        // Log error but don't crash - continue polling
+        // eslint-disable-next-line no-console
+        console.warn('[realtime-hf] Pending block check failed:', err.message);
+      });
+    }, tickMs);
+
+    // Run immediate check
+    this.checkPendingBlock().catch(err => {
+      // eslint-disable-next-line no-console
+      console.warn('[realtime-hf] Initial pending block check failed:', err.message);
+    });
+  }
+
+  /**
+   * Check pending block for changes (Flashblocks tick)
+   */
+  private async checkPendingBlock(): Promise<void> {
+    // Guard against re-entrancy
+    if (this.isPendingTickRunning || !this.provider) return;
+    this.isPendingTickRunning = true;
+
+    try {
+      // Poll pending block via JSON-RPC
+      const pendingBlock = await this.provider.send('eth_getBlockByNumber', ['pending', false]);
+      
+      if (pendingBlock && pendingBlock.hash) {
+        const currentHash = pendingBlock.hash;
+        
+        // Check if pending block hash has changed
+        if (this.lastPendingBlockHash && this.lastPendingBlockHash !== currentHash) {
+          // Pending block changed - trigger Flashblock tick
+          await this.onFlashblockTick();
+        }
+        
+        this.lastPendingBlockHash = currentHash;
+      }
+    } catch (err: any) {
+      // Non-fatal: log and continue
+      // Common failure: provider doesn't support 'pending' block
+      if (!err.message?.includes('pending')) {
+        // eslint-disable-next-line no-console
+        console.warn('[realtime-hf] Pending block polling error:', err.message);
+      }
+    } finally {
+      this.isPendingTickRunning = false;
+    }
+  }
+
+  /**
+   * Handle Flashblock tick (pending block changed)
+   */
+  private async onFlashblockTick(): Promise<void> {
+    // Trigger batch check on all candidates
+    // This is a hint for faster detection; canonical recheck happens on newHeads
+    await this.checkAllCandidates('head');
   }
 
   /**
