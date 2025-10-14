@@ -11,7 +11,13 @@ import { authenticate } from "./middleware/auth.js";
 import { rateLimiter } from "./middleware/rateLimit.js";
 import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
-import { registry, opportunitiesGeneratedTotal, opportunityProfitEstimate } from "./metrics/index.js";
+import { 
+  registry, 
+  opportunitiesGeneratedTotal, 
+  opportunityProfitEstimate,
+  actionableOpportunitiesTotal,
+  skippedUnresolvedPlanTotal
+} from "./metrics/index.js";
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";
@@ -97,48 +103,129 @@ if (config.atRiskScanLimit > 0) {
 
 // Initialize real-time HF service (only when enabled via config)
 let realtimeHFService: RealTimeHFService | undefined;
+
+// Per-block dedupe and in-flight execution tracking
+const lastNotifiedBlock = new Map<string, number>();
+const inflightExecutions = new Set<string>();
+
 if (config.useRealtimeHF) {
   realtimeHFService = new RealTimeHFService({ subgraphService });
   
   // Handle liquidatable events
   realtimeHFService.on('liquidatable', async (event: LiquidatableEvent) => {
-    logger.info(`[realtime-hf] Liquidatable event: user=${event.userAddress} HF=${event.healthFactor.toFixed(4)} trigger=${event.triggerType}`);
+    const userAddr = event.userAddress;
     
-    // Create synthetic opportunity for execution
-    // Note: debt and collateral details will be fetched by ExecutionService when needed
-    const opportunity = {
-      id: `realtime-${event.userAddress}-${event.timestamp}`,
-      txHash: null,
-      user: event.userAddress,
-      liquidator: 'bot',
-      timestamp: Math.floor(event.timestamp / 1000),
-      collateralAmountRaw: '0', // Will be fetched by ExecutionService from Aave
-      principalAmountRaw: '0',  // Will be fetched by ExecutionService from Aave
-      collateralReserve: { id: 'unknown', symbol: null, decimals: null },
-      principalReserve: { id: 'unknown', symbol: null, decimals: null },
-      healthFactor: event.healthFactor,
-      triggerSource: 'realtime' as const,
-      triggerType: event.triggerType
-    };
+    // Per-block dedupe safety net
+    const lastBlock = lastNotifiedBlock.get(userAddr);
+    if (lastBlock === event.blockNumber) {
+      logger.debug(`[realtime-hf] Skip duplicate notification for user=${userAddr} block=${event.blockNumber}`);
+      return;
+    }
     
-    // Notify about real-time opportunity
-    await notificationService.notifyOpportunity(opportunity);
-    
-    // Execute if enabled
-    if (config.executionEnabled) {
-      try {
-        const result = await executionService.execute(opportunity);
-        logger.info(`[realtime-hf] Execution result:`, { 
-          user: event.userAddress, 
-          success: result.success, 
-          reason: result.reason,
-          simulated: result.simulated
-        });
-      } catch (error) {
-        logger.error(`[realtime-hf] Execution error:`, { 
-          user: event.userAddress,
-          error: error instanceof Error ? error.message : String(error)
-        });
+    // Prepare actionable opportunity (resolve debt/collateral plan)
+    if (config.notifyOnlyWhenActionable) {
+      const actionablePlan = await executionService.prepareActionableOpportunity(userAddr, {
+        healthFactor: event.healthFactor,
+        blockNumber: event.blockNumber,
+        triggerType: event.triggerType
+      });
+      
+      if (!actionablePlan) {
+        // Cannot resolve debt/collateral plan - log once per block and skip
+        logger.info(`[realtime-hf] skip notify (unresolved plan) user=${userAddr} block=${event.blockNumber}`);
+        skippedUnresolvedPlanTotal.inc();
+        return;
+      }
+      
+      // Build enriched opportunity with resolved plan
+      logger.info(`[realtime-hf] notify actionable user=${userAddr} debtAsset=${actionablePlan.debtAssetSymbol} debtToCover=${actionablePlan.debtToCoverUsd.toFixed(2)} bonusBps=${Math.round(actionablePlan.liquidationBonusPct * 10000)}`);
+      actionableOpportunitiesTotal.inc();
+      
+      const opportunity = {
+        id: `realtime-${userAddr}-${event.timestamp}`,
+        txHash: null,
+        user: userAddr,
+        liquidator: 'bot',
+        timestamp: Math.floor(event.timestamp / 1000),
+        collateralAmountRaw: '0',
+        principalAmountRaw: actionablePlan.totalDebt.toString(),
+        collateralReserve: { id: actionablePlan.collateralAsset, symbol: actionablePlan.collateralSymbol, decimals: 18 },
+        principalReserve: { id: actionablePlan.debtAsset, symbol: actionablePlan.debtAssetSymbol, decimals: 6 },
+        healthFactor: event.healthFactor,
+        triggerSource: 'realtime' as const,
+        triggerType: event.triggerType,
+        debtToCover: actionablePlan.debtToCover.toString(),
+        debtToCoverUsd: actionablePlan.debtToCoverUsd,
+        bonusPct: actionablePlan.liquidationBonusPct
+      };
+      
+      // Track notification
+      lastNotifiedBlock.set(userAddr, event.blockNumber);
+      
+      // Send Telegram notification
+      await notificationService.notifyOpportunity(opportunity);
+      
+      // Execute if enabled and not already in-flight
+      if (config.executionEnabled) {
+        if (config.executionInflightLock && inflightExecutions.has(userAddr)) {
+          logger.info(`[realtime-hf] Skip execution - already in-flight for user=${userAddr}`);
+          return;
+        }
+        
+        try {
+          inflightExecutions.add(userAddr);
+          const result = await executionService.execute(opportunity);
+          logger.info(`[realtime-hf] Execution result:`, { 
+            user: userAddr, 
+            success: result.success, 
+            reason: result.reason,
+            simulated: result.simulated
+          });
+        } catch (error) {
+          logger.error(`[realtime-hf] Execution error:`, { 
+            user: userAddr,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        } finally {
+          inflightExecutions.delete(userAddr);
+        }
+      }
+    } else {
+      // Legacy mode: notify without resolving plan
+      logger.info(`[realtime-hf] Liquidatable event: user=${userAddr} HF=${event.healthFactor.toFixed(4)} trigger=${event.triggerType}`);
+      
+      const opportunity = {
+        id: `realtime-${userAddr}-${event.timestamp}`,
+        txHash: null,
+        user: userAddr,
+        liquidator: 'bot',
+        timestamp: Math.floor(event.timestamp / 1000),
+        collateralAmountRaw: '0',
+        principalAmountRaw: '0',
+        collateralReserve: { id: 'unknown', symbol: null, decimals: null },
+        principalReserve: { id: 'unknown', symbol: null, decimals: null },
+        healthFactor: event.healthFactor,
+        triggerSource: 'realtime' as const,
+        triggerType: event.triggerType
+      };
+      
+      await notificationService.notifyOpportunity(opportunity);
+      
+      if (config.executionEnabled) {
+        try {
+          const result = await executionService.execute(opportunity);
+          logger.info(`[realtime-hf] Execution result:`, { 
+            user: userAddr, 
+            success: result.success, 
+            reason: result.reason,
+            simulated: result.simulated
+          });
+        } catch (error) {
+          logger.error(`[realtime-hf] Execution error:`, { 
+            user: userAddr,
+            error: error instanceof Error ? error.message : String(error)
+          });
+        }
       }
     }
   });

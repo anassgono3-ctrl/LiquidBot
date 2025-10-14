@@ -103,6 +103,125 @@ export class ExecutionService {
   }
 
   /**
+   * Prepare an actionable opportunity by resolving debt asset and liquidation plan.
+   * Returns null if the opportunity cannot be resolved or is not actionable.
+   * 
+   * @param userAddress The user address
+   * @param options Additional options (collateralAsset hint, healthFactor, etc.)
+   * @returns ActionableOpportunity or null if not actionable
+   */
+  async prepareActionableOpportunity(
+    userAddress: string,
+    options?: {
+      collateralAsset?: string;
+      healthFactor?: number;
+      blockNumber?: number;
+      triggerType?: 'event' | 'head' | 'price';
+    }
+  ): Promise<{
+    debtAsset: string;
+    debtAssetSymbol: string;
+    totalDebt: bigint;
+    debtToCover: bigint;
+    debtToCoverUsd: number;
+    liquidationBonusPct: number;
+    collateralAsset: string;
+    collateralSymbol: string;
+  } | null> {
+    // Validate that AaveDataService is available
+    if (!this.aaveDataService || !this.aaveDataService.isInitialized()) {
+      return null;
+    }
+
+    try {
+      // Get user account data to find debt assets
+      const accountData = await this.aaveDataService.getUserAccountData(userAddress);
+      
+      // Check if user has any debt
+      if (accountData.totalDebtBase === 0n) {
+        return null;
+      }
+
+      // For now, we'll use a simple heuristic: check common stablecoins on Base
+      // In a production system, you'd want to query all reserves and check debt balances
+      const commonDebtAssets = [
+        { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC' },  // USDC on Base
+        { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI' },   // DAI on Base
+        { address: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', symbol: 'USDbC' }, // USDbC on Base
+      ];
+
+      let debtAsset: string | null = null;
+      let debtAssetSymbol: string | null = null;
+      let totalDebt = 0n;
+
+      // Try each common debt asset
+      for (const asset of commonDebtAssets) {
+        try {
+          const debt = await this.aaveDataService.getTotalDebt(asset.address, userAddress);
+          if (debt > 0n) {
+            debtAsset = asset.address;
+            debtAssetSymbol = asset.symbol;
+            totalDebt = debt;
+            break;
+          }
+        } catch (err) {
+          // Continue to next asset
+          continue;
+        }
+      }
+
+      if (!debtAsset || !debtAssetSymbol || totalDebt === 0n) {
+        // Could not find any debt asset
+        return null;
+      }
+
+      // Determine collateral asset (use hint if provided, otherwise default to common collateral)
+      const collateralAsset = options?.collateralAsset || '0x4200000000000000000000000000000000000006'; // WETH on Base
+      const collateralSymbol = 'WETH';
+
+      // Fetch liquidation bonus for collateral
+      let liquidationBonusPct = 0.05; // Default 5%
+      try {
+        liquidationBonusPct = await this.aaveDataService.getLiquidationBonusPct(collateralAsset);
+      } catch (err) {
+        // Use default if fetch fails
+        // eslint-disable-next-line no-console
+        console.warn('[execution] Failed to fetch liquidation bonus, using default 5%');
+      }
+
+      // Calculate debtToCover based on close factor mode
+      const mode = config.closeFactorExecutionMode;
+      let debtToCover: bigint;
+      
+      if (mode === 'full') {
+        debtToCover = totalDebt;
+      } else {
+        // fixed50: liquidate 50% of debt
+        debtToCover = totalDebt / 2n;
+      }
+
+      // Estimate USD value (rough estimate, would need price oracle for accurate value)
+      // For now, assume $1 for stablecoins
+      const debtToCoverUsd = Number(debtToCover) / 1e6; // Assuming 6 decimals for USDC
+
+      return {
+        debtAsset,
+        debtAssetSymbol,
+        totalDebt,
+        debtToCover,
+        debtToCoverUsd,
+        liquidationBonusPct,
+        collateralAsset,
+        collateralSymbol
+      };
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[execution] Failed to prepare actionable opportunity:', error instanceof Error ? error.message : error);
+      return null;
+    }
+  }
+
+  /**
    * Execute a liquidation opportunity with all safety checks
    * @param opportunity The opportunity to execute
    * @returns Execution result (simulated or real)
@@ -228,7 +347,7 @@ export class ExecutionService {
 
       // Step 2: Determine debt asset to liquidate
       // For real-time opportunities, we need to query which assets the user has borrowed
-      let debtAsset = opportunity.principalReserve.id;
+      const debtAsset = opportunity.principalReserve.id;
       
       // If debt asset is not known (real-time path), skip execution for now
       // TODO: Implement debt asset discovery via Protocol Data Provider

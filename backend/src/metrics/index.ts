@@ -190,3 +190,23 @@ export const realtimeCloseFactorMode = new Gauge({
   help: 'Current close factor mode (0=fixed50, 1=full)',
   registers: [registry]
 });
+
+// Edge-triggered notification metrics
+export const actionableOpportunitiesTotal = new Counter({
+  name: 'liquidbot_actionable_opportunities_total',
+  help: 'Total number of actionable opportunities notified',
+  registers: [registry]
+});
+
+export const skippedUnresolvedPlanTotal = new Counter({
+  name: 'liquidbot_skipped_unresolved_plan_total',
+  help: 'Total number of opportunities skipped due to unresolved liquidation plan',
+  registers: [registry]
+});
+
+export const liquidatableEdgeTriggersTotal = new Counter({
+  name: 'liquidbot_liquidatable_edge_triggers_total',
+  help: 'Total number of liquidatable edge-trigger events (state transitions)',
+  labelNames: ['reason'],
+  registers: [registry]
+});

@@ -145,6 +145,9 @@ export const config = {
   get executionHfThresholdBps() { return env.executionHfThresholdBps; },
   get realtimeSeedIntervalSec() { return env.realtimeSeedIntervalSec; },
   get candidateMax() { return env.candidateMax; },
+  get hysteresisBps() { return env.hysteresisBps; },
+  get notifyOnlyWhenActionable() { return env.notifyOnlyWhenActionable; },
+  get executionInflightLock() { return env.executionInflightLock; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },

@@ -20,7 +20,8 @@ import {
   realtimeTriggersProcessed,
   realtimeReconnects,
   realtimeCandidateCount,
-  realtimeMinHealthFactor
+  realtimeMinHealthFactor,
+  liquidatableEdgeTriggersTotal
 } from '../metrics/index.js';
 
 import { CandidateManager } from './CandidateManager.js';
@@ -63,6 +64,12 @@ export interface LiquidatableEvent {
  * 
  * Emits 'liquidatable' events when users cross below the HF threshold.
  */
+interface UserState {
+  status: 'safe' | 'liq';
+  lastHf: number;
+  lastBlock: number;
+}
+
 export class RealTimeHFService extends EventEmitter {
   private provider: WebSocketProvider | JsonRpcProvider | null = null;
   private multicall3: Contract | null = null;
@@ -76,6 +83,10 @@ export class RealTimeHFService extends EventEmitter {
   private seedTimer?: NodeJS.Timeout;
   private pendingBlockTimer?: NodeJS.Timeout;
   private skipWsConnection: boolean;
+
+  // Edge-triggering state per user
+  private userStates = new Map<string, UserState>();
+  private lastEmitBlock = new Map<string, number>();
 
   // Metrics
   private metrics = {
@@ -596,6 +607,81 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Determine if a liquidatable event should be emitted based on edge-triggering and hysteresis.
+   * Returns { shouldEmit: boolean, reason?: string }
+   */
+  private shouldEmit(userAddress: string, healthFactor: number, blockNumber: number): { shouldEmit: boolean; reason?: string } {
+    const threshold = config.executionHfThresholdBps / 10000;
+    const hysteresisBps = config.hysteresisBps;
+    const hysteresisFactor = hysteresisBps / 10000; // e.g., 20 bps = 0.002 = 0.2%
+    
+    const state = this.userStates.get(userAddress);
+    const lastBlock = this.lastEmitBlock.get(userAddress);
+    
+    // Never emit more than once per block per user
+    if (lastBlock === blockNumber) {
+      return { shouldEmit: false };
+    }
+    
+    const isLiquidatable = healthFactor < threshold;
+    
+    if (!state) {
+      // First time seeing this user
+      if (isLiquidatable) {
+        // User is liquidatable, emit and track
+        this.userStates.set(userAddress, {
+          status: 'liq',
+          lastHf: healthFactor,
+          lastBlock: blockNumber
+        });
+        return { shouldEmit: true, reason: 'safe_to_liq' };
+      } else {
+        // User is safe, just track
+        this.userStates.set(userAddress, {
+          status: 'safe',
+          lastHf: healthFactor,
+          lastBlock: blockNumber
+        });
+        return { shouldEmit: false };
+      }
+    }
+    
+    // Update state
+    const previousStatus = state.status;
+    const previousHf = state.lastHf;
+    
+    if (isLiquidatable) {
+      state.status = 'liq';
+      state.lastHf = healthFactor;
+      state.lastBlock = blockNumber;
+      
+      if (previousStatus === 'safe') {
+        // Transition from safe to liq (edge trigger)
+        return { shouldEmit: true, reason: 'safe_to_liq' };
+      } else {
+        // Already liquidatable - check hysteresis
+        const hfDiff = previousHf - healthFactor;
+        const hfDiffPct = hfDiff / previousHf;
+        
+        if (hfDiffPct >= hysteresisFactor) {
+          // HF worsened by at least hysteresis threshold
+          return { shouldEmit: true, reason: 'worsened' };
+        } else {
+          // Still liquidatable but HF hasn't worsened enough
+          return { shouldEmit: false };
+        }
+      }
+    } else {
+      // User is safe now
+      state.status = 'safe';
+      state.lastHf = healthFactor;
+      state.lastBlock = blockNumber;
+      
+      return { shouldEmit: false };
+    }
+  }
+
+  /**
    * Batch check multiple candidates using Multicall3
    */
   private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price'): Promise<void> {
@@ -611,7 +697,6 @@ export class RealTimeHFService extends EventEmitter {
 
       const results = await this.multicallAggregate3ReadOnly(calls);
       const blockNumber = await this.provider.getBlockNumber();
-      const threshold = config.executionHfThresholdBps / 10000; // e.g., 0.98
       let minHF: number | null = null;
 
       for (let i = 0; i < results.length; i++) {
@@ -641,10 +726,15 @@ export class RealTimeHFService extends EventEmitter {
               realtimeMinHealthFactor.set(this.metrics.minHF);
             }
 
-            // Check if below threshold
-            if (healthFactor < threshold) {
+            // Check if we should emit based on edge-triggering and hysteresis
+            const emitDecision = this.shouldEmit(userAddress, healthFactor, blockNumber);
+            
+            if (emitDecision.shouldEmit) {
               // eslint-disable-next-line no-console
-              console.log(`[realtime-hf] User ${userAddress} liquidatable: HF=${healthFactor.toFixed(4)} (trigger=${triggerType})`);
+              console.log(`[realtime-hf] emit liquidatable user=${userAddress} hf=${healthFactor.toFixed(4)} reason=${emitDecision.reason} block=${blockNumber}`);
+
+              // Track last emit block
+              this.lastEmitBlock.set(userAddress, blockNumber);
 
               // Emit liquidatable event
               this.emit('liquidatable', {
@@ -657,6 +747,7 @@ export class RealTimeHFService extends EventEmitter {
 
               this.metrics.triggersProcessed++;
               realtimeTriggersProcessed.inc({ trigger_type: triggerType });
+              liquidatableEdgeTriggersTotal.inc({ reason: emitDecision.reason || 'unknown' });
             }
           } catch (err) {
             // eslint-disable-next-line no-console

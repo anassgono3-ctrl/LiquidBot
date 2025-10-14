@@ -122,7 +122,10 @@ export const rawEnvSchema = z.object({
   AAVE_POOL: z.string().optional(),
   EXECUTION_HF_THRESHOLD_BPS: z.string().optional(),
   REALTIME_SEED_INTERVAL_SEC: z.string().optional(),
-  CANDIDATE_MAX: z.string().optional()
+  CANDIDATE_MAX: z.string().optional(),
+  HYSTERESIS_BPS: z.string().optional(),
+  NOTIFY_ONLY_WHEN_ACTIONABLE: z.string().optional(),
+  EXECUTION_INFLIGHT_LOCK: z.string().optional()
 });
 
 export const env = (() => {
@@ -251,6 +254,9 @@ export const env = (() => {
     aavePool: parsed.AAVE_POOL || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
     executionHfThresholdBps: Number(parsed.EXECUTION_HF_THRESHOLD_BPS || 9800),
     realtimeSeedIntervalSec: Number(parsed.REALTIME_SEED_INTERVAL_SEC || 45),
-    candidateMax: Number(parsed.CANDIDATE_MAX || 300)
+    candidateMax: Number(parsed.CANDIDATE_MAX || 300),
+    hysteresisBps: Number(parsed.HYSTERESIS_BPS || 20),
+    notifyOnlyWhenActionable: (parsed.NOTIFY_ONLY_WHEN_ACTIONABLE || 'true').toLowerCase() === 'true',
+    executionInflightLock: (parsed.EXECUTION_INFLIGHT_LOCK || 'true').toLowerCase() === 'true'
   };
 })();
