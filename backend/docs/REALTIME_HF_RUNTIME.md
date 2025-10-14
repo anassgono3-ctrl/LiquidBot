@@ -4,14 +4,16 @@
 
 The Real-time Health Factor (HF) Detection system provides low-latency liquidation monitoring via WebSocket subscriptions to on-chain events. This replaces subgraph-triggered execution with a faster pipeline using:
 
-- **WebSocket blocks/events** for immediate notifications
+- **WebSocket blocks/events** for immediate notifications (ethers v6 native listeners)
 - **Multicall3 batching** for efficient health factor checks
 - **Event-driven rechecks** when users interact with Aave Pool
-- **Optional Flashblocks** for sub-block updates (provider-specific)
+- **Optional Flashblocks** for sub-block updates via pending block polling
 
 The subgraph continues to serve as a **seeding source only**, populating the initial candidate set.
 
 **Status:** Feature-flagged, opt-in, default disabled for safety.
+
+**Note:** This service requires ethers v6 and uses native `provider.on(...)` event listeners. The legacy `provider.on('message')` subscription method is no longer supported.
 
 ---
 
@@ -21,10 +23,11 @@ The subgraph continues to serve as a **seeding source only**, populating the ini
 
 1. **RealTimeHFService** (`backend/src/services/RealTimeHFService.ts`)
    - Manages WebSocket connection to RPC provider
-   - Subscribes to:
-     - `newHeads` - canonical block notifications for batch rechecks
-     - Aave Pool logs (`Borrow`, `Repay`, `Supply`, `Withdraw`) - targeted user rechecks
-     - Chainlink `AnswerUpdated` (optional) - price-triggered selective rechecks
+   - Uses ethers v6 native event listeners:
+     - `provider.on('block', handler)` - canonical block notifications for batch rechecks
+     - `provider.on(aaveFilter, handler)` - Aave Pool logs (`Borrow`, `Repay`, `Supply`, `Withdraw`) for targeted user rechecks
+     - `provider.on(chainlinkFilter, handler)` - Chainlink `AnswerUpdated` (optional) for price-triggered selective rechecks
+   - Optional: Pending block polling when `USE_FLASHBLOCKS=true` (polls `eth_getBlockByNumber('pending')` at `FLASHBLOCKS_TICK_MS` interval)
    - Performs Multicall3 batch `getUserAccountData()` calls
    - Emits `liquidatable` events when HF < threshold
 
@@ -101,9 +104,12 @@ USE_REALTIME_HF=false
 # Standard WebSocket RPC URL (required when USE_REALTIME_HF=true)
 WS_RPC_URL=wss://mainnet.base.org
 
-# Optional: Attempt provider-specific Flashblocks (default: false)
+# Optional: Enable Flashblocks pending block polling (default: false)
 USE_FLASHBLOCKS=false
+# Flashblocks WebSocket URL (optional, defaults to WS_RPC_URL if not set)
 # FLASHBLOCKS_WS_URL=wss://your-flashblocks-provider.com
+# Flashblocks pending block polling interval in milliseconds (default: 250)
+# FLASHBLOCKS_TICK_MS=250
 ```
 
 #### Contract Addresses
@@ -149,14 +155,15 @@ When `USE_REALTIME_HF=false` (default):
 
 ### Flashblocks (Optional)
 
-Some RPC providers offer a **Flashblocks** channel for sub-block updates (mempool visibility, faster block notifications). If supported:
+When `USE_FLASHBLOCKS=true`, the service enables **pending block polling** for sub-block updates:
 
 1. Set `USE_FLASHBLOCKS=true`
-2. Provide `FLASHBLOCKS_WS_URL`
-3. RealTimeHFService will attempt Flashblocks subscription
-4. Falls back to standard `newHeads` if unsupported
+2. Optionally provide `FLASHBLOCKS_WS_URL` (defaults to `WS_RPC_URL`)
+3. Optionally configure `FLASHBLOCKS_TICK_MS` (default: 250ms)
+4. Service polls `eth_getBlockByNumber('pending', false)` at the configured interval
+5. Triggers selective rechecks on low HF candidates when pending block changes
 
-**Note:** Flashblocks is a **hint** for faster triggers. The service **always** performs a canonical recheck on `newHeads` before signaling execution.
+**Note:** Flashblocks polling is a **hint** for faster triggers. The service **always** performs a canonical recheck on block notifications before signaling execution. Pending block queries may fail silently on providers that don't support them.
 
 ### Canonical Recheck
 
@@ -208,9 +215,14 @@ You should see:
 [realtime-hf] Using standard WebSocket
 [realtime-hf] WebSocket provider connected
 [realtime-hf] Contracts verified
-[realtime-hf] Subscribed to newHeads
-[realtime-hf] Subscribed to Aave Pool logs
+[realtime-hf] Subscribed (ethers) to block listener
+[realtime-hf] Subscribed (ethers) to Aave Pool logs
 [realtime-hf] Service started successfully
+```
+
+If `USE_FLASHBLOCKS=true`, you'll also see:
+```
+[realtime-hf] Starting pending block polling (tick=250ms)
 ```
 
 ### Step 4: Monitor Logs

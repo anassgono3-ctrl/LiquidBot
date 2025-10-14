@@ -74,7 +74,7 @@ export class RealTimeHFService extends EventEmitter {
   private readonly maxReconnectAttempts = 10;
   private reconnectTimer?: NodeJS.Timeout;
   private seedTimer?: NodeJS.Timeout;
-  private subscriptions: string[] = [];
+  private pendingBlockTimer?: NodeJS.Timeout;
   private skipWsConnection: boolean;
 
   // Metrics
@@ -120,7 +120,7 @@ export class RealTimeHFService extends EventEmitter {
     if (!this.skipWsConnection) {
       await this.setupProvider();
       await this.setupContracts();
-      await this.setupSubscriptions();
+      await this.setupRealtime();
     }
 
     // Start periodic seeding from subgraph
@@ -145,15 +145,14 @@ export class RealTimeHFService extends EventEmitter {
     // Clear timers
     if (this.seedTimer) clearInterval(this.seedTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.pendingBlockTimer) clearInterval(this.pendingBlockTimer);
 
-    // Unsubscribe from all subscriptions
-    if (this.provider instanceof WebSocketProvider) {
-      for (const subId of this.subscriptions) {
-        try {
-          await this.provider.send('eth_unsubscribe', [subId]);
-        } catch (err) {
-          // Ignore errors during unsubscribe
-        }
+    // Remove all event listeners
+    if (this.provider) {
+      try {
+        this.provider.removeAllListeners();
+      } catch (err) {
+        // Ignore errors during cleanup
       }
     }
 
@@ -248,23 +247,33 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Setup WebSocket subscriptions (newHeads, Aave Pool logs, Chainlink feeds)
+   * Setup real-time event listeners using native ethers v6 providers
    */
-  private async setupSubscriptions(): Promise<void> {
-    if (!this.provider || !(this.provider instanceof WebSocketProvider)) {
+  private async setupRealtime(): Promise<void> {
+    if (!this.provider) {
       // eslint-disable-next-line no-console
-      console.log('[realtime-hf] No WebSocket provider, skipping subscriptions');
+      console.log('[realtime-hf] No provider, skipping real-time setup');
       return;
     }
 
     try {
-      // Subscribe to newHeads for canonical rechecks
-      const headsSub = await this.provider.send('eth_subscribe', ['newHeads']);
-      this.subscriptions.push(headsSub);
+      // 1. Setup block listener for canonical rechecks
+      this.provider.on('block', (blockNumber: number) => {
+        if (this.isShuttingDown) return;
+        try {
+          this.handleNewBlock(blockNumber).catch(err => {
+            // eslint-disable-next-line no-console
+            console.error('[realtime-hf] Error handling block:', err);
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[realtime-hf] Error in block listener:', err);
+        }
+      });
       // eslint-disable-next-line no-console
-      console.log('[realtime-hf] Subscribed to newHeads');
+      console.log('[realtime-hf] Subscribed (ethers) to block listener');
 
-      // Subscribe to Aave Pool logs
+      // 2. Setup Aave Pool log listener
       // Get all registered event topics from EventRegistry
       const aaveTopics = eventRegistry.getAllTopics().filter(topic => {
         const entry = eventRegistry.get(topic);
@@ -272,7 +281,7 @@ export class RealTimeHFService extends EventEmitter {
         return entry && entry.name !== 'AnswerUpdated';
       });
       
-      const logsFilter = {
+      const aaveFilter = {
         address: config.aavePool,
         topics: [
           aaveTopics.length > 0 ? aaveTopics : [
@@ -285,12 +294,22 @@ export class RealTimeHFService extends EventEmitter {
         ]
       };
 
-      const logsSub = await this.provider.send('eth_subscribe', ['logs', logsFilter]);
-      this.subscriptions.push(logsSub);
+      this.provider.on(aaveFilter, (log: EventLog) => {
+        if (this.isShuttingDown) return;
+        try {
+          this.handleLog(log).catch(err => {
+            // eslint-disable-next-line no-console
+            console.error('[realtime-hf] Error handling Aave log:', err);
+          });
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[realtime-hf] Error in Aave log listener:', err);
+        }
+      });
       // eslint-disable-next-line no-console
-      console.log('[realtime-hf] Subscribed to Aave Pool logs');
+      console.log('[realtime-hf] Subscribed (ethers) to Aave Pool logs');
 
-      // Optional: Subscribe to Chainlink price feeds
+      // 3. Optional: Setup Chainlink price feed listeners
       if (config.chainlinkFeeds) {
         const feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
         // Get AnswerUpdated topic from event registry
@@ -301,16 +320,27 @@ export class RealTimeHFService extends EventEmitter {
         
         for (const [token, feedAddress] of Object.entries(feeds)) {
           try {
-            const priceFeedFilter = {
+            const chainlinkFilter = {
               address: feedAddress,
               topics: [
                 answerUpdatedTopic || new Interface(CHAINLINK_AGG_ABI).getEvent('AnswerUpdated')?.topicHash || ''
               ]
             };
-            const priceSub = await this.provider.send('eth_subscribe', ['logs', priceFeedFilter]);
-            this.subscriptions.push(priceSub);
+            
+            this.provider.on(chainlinkFilter, (log: EventLog) => {
+              if (this.isShuttingDown) return;
+              try {
+                this.handleLog(log).catch(err => {
+                  // eslint-disable-next-line no-console
+                  console.error(`[realtime-hf] Error handling Chainlink log for ${token}:`, err);
+                });
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error(`[realtime-hf] Error in Chainlink listener for ${token}:`, err);
+              }
+            });
             // eslint-disable-next-line no-console
-            console.log(`[realtime-hf] Subscribed to Chainlink feed for ${token}`);
+            console.log(`[realtime-hf] Subscribed (ethers) to Chainlink feed for ${token}`);
           } catch (err) {
             // eslint-disable-next-line no-console
             console.warn(`[realtime-hf] Failed to subscribe to Chainlink feed for ${token}:`, err);
@@ -318,56 +348,55 @@ export class RealTimeHFService extends EventEmitter {
         }
       }
 
-      // Setup message handler
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      this.provider.on('message', (message: { type: string; data: any }) => {
-        if (this.isShuttingDown) return;
-        this.handleSubscriptionMessage(message).catch(err => {
-          // eslint-disable-next-line no-console
-          console.error('[realtime-hf] Error handling subscription message:', err);
-        });
-      });
+      // 4. Optional: Setup pending block polling when Flashblocks enabled
+      if (config.useFlashblocks) {
+        this.startPendingBlockPolling();
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.error('[realtime-hf] Failed to setup subscriptions:', err);
+      console.error('[realtime-hf] Failed to setup real-time listeners:', err);
       throw err;
     }
   }
 
   /**
-   * Handle subscription messages (newHeads, logs)
+   * Handle new block notification - perform canonical recheck
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleSubscriptionMessage(message: { type: string; data: any }): Promise<void> {
-    if (message.type === 'eth_subscription') {
-      const result = message.data?.result;
-      if (!result) return;
-
-      // Check if it's a newHead block
-      if (result.number) {
-        this.metrics.blocksReceived++;
-        await this.handleNewHead(result);
-      }
-      // Check if it's a log
-      else if (result.topics) {
-        const log = result as EventLog;
-        await this.handleLog(log);
-      }
-    }
-  }
-
-  /**
-   * Handle newHeads block notification - perform canonical recheck
-   */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async handleNewHead(block: any): Promise<void> {
+  private async handleNewBlock(blockNumber: number): Promise<void> {
     // eslint-disable-next-line no-console
-    console.log(`[realtime-hf] New block ${block.number}`);
+    console.log(`[realtime-hf] New block ${blockNumber}`);
 
+    this.metrics.blocksReceived++;
     realtimeBlocksReceived.inc();
 
     // Perform batch check on all candidates
     await this.checkAllCandidates('head');
+  }
+
+  /**
+   * Start pending block polling (Flashblocks mode)
+   */
+  private startPendingBlockPolling(): void {
+    if (!this.provider) return;
+
+    const tickMs = config.flashblocksTickMs;
+    // eslint-disable-next-line no-console
+    console.log(`[realtime-hf] Starting pending block polling (tick=${tickMs}ms)`);
+
+    this.pendingBlockTimer = setInterval(async () => {
+      if (this.isShuttingDown || !this.provider) return;
+
+      try {
+        // Query pending block
+        const pendingBlock = await this.provider.send('eth_getBlockByNumber', ['pending', false]);
+        if (pendingBlock && pendingBlock.number) {
+          // Trigger selective checks on low HF candidates when pending block changes
+          await this.checkLowHFCandidates('price');
+        }
+      } catch (err) {
+        // Silently ignore errors in pending block queries (expected for some providers)
+      }
+    }, tickMs);
   }
 
   /**
@@ -681,7 +710,7 @@ export class RealTimeHFService extends EventEmitter {
       
       this.setupProvider()
         .then(() => this.setupContracts())
-        .then(() => this.setupSubscriptions())
+        .then(() => this.setupRealtime())
         .then(() => {
           // eslint-disable-next-line no-console
           console.log('[realtime-hf] Reconnected successfully');

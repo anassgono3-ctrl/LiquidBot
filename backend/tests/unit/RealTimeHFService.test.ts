@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { RealTimeHFService } from '../../src/services/RealTimeHFService.js';
 
 // Mock config
@@ -133,6 +134,33 @@ describe('RealTimeHFService', () => {
       
       const metrics = disabledService.getMetrics();
       expect(metrics.blocksReceived).toBe(0);
+    });
+  });
+
+  describe('Flashblocks mode', () => {
+    it('should start without errors when USE_FLASHBLOCKS=true', async () => {
+      // Mock config with Flashblocks enabled
+      vi.doMock('../../src/config/index.js', () => ({
+        config: {
+          useRealtimeHF: true,
+          wsRpcUrl: 'wss://test.example.com',
+          useFlashblocks: true,
+          flashblocksWsUrl: 'wss://flashblocks.test.com',
+          flashblocksTickMs: 250,
+          multicall3Address: '0xca11bde05977b3631167028862be2a173976ca11',
+          aavePool: '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
+          executionHfThresholdBps: 9800,
+          realtimeSeedIntervalSec: 45,
+          candidateMax: 300,
+          chainlinkFeeds: undefined,
+          rpcUrl: 'https://test.example.com'
+        }
+      }));
+
+      const flashblocksService = new RealTimeHFService({ skipWsConnection: true });
+      await expect(flashblocksService.start()).resolves.not.toThrow();
+      
+      await flashblocksService.stop();
     });
   });
 });
