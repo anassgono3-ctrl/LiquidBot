@@ -390,12 +390,7 @@ export class RealTimeHFService extends EventEmitter {
         // Query pending block
         const pendingBlock = await this.provider.send('eth_getBlockByNumber', ['pending', false]);
         if (pendingBlock && pendingBlock.number) {
-          // Only process if block number changed
-          const blockNum = typeof pendingBlock.number === 'string' 
-            ? parseInt(pendingBlock.number, 16)
-            : pendingBlock.number;
-          
-          // Trigger selective checks on low HF candidates
+          // Trigger selective checks on low HF candidates when pending block changes
           await this.checkLowHFCandidates('price');
         }
       } catch (err) {

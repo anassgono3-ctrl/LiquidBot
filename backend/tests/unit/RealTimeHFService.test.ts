@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { RealTimeHFService } from '../../src/services/RealTimeHFService.js';
 
 // Mock config
@@ -138,15 +139,6 @@ describe('RealTimeHFService', () => {
 
   describe('Flashblocks mode', () => {
     it('should start without errors when USE_FLASHBLOCKS=true', async () => {
-      // Create a mock provider with on() method
-      const mockProvider = {
-        on: vi.fn(),
-        removeAllListeners: vi.fn(),
-        ready: Promise.resolve({}),
-        getCode: vi.fn().mockResolvedValue('0x123'),
-        send: vi.fn()
-      };
-
       // Mock config with Flashblocks enabled
       vi.doMock('../../src/config/index.js', () => ({
         config: {
