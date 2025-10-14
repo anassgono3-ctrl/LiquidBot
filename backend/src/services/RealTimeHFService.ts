@@ -549,6 +549,53 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Perform read-only Multicall3 aggregate3 call with automatic chunking
+   */
+  private async multicallAggregate3ReadOnly(
+    calls: Array<{ target: string; allowFailure: boolean; callData: string }>,
+    chunkSize = 120
+  ): Promise<Array<{ success: boolean; returnData: string }>> {
+    if (!this.multicall3 || !this.provider) {
+      throw new Error('[realtime-hf] Multicall3 or provider not initialized');
+    }
+
+    // If calls fit in single batch, execute directly
+    if (calls.length <= chunkSize) {
+      try {
+        const results = await this.multicall3.aggregate3.staticCall(calls);
+        return results;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[realtime-hf] Multicall3 staticCall failed:', err);
+        throw err;
+      }
+    }
+
+    // Split into chunks for large batches
+    // eslint-disable-next-line no-console
+    console.log(`[realtime-hf] Chunking ${calls.length} calls into batches of ${chunkSize}`);
+    
+    const allResults: Array<{ success: boolean; returnData: string }> = [];
+    for (let i = 0; i < calls.length; i += chunkSize) {
+      const chunk = calls.slice(i, i + chunkSize);
+      try {
+        const results = await this.multicall3.aggregate3.staticCall(chunk);
+        allResults.push(...results);
+        // eslint-disable-next-line no-console
+        console.log(`[realtime-hf] Chunk ${Math.floor(i / chunkSize) + 1}/${Math.ceil(calls.length / chunkSize)} complete (${chunk.length} calls)`);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`[realtime-hf] Multicall3 chunk ${Math.floor(i / chunkSize) + 1} failed:`, err);
+        // Return failure results for this chunk to avoid crashing
+        const failedResults = chunk.map(() => ({ success: false, returnData: '0x' }));
+        allResults.push(...failedResults);
+      }
+    }
+
+    return allResults;
+  }
+
+  /**
    * Batch check multiple candidates using Multicall3
    */
   private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price'): Promise<void> {
@@ -562,7 +609,7 @@ export class RealTimeHFService extends EventEmitter {
         callData: aavePoolInterface.encodeFunctionData('getUserAccountData', [addr])
       }));
 
-      const results = await this.multicall3.aggregate3(calls);
+      const results = await this.multicallAggregate3ReadOnly(calls);
       const blockNumber = await this.provider.getBlockNumber();
       const threshold = config.executionHfThresholdBps / 10000; // e.g., 0.98
       let minHF: number | null = null;
@@ -626,6 +673,8 @@ export class RealTimeHFService extends EventEmitter {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[realtime-hf] Batch check failed:', err);
+      // Do not crash the service - continue runtime
+      // The error is already logged above
     }
   }
 
