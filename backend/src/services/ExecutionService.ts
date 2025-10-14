@@ -22,6 +22,9 @@ export interface ExecutionResult {
   realizedProfitUsd?: number;
 }
 
+// Constants for dust guard (no env vars)
+const MIN_USD_1e18 = 5n * 10n**18n; // $5 USD minimum threshold
+
 export interface GasEstimator {
   getCurrentGasPrice(): Promise<number>; // Returns gas price in Gwei
 }
@@ -244,35 +247,54 @@ export class ExecutionService {
       
       // Step 3: Calculate debt to cover with dynamic data (respecting close factor)
       const debtInfo = await this.calculateDebtToCover(opportunity, debtAsset, opportunity.user);
-      const { debtToCover, liquidationBonusPct, debtToCoverUsd } = debtInfo;
+      const { debtToCover, liquidationBonusPct, debtToCoverUsd, isDust, debtToCoverHuman } = debtInfo;
       
-      // Safety check: skip if debtToCover is zero
-      if (debtToCover === 0n) {
+      // Enrich opportunity with debt info (for logging and Telegram)
+      opportunity.debtToCover = debtToCover.toString();
+      opportunity.debtToCoverHuman = debtToCoverHuman;
+      opportunity.debtToCoverUsd = debtToCoverUsd;
+      opportunity.bonusPct = liquidationBonusPct;
+      
+      // Apply dust guard: skip if below threshold or zero
+      if (isDust) {
         // eslint-disable-next-line no-console
-        console.log('[execution] Skipping execution - calculated debtToCover is zero');
+        console.log('[execution] Skipping execution - dust guard triggered:', {
+          debtToCoverRaw: debtToCover.toString(),
+          debtToCoverHuman,
+          debtToCoverUsd,
+          reason: debtToCover === 0n ? 'zero_debt' : 'below_dust_threshold'
+        });
         return {
           success: false,
           simulated: false,
-          reason: 'zero_debt'
+          reason: 'dust'
         };
       }
       
-      // Log profit components with dynamic bonus
+      // Log profit components with dynamic bonus and amounts
       // eslint-disable-next-line no-console
-      console.log('[execution] Profit estimation:', {
-        debtToCoverUsd,
+      console.log('[execution] Debt to cover calculated:', {
+        debtToCoverRaw: debtToCover.toString(),
+        debtToCoverHuman,
+        debtToCoverUsd: `$${debtToCoverUsd.toFixed(2)}`,
         liquidationBonusPct,
         bonusBps: Math.round(liquidationBonusPct * 10000),
         closeFactorMode: config.closeFactorExecutionMode
       });
       
-      // Step 3: Get 1inch swap quote
+      // Step 4: Get 1inch swap quote
+      // For the swap, we need to estimate collateral received (debt * (1 + bonus))
+      // For now, we'll use collateral amount from opportunity or estimate
       const slippageBps = Number(process.env.MAX_SLIPPAGE_BPS || 100); // 1% default
+      
+      // Calculate expected collateral to swap (debtToCover * (1 + bonus))
+      const bonusMultiplier = BigInt(Math.round((1 + liquidationBonusPct) * 10000));
+      const expectedCollateral = (debtToCover * bonusMultiplier) / 10000n;
       
       const swapQuote = await this.oneInchService.getSwapCalldata({
         fromToken: opportunity.collateralReserve.id,
         toToken: opportunity.principalReserve.id,
-        amount: opportunity.collateralAmountRaw, // Use full collateral amount
+        amount: expectedCollateral.toString(), // Use raw amount (BigInt to string)
         slippageBps: slippageBps,
         fromAddress: this.executorAddress
       });
@@ -373,13 +395,13 @@ export class ExecutionService {
    * @param opportunity The liquidation opportunity
    * @param debtAsset The debt asset address (reserve)
    * @param userAddress The user address
-   * @returns Object with debt amount to cover in wei and liquidation bonus
+   * @returns Object with debt amount to cover in wei, liquidation bonus, USD value, and dust check
    */
   private async calculateDebtToCover(
     opportunity: Opportunity,
     debtAsset: string,
     userAddress: string
-  ): Promise<{ debtToCover: bigint; liquidationBonusPct: number; debtToCoverUsd: number }> {
+  ): Promise<{ debtToCover: bigint; liquidationBonusPct: number; debtToCoverUsd: number; isDust: boolean; debtToCoverHuman: string }> {
     const mode = config.closeFactorExecutionMode;
     
     // For real-time opportunities with triggerSource='realtime', fetch live debt
@@ -417,7 +439,7 @@ export class ExecutionService {
     
     // Check for zero debt
     if (totalDebt === 0n) {
-      return { debtToCover: 0n, liquidationBonusPct, debtToCoverUsd: 0 };
+      return { debtToCover: 0n, liquidationBonusPct, debtToCoverUsd: 0, isDust: true, debtToCoverHuman: '0' };
     }
     
     // Calculate debtToCover based on mode
@@ -430,20 +452,47 @@ export class ExecutionService {
       debtToCover = totalDebt / 2n;
     }
     
-    // Estimate USD value for metrics
-    if (opportunity.principalValueUsd && opportunity.principalAmountRaw) {
-      const principalRaw = BigInt(opportunity.principalAmountRaw);
-      if (principalRaw > 0n) {
-        debtToCoverUsd = (opportunity.principalValueUsd * Number(debtToCover)) / Number(principalRaw);
+    // Get debt asset decimals and price for proper USD calculation
+    let tokenDecimals = opportunity.principalReserve.decimals || 18;
+    let priceRaw = 0n;
+    let priceDecimals = 8; // Aave Oracle returns prices in 8 decimals USD
+    
+    // Fetch price from Aave Oracle if available
+    if (this.aaveDataService && this.aaveDataService.isInitialized()) {
+      try {
+        priceRaw = await this.aaveDataService.getAssetPrice(debtAsset);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('[execution] Failed to fetch asset price from oracle:', error instanceof Error ? error.message : error);
       }
     }
     
-    // Update metrics
-    if (debtToCoverUsd > 0) {
+    // Calculate USD value with 1e18 math to avoid rounding to zero
+    let usdValue1e18 = 0n;
+    if (priceRaw > 0n && debtToCover > 0n) {
+      // Scale amount to 1e18
+      const amount1e18 = debtToCover * (10n ** BigInt(18 - tokenDecimals));
+      // Scale price to 1e18
+      const price1e18 = priceRaw * (10n ** BigInt(18 - priceDecimals));
+      // Calculate USD value: (amount * price) / 1e18
+      usdValue1e18 = (amount1e18 * price1e18) / (10n ** 18n);
+    }
+    
+    // Convert to human-readable USD
+    debtToCoverUsd = Number(usdValue1e18) / 1e18;
+    
+    // Apply dust guard: skip if debtToCover is zero or USD value < $5
+    const isDust = debtToCover === 0n || usdValue1e18 < MIN_USD_1e18;
+    
+    // Format human-readable amount
+    const debtToCoverHuman = (Number(debtToCover) / Math.pow(10, tokenDecimals)).toFixed(tokenDecimals <= 6 ? tokenDecimals : 6);
+    
+    // Update metrics only for non-dust opportunities
+    if (!isDust && debtToCoverUsd > 0) {
       realtimeDebtToCover.observe(debtToCoverUsd);
     }
     
-    return { debtToCover, liquidationBonusPct, debtToCoverUsd };
+    return { debtToCover, liquidationBonusPct, debtToCoverUsd, isDust, debtToCoverHuman };
   }
 
   /**

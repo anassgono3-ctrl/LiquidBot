@@ -100,7 +100,8 @@ export interface Opportunity {
   hfDiff?: number | null;                // difference between original and verified HF
   triggerSource?: 'subgraph' | 'realtime'; // source of opportunity detection
   triggerType?: 'event' | 'head' | 'price'; // real-time trigger type (if realtime source)
-  debtToCover?: string | null;           // calculated debt to cover (for real-time execution)
+  debtToCover?: string | null;           // calculated debt to cover raw amount (for real-time execution)
+  debtToCoverHuman?: string | null;      // human-readable debt to cover
   debtToCoverUsd?: number | null;        // debt to cover in USD
 }
 

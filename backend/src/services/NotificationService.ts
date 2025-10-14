@@ -127,9 +127,14 @@ export class NotificationService {
     // Real-time enriched data (only for realtime path)
     let realtimeInfo = '';
     if (op.triggerSource === 'realtime') {
-      const debtToCoverInfo = op.debtToCoverUsd 
-        ? `\n💳 Debt to Cover: $${op.debtToCoverUsd.toFixed(2)}`
-        : '';
+      // Show debt to cover with both human and raw amounts, plus USD
+      let debtToCoverInfo = '';
+      if (op.debtToCoverHuman && op.debtToCover && op.debtToCoverUsd) {
+        const symbol = op.principalReserve.symbol || 'tokens';
+        debtToCoverInfo = `\n💳 Debt to Cover: ${op.debtToCoverHuman} ${symbol} (raw ${op.debtToCover}) ~$${op.debtToCoverUsd.toFixed(2)}`;
+      } else if (op.debtToCoverUsd) {
+        debtToCoverInfo = `\n💳 Debt to Cover: ~$${op.debtToCoverUsd.toFixed(2)}`;
+      }
       const bonusInfo = op.bonusPct
         ? `\n🎁 Liquidation Bonus: ${(op.bonusPct * 100).toFixed(2)}%`
         : '';

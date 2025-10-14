@@ -97,6 +97,9 @@ if (config.atRiskScanLimit > 0) {
 
 // Initialize real-time HF service (only when enabled via config)
 let realtimeHFService: RealTimeHFService | undefined;
+// Track last block where dust was logged to avoid spam
+let lastDustLogBlock = 0;
+
 if (config.useRealtimeHF) {
   realtimeHFService = new RealTimeHFService({ subgraphService });
   
@@ -121,25 +124,38 @@ if (config.useRealtimeHF) {
       triggerType: event.triggerType
     };
     
-    // Notify about real-time opportunity
-    await notificationService.notifyOpportunity(opportunity);
-    
-    // Execute if enabled
-    if (config.executionEnabled) {
-      try {
-        const result = await executionService.execute(opportunity);
-        logger.info(`[realtime-hf] Execution result:`, { 
-          user: event.userAddress, 
-          success: result.success, 
-          reason: result.reason,
-          simulated: result.simulated
-        });
-      } catch (error) {
-        logger.error(`[realtime-hf] Execution error:`, { 
-          user: event.userAddress,
-          error: error instanceof Error ? error.message : String(error)
-        });
+    // Execute if enabled (execution service will check dust guard)
+    // Note: Even when execution is disabled, we should still check for actionable opportunities
+    // by running through the execution pipeline in dry-run mode to get debt calculations
+    let shouldNotify = true;
+    try {
+      const result = await executionService.execute(opportunity);
+      logger.info(`[realtime-hf] Execution result:`, { 
+        user: event.userAddress, 
+        success: result.success, 
+        reason: result.reason,
+        simulated: result.simulated
+      });
+      
+      // Don't notify if execution was skipped due to dust
+      if (result.reason === 'dust') {
+        shouldNotify = false;
+        // Log once per block to avoid spam
+        if (event.blockNumber !== lastDustLogBlock) {
+          logger.info(`[realtime-hf] skip_notify_dust: block=${event.blockNumber} user=${event.userAddress}`);
+          lastDustLogBlock = event.blockNumber;
+        }
       }
+    } catch (error) {
+      logger.error(`[realtime-hf] Execution error:`, { 
+        user: event.userAddress,
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+    
+    // Notify about real-time opportunity only if not dust
+    if (shouldNotify) {
+      await notificationService.notifyOpportunity(opportunity);
     }
   });
   
