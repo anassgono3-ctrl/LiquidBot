@@ -100,6 +100,8 @@ export interface Opportunity {
   hfDiff?: number | null;                // difference between original and verified HF
   triggerSource?: 'subgraph' | 'realtime'; // source of opportunity detection
   triggerType?: 'event' | 'head' | 'price'; // real-time trigger type (if realtime source)
+  debtToCover?: string | null;           // calculated debt to cover (for real-time execution)
+  debtToCoverUsd?: number | null;        // debt to cover in USD
 }
 
 export interface HealthSnapshot {

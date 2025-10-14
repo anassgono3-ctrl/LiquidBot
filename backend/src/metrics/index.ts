@@ -170,3 +170,23 @@ export const realtimeMinHealthFactor = new Gauge({
   help: 'Lowest health factor observed across all candidates',
   registers: [registry]
 });
+
+// Real-time execution metrics
+export const realtimeLiquidationBonusBps = new Gauge({
+  name: 'liquidbot_realtime_liquidation_bonus_bps',
+  help: 'Last used liquidation bonus in basis points for real-time execution',
+  registers: [registry]
+});
+
+export const realtimeDebtToCover = new Histogram({
+  name: 'liquidbot_realtime_debt_to_cover',
+  help: 'Distribution of debt to cover amounts (USD equivalent)',
+  buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+  registers: [registry]
+});
+
+export const realtimeCloseFactorMode = new Gauge({
+  name: 'liquidbot_realtime_close_factor_mode',
+  help: 'Current close factor mode (0=fixed50, 1=full)',
+  registers: [registry]
+});

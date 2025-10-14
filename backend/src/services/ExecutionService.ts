@@ -3,8 +3,15 @@ import { ethers } from 'ethers';
 
 import type { Opportunity } from '../types/index.js';
 import { executionConfig } from '../config/executionConfig.js';
+import { config } from '../config/index.js';
+import {
+  realtimeLiquidationBonusBps,
+  realtimeDebtToCover,
+  realtimeCloseFactorMode
+} from '../metrics/index.js';
 
 import { OneInchQuoteService } from './OneInchQuoteService.js';
+import { AaveDataService } from './AaveDataService.js';
 
 export interface ExecutionResult {
   success: boolean;
@@ -29,6 +36,7 @@ export class ExecutionService {
   private provider?: ethers.JsonRpcProvider;
   private wallet?: ethers.Wallet;
   private executorAddress?: string;
+  private aaveDataService?: AaveDataService;
 
   constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService) {
     this.gasEstimator = gasEstimator;
@@ -42,7 +50,12 @@ export class ExecutionService {
     if (rpcUrl && privateKey) {
       this.provider = new ethers.JsonRpcProvider(rpcUrl);
       this.wallet = new ethers.Wallet(privateKey, this.provider);
+      this.aaveDataService = new AaveDataService(this.provider);
     }
+    
+    // Set close factor mode metric
+    const mode = config.closeFactorExecutionMode;
+    realtimeCloseFactorMode.set(mode === 'full' ? 1 : 0);
   }
 
   /**
@@ -50,26 +63,17 @@ export class ExecutionService {
    * @param userAddress The user address to check
    * @returns Health factor check result
    */
-  private async checkAaveHealthFactor(userAddress: string): Promise<{ liquidatable: boolean; healthFactor: string; reason?: string }> {
-    if (!this.provider) {
+  private async checkAaveHealthFactor(userAddress: string): Promise<{ liquidatable: boolean; healthFactor: string; totalDebt: bigint; reason?: string }> {
+    if (!this.aaveDataService || !this.aaveDataService.isInitialized()) {
       // No provider configured, skip check
-      return { liquidatable: true, healthFactor: 'unknown' };
+      return { liquidatable: true, healthFactor: 'unknown', totalDebt: 0n };
     }
 
     try {
-      // Aave V3 Pool address on Base (default if not specified)
-      const aavePoolAddress = process.env.AAVE_POOL || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5';
-      
-      // ABI for getUserAccountData
-      const aavePoolAbi = [
-        'function getUserAccountData(address user) external view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)'
-      ];
-      
-      const aavePool = new ethers.Contract(aavePoolAddress, aavePoolAbi, this.provider);
-      
-      // Query user account data
-      const accountData = await aavePool.getUserAccountData(userAddress);
+      // Query user account data at latest block
+      const accountData = await this.aaveDataService.getUserAccountData(userAddress);
       const healthFactor = accountData.healthFactor;
+      const totalDebt = accountData.totalDebtBase;
       
       // Health factor >= 1e18 means user is not liquidatable
       const threshold = BigInt('1000000000000000000'); // 1e18
@@ -79,20 +83,22 @@ export class ExecutionService {
         return {
           liquidatable: false,
           healthFactor: hfFormatted,
+          totalDebt,
           reason: `user_not_liquidatable: HF=${hfFormatted}`
         };
       }
       
       return {
         liquidatable: true,
-        healthFactor: (Number(healthFactor) / 1e18).toFixed(4)
+        healthFactor: (Number(healthFactor) / 1e18).toFixed(4),
+        totalDebt
       };
       
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn('[execution] Failed to check Aave health factor, continuing:', error instanceof Error ? error.message : error);
       // On error, assume liquidatable (don't block execution on HF check failure)
-      return { liquidatable: true, healthFactor: 'error' };
+      return { liquidatable: true, healthFactor: 'error', totalDebt: 0n };
     }
   }
 
@@ -190,7 +196,7 @@ export class ExecutionService {
         debt: opportunity.principalReserve.symbol
       });
 
-      // Step 1: Preflight check - verify user is currently liquidatable
+      // Step 1: Preflight check - verify user is currently liquidatable at latest block
       const hfCheck = await this.checkAaveHealthFactor(opportunity.user);
       
       if (!hfCheck.liquidatable) {
@@ -203,11 +209,47 @@ export class ExecutionService {
         };
       }
       
+      // Check for zero debt
+      if (hfCheck.totalDebt === 0n) {
+        // eslint-disable-next-line no-console
+        console.log('[execution] Skipping execution - user has zero debt');
+        return {
+          success: false,
+          simulated: false,
+          reason: 'zero_debt'
+        };
+      }
+      
       // eslint-disable-next-line no-console
-      console.log('[execution] Health factor check passed:', { healthFactor: hfCheck.healthFactor });
+      console.log('[execution] Health factor check passed:', { 
+        healthFactor: hfCheck.healthFactor,
+        totalDebt: hfCheck.totalDebt.toString()
+      });
 
-      // Step 2: Calculate debt to cover (respecting close factor)
-      const debtToCover = await this.calculateDebtToCover(opportunity);
+      // Step 2: Calculate debt to cover with dynamic data (respecting close factor)
+      const debtAsset = opportunity.principalReserve.id;
+      const debtInfo = await this.calculateDebtToCover(opportunity, debtAsset, opportunity.user);
+      const { debtToCover, liquidationBonusPct, debtToCoverUsd } = debtInfo;
+      
+      // Safety check: skip if debtToCover is zero
+      if (debtToCover === 0n) {
+        // eslint-disable-next-line no-console
+        console.log('[execution] Skipping execution - calculated debtToCover is zero');
+        return {
+          success: false,
+          simulated: false,
+          reason: 'zero_debt'
+        };
+      }
+      
+      // Log profit components with dynamic bonus
+      // eslint-disable-next-line no-console
+      console.log('[execution] Profit estimation:', {
+        debtToCoverUsd,
+        liquidationBonusPct,
+        bonusBps: Math.round(liquidationBonusPct * 10000),
+        closeFactorMode: config.closeFactorExecutionMode
+      });
       
       // Step 3: Get 1inch swap quote
       const slippageBps = Number(process.env.MAX_SLIPPAGE_BPS || 100); // 1% default
@@ -312,23 +354,81 @@ export class ExecutionService {
   }
 
   /**
-   * Calculate debt to cover respecting close factor
+   * Calculate debt to cover respecting close factor with live data
    * @param opportunity The liquidation opportunity
-   * @returns Debt amount to cover in wei
+   * @param debtAsset The debt asset address (reserve)
+   * @param userAddress The user address
+   * @returns Object with debt amount to cover in wei and liquidation bonus
    */
-  private async calculateDebtToCover(opportunity: Opportunity): Promise<bigint> {
-    const closeFactorMode = process.env.CLOSE_FACTOR_MODE || 'auto';
+  private async calculateDebtToCover(
+    opportunity: Opportunity,
+    debtAsset: string,
+    userAddress: string
+  ): Promise<{ debtToCover: bigint; liquidationBonusPct: number; debtToCoverUsd: number }> {
+    const mode = config.closeFactorExecutionMode;
     
-    if (closeFactorMode === 'fixed') {
-      // Use fixed 50% close factor
-      const debtAmount = BigInt(opportunity.principalAmountRaw);
-      return debtAmount / 2n;
+    // For real-time opportunities with triggerSource='realtime', fetch live debt
+    let totalDebt: bigint;
+    let liquidationBonusPct = 0.05; // Default 5% fallback
+    let debtToCoverUsd = 0;
+    
+    if (this.aaveDataService && this.aaveDataService.isInitialized() && opportunity.triggerSource === 'realtime') {
+      try {
+        // Fetch live debt from Protocol Data Provider
+        totalDebt = await this.aaveDataService.getTotalDebt(debtAsset, userAddress);
+        
+        // Fetch liquidation bonus for this reserve
+        const collateralAsset = opportunity.collateralReserve.id;
+        liquidationBonusPct = await this.aaveDataService.getLiquidationBonusPct(collateralAsset);
+        
+        // Update metrics
+        realtimeLiquidationBonusBps.set(liquidationBonusPct * 10000);
+        
+        // eslint-disable-next-line no-console
+        console.log('[execution] Fetched live debt data:', {
+          totalDebt: totalDebt.toString(),
+          liquidationBonusPct,
+          mode
+        });
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('[execution] Failed to fetch live debt, using opportunity data:', error instanceof Error ? error.message : error);
+        totalDebt = BigInt(opportunity.principalAmountRaw);
+      }
+    } else {
+      // For subgraph opportunities, use the debt from the opportunity event
+      totalDebt = BigInt(opportunity.principalAmountRaw);
     }
     
-    // Auto mode: use full debt amount from opportunity
-    // In production, you would query Aave data provider for actual close factor
-    // For now, use the amount from the opportunity which represents what was liquidated
-    return BigInt(opportunity.principalAmountRaw);
+    // Check for zero debt
+    if (totalDebt === 0n) {
+      return { debtToCover: 0n, liquidationBonusPct, debtToCoverUsd: 0 };
+    }
+    
+    // Calculate debtToCover based on mode
+    let debtToCover: bigint;
+    if (mode === 'full') {
+      // Full debt mode (experimental)
+      debtToCover = totalDebt;
+    } else {
+      // Default: fixed50 mode (safer, 50% of total debt)
+      debtToCover = totalDebt / 2n;
+    }
+    
+    // Estimate USD value for metrics
+    if (opportunity.principalValueUsd && opportunity.principalAmountRaw) {
+      const principalRaw = BigInt(opportunity.principalAmountRaw);
+      if (principalRaw > 0n) {
+        debtToCoverUsd = (opportunity.principalValueUsd * Number(debtToCover)) / Number(principalRaw);
+      }
+    }
+    
+    // Update metrics
+    if (debtToCoverUsd > 0) {
+      realtimeDebtToCover.observe(debtToCoverUsd);
+    }
+    
+    return { debtToCover, liquidationBonusPct, debtToCoverUsd };
   }
 
   /**

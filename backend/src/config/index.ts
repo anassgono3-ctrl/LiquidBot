@@ -63,6 +63,14 @@ export const config = {
   },
 
   get aavePoolAddress() { return env.aavePoolAddress; },
+  
+  // Aave V3 Base Data Provider addresses
+  get aaveAddressesProvider() { return env.aaveAddressesProvider; },
+  get aaveProtocolDataProvider() { return env.aaveProtocolDataProvider; },
+  get aaveOracle() { return env.aaveOracle; },
+  get aavePoolConfigurator() { return env.aavePoolConfigurator; },
+  get aaveUiPoolDataProvider() { return env.aaveUiPoolDataProvider; },
+  get aaveWrappedTokenGateway() { return env.aaveWrappedTokenGateway; },
 
   // Limits / retries
   get subgraphFailureThreshold() { return env.subgraphFailureThreshold; },
@@ -136,6 +144,10 @@ export const config = {
   get executionHfThresholdBps() { return env.executionHfThresholdBps; },
   get realtimeSeedIntervalSec() { return env.realtimeSeedIntervalSec; },
   get candidateMax() { return env.candidateMax; },
+  
+  // Execution configuration
+  get closeFactorExecutionMode() { return env.closeFactorExecutionMode; },
+  get liquidationDebtAssets() { return env.liquidationDebtAssets; },
 
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
