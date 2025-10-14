@@ -7,6 +7,16 @@ import EventEmitter from 'events';
 import { config } from '../config/index.js';
 import { CandidateManager } from './CandidateManager.js';
 import type { SubgraphService } from './SubgraphService.js';
+import {
+  realtimeBlocksReceived,
+  realtimeAaveLogsReceived,
+  realtimePriceUpdatesReceived,
+  realtimeHealthChecksPerformed,
+  realtimeTriggersProcessed,
+  realtimeReconnects,
+  realtimeCandidateCount,
+  realtimeMinHealthFactor
+} from '../metrics/index.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -335,6 +345,8 @@ export class RealTimeHFService extends EventEmitter {
     // eslint-disable-next-line no-console
     console.log(`[realtime-hf] New block ${block.number}`);
 
+    realtimeBlocksReceived.inc();
+
     // Perform batch check on all candidates
     await this.checkAllCandidates('head');
   }
@@ -348,6 +360,7 @@ export class RealTimeHFService extends EventEmitter {
     // Check if it's an Aave Pool log
     if (logAddress === config.aavePool.toLowerCase()) {
       this.metrics.aaveLogsReceived++;
+      realtimeAaveLogsReceived.inc();
 
       // Extract user address from log (varies by event)
       const userAddress = this.extractUserFromLog(log);
@@ -364,6 +377,7 @@ export class RealTimeHFService extends EventEmitter {
     } else {
       // Chainlink price update
       this.metrics.priceUpdatesReceived++;
+      realtimePriceUpdatesReceived.inc();
       // eslint-disable-next-line no-console
       console.log('[realtime-hf] Chainlink price update detected');
       
@@ -464,6 +478,7 @@ export class RealTimeHFService extends EventEmitter {
 
             this.candidateManager.updateHF(userAddress, healthFactor);
             this.metrics.healthChecksPerformed++;
+            realtimeHealthChecksPerformed.inc();
 
             // Track min HF
             if (minHF === null || healthFactor < minHF) {
@@ -471,6 +486,11 @@ export class RealTimeHFService extends EventEmitter {
             }
             if (this.metrics.minHF === null || healthFactor < this.metrics.minHF) {
               this.metrics.minHF = healthFactor;
+            }
+
+            // Update Prometheus gauge for min HF
+            if (this.metrics.minHF !== null) {
+              realtimeMinHealthFactor.set(this.metrics.minHF);
             }
 
             // Check if below threshold
@@ -488,6 +508,7 @@ export class RealTimeHFService extends EventEmitter {
               } as LiquidatableEvent);
 
               this.metrics.triggersProcessed++;
+              realtimeTriggersProcessed.inc({ trigger_type: triggerType });
             }
           } catch (err) {
             // eslint-disable-next-line no-console
@@ -495,6 +516,9 @@ export class RealTimeHFService extends EventEmitter {
           }
         }
       }
+
+      // Update candidate count gauge
+      realtimeCandidateCount.set(this.candidateManager.size());
 
       // eslint-disable-next-line no-console
       console.log(`[realtime-hf] Batch check complete: ${addresses.length} candidates, minHF=${minHF?.toFixed(4) || 'N/A'}, trigger=${triggerType}`);
@@ -567,6 +591,7 @@ export class RealTimeHFService extends EventEmitter {
 
     this.reconnectAttempts++;
     this.metrics.reconnects++;
+    realtimeReconnects.inc();
 
     if (this.reconnectAttempts > this.maxReconnectAttempts) {
       // eslint-disable-next-line no-console
