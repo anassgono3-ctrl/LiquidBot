@@ -146,6 +146,8 @@ export const config = {
   get candidateMax() { return env.candidateMax; },
   
   // Execution configuration
+  get executionEnabled() { return env.executionEnabled; },
+  get dryRunExecution() { return env.dryRunExecution; },
   get closeFactorExecutionMode() { return env.closeFactorExecutionMode; },
   get liquidationDebtAssets() { return env.liquidationDebtAssets; },
 

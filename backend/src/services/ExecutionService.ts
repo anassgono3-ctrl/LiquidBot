@@ -226,8 +226,23 @@ export class ExecutionService {
         totalDebt: hfCheck.totalDebt.toString()
       });
 
-      // Step 2: Calculate debt to cover with dynamic data (respecting close factor)
-      const debtAsset = opportunity.principalReserve.id;
+      // Step 2: Determine debt asset to liquidate
+      // For real-time opportunities, we need to query which assets the user has borrowed
+      let debtAsset = opportunity.principalReserve.id;
+      
+      // If debt asset is not known (real-time path), skip execution for now
+      // TODO: Implement debt asset discovery via Protocol Data Provider
+      if (debtAsset === 'unknown' || !debtAsset) {
+        // eslint-disable-next-line no-console
+        console.log('[execution] Skipping execution - debt asset unknown (real-time path needs implementation)');
+        return {
+          success: false,
+          simulated: false,
+          reason: 'debt_asset_unknown'
+        };
+      }
+      
+      // Step 3: Calculate debt to cover with dynamic data (respecting close factor)
       const debtInfo = await this.calculateDebtToCover(opportunity, debtAsset, opportunity.user);
       const { debtToCover, liquidationBonusPct, debtToCoverUsd } = debtInfo;
       
