@@ -105,14 +105,15 @@ if (config.useRealtimeHF) {
     logger.info(`[realtime-hf] Liquidatable event: user=${event.userAddress} HF=${event.healthFactor.toFixed(4)} trigger=${event.triggerType}`);
     
     // Create synthetic opportunity for execution
+    // Note: debt and collateral details will be fetched by ExecutionService when needed
     const opportunity = {
       id: `realtime-${event.userAddress}-${event.timestamp}`,
       txHash: null,
       user: event.userAddress,
       liquidator: 'bot',
       timestamp: Math.floor(event.timestamp / 1000),
-      collateralAmountRaw: '0', // Will be computed if execution proceeds
-      principalAmountRaw: '0',
+      collateralAmountRaw: '0', // Will be fetched by ExecutionService from Aave
+      principalAmountRaw: '0',  // Will be fetched by ExecutionService from Aave
       collateralReserve: { id: 'unknown', symbol: null, decimals: null },
       principalReserve: { id: 'unknown', symbol: null, decimals: null },
       healthFactor: event.healthFactor,
@@ -123,8 +124,23 @@ if (config.useRealtimeHF) {
     // Notify about real-time opportunity
     await notificationService.notifyOpportunity(opportunity);
     
-    // TODO: Execute liquidation if execution enabled
-    // For now, just log and notify
+    // Execute if enabled
+    if (config.executionEnabled) {
+      try {
+        const result = await executionService.execute(opportunity);
+        logger.info(`[realtime-hf] Execution result:`, { 
+          user: event.userAddress, 
+          success: result.success, 
+          reason: result.reason,
+          simulated: result.simulated
+        });
+      } catch (error) {
+        logger.error(`[realtime-hf] Execution error:`, { 
+          user: event.userAddress,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      }
+    }
   });
   
   logger.info('[realtime-hf] Service initialized and will start when server starts');

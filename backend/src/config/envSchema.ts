@@ -34,6 +34,14 @@ export const rawEnvSchema = z.object({
   SUBGRAPH_RATE_LIMIT_INTERVAL_MS: z.string().optional(),
 
   AAVE_POOL_ADDRESS: z.string().optional(),
+  
+  // Aave V3 Base Data Provider addresses
+  AAVE_ADDRESSES_PROVIDER: z.string().optional(),
+  AAVE_PROTOCOL_DATA_PROVIDER: z.string().optional(),
+  AAVE_ORACLE: z.string().optional(),
+  AAVE_POOL_CONFIGURATOR: z.string().optional(),
+  AAVE_UI_POOL_DATA_PROVIDER: z.string().optional(),
+  AAVE_WRAPPED_TOKEN_GATEWAY: z.string().optional(),
 
   DATABASE_URL: z.string().optional(),
   REDIS_URL: z.string().optional(),
@@ -101,6 +109,8 @@ export const rawEnvSchema = z.object({
   ONEINCH_BASE_URL: z.string().optional(),
   MAX_SLIPPAGE_BPS: z.string().optional(),
   CLOSE_FACTOR_MODE: z.string().optional(),
+  CLOSE_FACTOR_EXECUTION_MODE: z.string().optional(),
+  LIQUIDATION_DEBT_ASSETS: z.string().optional(),
 
   // Real-time HF detection
   USE_REALTIME_HF: z.string().optional(),
@@ -146,6 +156,14 @@ export const env = (() => {
     subgraphRateLimitIntervalMs: Number(parsed.SUBGRAPH_RATE_LIMIT_INTERVAL_MS || 10000),
 
     aavePoolAddress: parsed.AAVE_POOL_ADDRESS || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
+    
+    // Aave V3 Base Data Provider addresses
+    aaveAddressesProvider: parsed.AAVE_ADDRESSES_PROVIDER || '0xe20fCBdBfFC4Dd138cE8b2E6FBb6CB49777ad64D',
+    aaveProtocolDataProvider: parsed.AAVE_PROTOCOL_DATA_PROVIDER || '0xC4Fcf9893072d61Cc2899C0054877Cb752587981',
+    aaveOracle: parsed.AAVE_ORACLE || '0x2Cc0Fc26eD4563A5ce5e8bdcfe1A2878676Ae156',
+    aavePoolConfigurator: parsed.AAVE_POOL_CONFIGURATOR || '0x5731a04B1E775f0fdd454Bf70f3335886e9A96be',
+    aaveUiPoolDataProvider: parsed.AAVE_UI_POOL_DATA_PROVIDER || '0x68100bD5345eA474D93577127C11F39FF8463e93',
+    aaveWrappedTokenGateway: parsed.AAVE_WRAPPED_TOKEN_GATEWAY || '0xa0d9C1E9E48Ca30c8d8C3B5D69FF5dc1f6DFfC24',
 
     databaseUrl: parsed.DATABASE_URL,
     redisUrl: parsed.REDIS_URL,
@@ -216,6 +234,11 @@ export const env = (() => {
     oneInchBaseUrl: parsed.ONEINCH_BASE_URL || 'https://api.1inch.dev/swap/v6.0/8453',
     maxSlippageBps: Number(parsed.MAX_SLIPPAGE_BPS || 100),
     closeFactorMode: parsed.CLOSE_FACTOR_MODE || 'auto',
+    closeFactorExecutionMode: parsed.CLOSE_FACTOR_EXECUTION_MODE || 'fixed50',
+    liquidationDebtAssets: (parsed.LIQUIDATION_DEBT_ASSETS || '')
+      .split(',')
+      .map(a => a.trim().toLowerCase())
+      .filter(a => a.length > 0),
 
     // Real-time HF detection
     useRealtimeHF: (parsed.USE_REALTIME_HF || 'false').toLowerCase() === 'true',

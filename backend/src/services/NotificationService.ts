@@ -124,12 +124,24 @@ export class NotificationService {
       ? ' (Subgraph)'
       : '';
 
+    // Real-time enriched data (only for realtime path)
+    let realtimeInfo = '';
+    if (op.triggerSource === 'realtime') {
+      const debtToCoverInfo = op.debtToCoverUsd 
+        ? `\n💳 Debt to Cover: $${op.debtToCoverUsd.toFixed(2)}`
+        : '';
+      const bonusInfo = op.bonusPct
+        ? `\n🎁 Liquidation Bonus: ${(op.bonusPct * 100).toFixed(2)}%`
+        : '';
+      realtimeInfo = debtToCoverInfo + bonusInfo;
+    }
+
     return `🚨 <b>Liquidation Opportunity${sourceTag}</b>
 
 👤 User: <code>${userAddr}</code>
 💰 Collateral: ${collateralAmount} ${collateralSymbol} (${collateralUsd})
 📉 Debt: ${principalAmount} ${principalSymbol} (${principalUsd})
-📊 Health Factor: ${hf}
+📊 Health Factor: ${hf}${realtimeInfo}
 💵 Est. Profit: ${profit}${txLink}
 
 ⏰ ${new Date(op.timestamp * 1000).toISOString()}`;

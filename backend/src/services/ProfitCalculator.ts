@@ -94,4 +94,43 @@ export class ProfitCalculator {
   getGasCostUsd(): number {
     return this.gasCostUsd;
   }
+
+  /**
+   * Estimate profit for pre-execution with dynamic liquidation bonus.
+   * Used for real-time opportunities before liquidation occurs.
+   * 
+   * @param debtToCoverUsd Debt amount to be repaid in USD
+   * @param liquidationBonusPct Dynamic liquidation bonus (e.g., 0.05 for 5%)
+   * @returns Estimated profit breakdown
+   */
+  estimateProfitWithBonus(debtToCoverUsd: number, liquidationBonusPct: number): ProfitBreakdown {
+    // Expected collateral to receive (debt + bonus)
+    const expectedCollateralUsd = debtToCoverUsd * (1 + liquidationBonusPct);
+    
+    // Raw spread
+    const rawSpread = expectedCollateralUsd - debtToCoverUsd;
+    
+    // Bonus value
+    const bonusValue = debtToCoverUsd * liquidationBonusPct;
+    
+    // Gross profit
+    const gross = rawSpread;
+    
+    // Calculate fees on gross
+    const fees = gross * (this.feeBps / 10000);
+    
+    // Gas cost
+    const gasCost = this.gasCostUsd;
+    
+    // Net profit
+    const net = gross - fees - gasCost;
+    
+    return {
+      gross,
+      bonusValue,
+      gasCost,
+      fees,
+      net
+    };
+  }
 }
