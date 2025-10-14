@@ -181,13 +181,8 @@ export class RealTimeHFService extends EventEmitter {
       wsUrl = config.wsRpcUrl;
       // eslint-disable-next-line no-console
       console.log('[realtime-hf] Using standard WebSocket');
-    } else if (config.rpcUrl) {
-      // eslint-disable-next-line no-console
-      console.log('[realtime-hf] No WS_RPC_URL, falling back to HTTP RPC (polling mode)');
-      this.provider = new JsonRpcProvider(config.rpcUrl);
-      return;
     } else {
-      throw new Error('[realtime-hf] No WS_RPC_URL or RPC_URL configured');
+      throw new Error('[realtime-hf] No WS_RPC_URL configured. Set WS_RPC_URL environment variable.');
     }
 
     try {
@@ -262,15 +257,18 @@ export class RealTimeHFService extends EventEmitter {
       console.log('[realtime-hf] Subscribed to newHeads');
 
       // Subscribe to Aave Pool logs
+      // Create interface to get event signatures
+      const aaveIface = new Interface(AAVE_POOL_ABI);
+      
       const logsFilter = {
         address: config.aavePool,
         topics: [
           [
             // Borrow, Repay, Supply, Withdraw events
-            '0x' + Interface.getEvent('Borrow(address,address,address,uint256,uint8,uint256,uint16)').topicHash.slice(2),
-            '0x' + Interface.getEvent('Repay(address,address,address,uint256,bool)').topicHash.slice(2),
-            '0x' + Interface.getEvent('Supply(address,address,address,uint256,uint16)').topicHash.slice(2),
-            '0x' + Interface.getEvent('Withdraw(address,address,address,uint256)').topicHash.slice(2)
+            aaveIface.getEvent('Borrow')?.topicHash || '',
+            aaveIface.getEvent('Repay')?.topicHash || '',
+            aaveIface.getEvent('Supply')?.topicHash || '',
+            aaveIface.getEvent('Withdraw')?.topicHash || ''
           ]
         ]
       };
@@ -283,12 +281,13 @@ export class RealTimeHFService extends EventEmitter {
       // Optional: Subscribe to Chainlink price feeds
       if (config.chainlinkFeeds) {
         const feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+        const chainlinkIface = new Interface(CHAINLINK_AGG_ABI);
         for (const [token, feedAddress] of Object.entries(feeds)) {
           try {
             const priceFeedFilter = {
               address: feedAddress,
               topics: [
-                '0x' + Interface.getEvent('AnswerUpdated(int256,uint256,uint256)').topicHash.slice(2)
+                chainlinkIface.getEvent('AnswerUpdated')?.topicHash || ''
               ]
             };
             const priceSub = await this.provider.send('eth_subscribe', ['logs', priceFeedFilter]);
