@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { RealTimeHFService } from '../../src/services/RealTimeHFService.js';
 
 // Mock config

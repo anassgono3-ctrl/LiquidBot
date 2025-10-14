@@ -1,12 +1,11 @@
 // RealTimeHFService: Real-time on-chain liquidation detection via WebSocket
 // Monitors Aave Pool events and blocks, performs Multicall3 batch HF checks
 
-import { WebSocketProvider, JsonRpcProvider, Contract, Interface, formatUnits, EventLog } from 'ethers';
 import EventEmitter from 'events';
 
+import { WebSocketProvider, JsonRpcProvider, Contract, Interface, formatUnits, EventLog } from 'ethers';
+
 import { config } from '../config/index.js';
-import { CandidateManager } from './CandidateManager.js';
-import type { SubgraphService } from './SubgraphService.js';
 import {
   realtimeBlocksReceived,
   realtimeAaveLogsReceived,
@@ -17,6 +16,9 @@ import {
   realtimeCandidateCount,
   realtimeMinHealthFactor
 } from '../metrics/index.js';
+
+import { CandidateManager } from './CandidateManager.js';
+import type { SubgraphService } from './SubgraphService.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -352,6 +354,7 @@ export class RealTimeHFService extends EventEmitter {
 
       // Setup event handler for logs subscriptions
       // Use internal event listener for eth_subscription messages
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (this.provider as any)._addEventListener('eth_subscription', (message: any) => {
         if (this.isShuttingDown) return;
         this.handleSubscriptionLog(message).catch(err => {
@@ -374,6 +377,7 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Handle subscription logs (Aave Pool, Chainlink)
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleSubscriptionLog(result: any): Promise<void> {
     if (!result) return;
 
@@ -726,6 +730,7 @@ export class RealTimeHFService extends EventEmitter {
         
         this.lastPendingBlockHash = currentHash;
       }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (err: any) {
       // Non-fatal: log and continue
       // Common failure: provider doesn't support 'pending' block
