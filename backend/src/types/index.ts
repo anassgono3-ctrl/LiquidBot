@@ -98,6 +98,8 @@ export interface Opportunity {
   bonusPct?: number | null;              // liquidation bonus percentage
   hfVerified?: number | null;            // verified health factor (if verifier available)
   hfDiff?: number | null;                // difference between original and verified HF
+  triggerSource?: 'subgraph' | 'realtime'; // source of opportunity detection
+  triggerType?: 'event' | 'head' | 'price'; // real-time trigger type (if realtime source)
 }
 
 export interface HealthSnapshot {

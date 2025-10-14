@@ -120,3 +120,53 @@ export const atRiskScanWarnTotal = new Counter({
   help: 'Total number of users detected between warn and liquidation thresholds',
   registers: [registry]
 });
+
+// Real-time HF detection metrics
+export const realtimeBlocksReceived = new Counter({
+  name: 'liquidbot_realtime_blocks_received_total',
+  help: 'Total number of newHeads blocks received',
+  registers: [registry]
+});
+
+export const realtimeAaveLogsReceived = new Counter({
+  name: 'liquidbot_realtime_aave_logs_received_total',
+  help: 'Total number of Aave Pool log events received',
+  registers: [registry]
+});
+
+export const realtimePriceUpdatesReceived = new Counter({
+  name: 'liquidbot_realtime_price_updates_received_total',
+  help: 'Total number of Chainlink price update events received',
+  registers: [registry]
+});
+
+export const realtimeHealthChecksPerformed = new Counter({
+  name: 'liquidbot_realtime_health_checks_performed_total',
+  help: 'Total number of health factor checks performed via Multicall3',
+  registers: [registry]
+});
+
+export const realtimeTriggersProcessed = new Counter({
+  name: 'liquidbot_realtime_triggers_processed_total',
+  help: 'Total number of liquidatable events emitted',
+  labelNames: ['trigger_type'],
+  registers: [registry]
+});
+
+export const realtimeReconnects = new Counter({
+  name: 'liquidbot_realtime_reconnects_total',
+  help: 'Total number of WebSocket reconnection attempts',
+  registers: [registry]
+});
+
+export const realtimeCandidateCount = new Gauge({
+  name: 'liquidbot_realtime_candidate_count',
+  help: 'Current number of candidates in memory',
+  registers: [registry]
+});
+
+export const realtimeMinHealthFactor = new Gauge({
+  name: 'liquidbot_realtime_min_health_factor',
+  help: 'Lowest health factor observed across all candidates',
+  registers: [registry]
+});

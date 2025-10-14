@@ -117,7 +117,14 @@ export class NotificationService {
       ? `\n🔗 Tx: <a href="https://basescan.org/tx/${op.txHash}">${this.sanitizeAddress(op.txHash)}</a>`
       : '';
 
-    return `🚨 <b>Liquidation Opportunity</b>
+    // Add trigger source info for real-time opportunities
+    const sourceTag = op.triggerSource === 'realtime' 
+      ? ` (Real-time${op.triggerType ? `: ${op.triggerType}` : ''})`
+      : op.triggerSource === 'subgraph'
+      ? ' (Subgraph)'
+      : '';
+
+    return `🚨 <b>Liquidation Opportunity${sourceTag}</b>
 
 👤 User: <code>${userAddr}</code>
 💰 Collateral: ${collateralAmount} ${collateralSymbol} (${collateralUsd})

@@ -23,6 +23,8 @@ import { ExecutionService } from "./services/ExecutionService.js";
 import { RiskManager } from "./services/RiskManager.js";
 import { HealthCalculator } from "./services/HealthCalculator.js";
 import { AtRiskScanner } from "./services/AtRiskScanner.js";
+import { RealTimeHFService } from "./services/RealTimeHFService.js";
+import type { LiquidatableEvent } from "./services/RealTimeHFService.js";
 
 const logger = createLogger({
   level: "info",
@@ -93,6 +95,43 @@ if (config.atRiskScanLimit > 0) {
   logger.info('[at-risk-scanner] Disabled (AT_RISK_SCAN_LIMIT=0)');
 }
 
+// Initialize real-time HF service (only when enabled via config)
+let realtimeHFService: RealTimeHFService | undefined;
+if (config.useRealtimeHF) {
+  realtimeHFService = new RealTimeHFService({ subgraphService });
+  
+  // Handle liquidatable events
+  realtimeHFService.on('liquidatable', async (event: LiquidatableEvent) => {
+    logger.info(`[realtime-hf] Liquidatable event: user=${event.userAddress} HF=${event.healthFactor.toFixed(4)} trigger=${event.triggerType}`);
+    
+    // Create synthetic opportunity for execution
+    const opportunity = {
+      id: `realtime-${event.userAddress}-${event.timestamp}`,
+      txHash: null,
+      user: event.userAddress,
+      liquidator: 'bot',
+      timestamp: Math.floor(event.timestamp / 1000),
+      collateralAmountRaw: '0', // Will be computed if execution proceeds
+      principalAmountRaw: '0',
+      collateralReserve: { id: 'unknown', symbol: null, decimals: null },
+      principalReserve: { id: 'unknown', symbol: null, decimals: null },
+      healthFactor: event.healthFactor,
+      triggerSource: 'realtime' as const,
+      triggerType: event.triggerType
+    };
+    
+    // Notify about real-time opportunity
+    await notificationService.notifyOpportunity(opportunity);
+    
+    // TODO: Execute liquidation if execution enabled
+    // For now, just log and notify
+  });
+  
+  logger.info('[realtime-hf] Service initialized and will start when server starts');
+} else {
+  logger.info('[realtime-hf] Disabled (USE_REALTIME_HF=false)');
+}
+
 // Track opportunity stats for health endpoint
 const opportunityStats = {
   lastBatchSize: 0,
@@ -159,6 +198,11 @@ app.get("/health", (_req, res) => {
 
   // Add on-demand health factor flag
   healthData.onDemandHealthFactor = !!onDemandHealthFactor;
+  
+  // Add real-time HF service metrics if enabled
+  if (realtimeHFService) {
+    healthData.realtimeHF = realtimeHFService.getMetrics();
+  }
   
   res.json(healthData);
 });
@@ -300,9 +344,20 @@ if (!config.useMockSubgraph) {
 }
 
 // Graceful shutdown handling
-const shutdown = (signal: string) => {
+const shutdown = async (signal: string) => {
   logger.info(`Received ${signal}, shutting down...`);
   subgraphPoller?.stop();
+  
+  // Stop real-time HF service if running
+  if (realtimeHFService) {
+    try {
+      await realtimeHFService.stop();
+      logger.info('[realtime-hf] Service stopped');
+    } catch (err) {
+      logger.error('[realtime-hf] Error stopping service:', err);
+    }
+  }
+  
   wss.close(() => {
     logger.info("WebSocket server closed");
     process.exit(0);
@@ -311,9 +366,19 @@ const shutdown = (signal: string) => {
 ["SIGINT", "SIGTERM"].forEach((sig) => process.on(sig, () => shutdown(sig)));
 
 const port = config.port;
-httpServer.listen(port, () => {
+httpServer.listen(port, async () => {
   logger.info(`LiquidBot backend listening on port ${port}`);
   logger.info(`WebSocket server available at ws://localhost:${port}/ws`);
   logger.info(`Build info: commit=${buildInfo.commit} node=${buildInfo.node} started=${buildInfo.startedAt}`);
   logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
+  
+  // Start real-time HF service if enabled
+  if (realtimeHFService) {
+    try {
+      await realtimeHFService.start();
+      logger.info('[realtime-hf] Service started successfully');
+    } catch (err) {
+      logger.error('[realtime-hf] Failed to start service:', err);
+    }
+  }
 });
