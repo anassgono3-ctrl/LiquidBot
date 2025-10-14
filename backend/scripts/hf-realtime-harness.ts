@@ -418,7 +418,7 @@ class HFRealtimeHarness {
 
       if (calls.length === 0) return;
 
-      const results = await this.multicall3.aggregate3(calls);
+      const results = await this.multicall3.aggregate3.staticCall(calls);
       
       let minHF: number | null = null;
       let minHFUser: string | null = null;
