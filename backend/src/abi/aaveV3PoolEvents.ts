@@ -87,15 +87,20 @@ export class EventRegistry {
               const parsed = aaveV3Interface.parseLog({ topics, data });
               if (!parsed) return null;
               
+              // Convert Result to plain object, including both indexed and non-indexed params
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const args: { [key: string]: any } = {};
+              parsed.args.forEach((value, index) => {
+                const fragment = parsed.fragment;
+                const paramName = fragment.inputs[index].name;
+                if (paramName) {
+                  args[paramName] = value;
+                }
+              });
+              
               return {
                 name: parsed.name,
-                args: Object.keys(parsed.args).reduce((acc, key) => {
-                  if (isNaN(Number(key))) {
-                    acc[key] = parsed.args[key];
-                  }
-                  return acc;
-                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                }, {} as { [key: string]: any }),
+                args,
                 signature
               };
             } catch (err) {
@@ -124,15 +129,20 @@ export class EventRegistry {
             const parsed = chainlinkInterface.parseLog({ topics, data });
             if (!parsed) return null;
             
+            // Convert Result to plain object, including both indexed and non-indexed params
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const args: { [key: string]: any } = {};
+            parsed.args.forEach((value, index) => {
+              const fragment = parsed.fragment;
+              const paramName = fragment.inputs[index].name;
+              if (paramName) {
+                args[paramName] = value;
+              }
+            });
+            
             return {
               name: parsed.name,
-              args: Object.keys(parsed.args).reduce((acc, key) => {
-                if (isNaN(Number(key))) {
-                  acc[key] = parsed.args[key];
-                }
-                return acc;
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              }, {} as { [key: string]: any }),
+              args,
               signature
             };
           } catch (err) {
