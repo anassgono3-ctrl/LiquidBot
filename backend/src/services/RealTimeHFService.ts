@@ -1,12 +1,17 @@
 // RealTimeHFService: Real-time on-chain liquidation detection via WebSocket
 // Monitors Aave Pool events and blocks, performs Multicall3 batch HF checks
 
-import { WebSocketProvider, JsonRpcProvider, Contract, Interface, formatUnits, EventLog } from 'ethers';
 import EventEmitter from 'events';
 
+import { WebSocketProvider, JsonRpcProvider, Contract, Interface, formatUnits, EventLog } from 'ethers';
+
+import {
+  eventRegistry,
+  extractUserFromAaveEvent,
+  extractReserveFromAaveEvent,
+  formatDecodedEvent
+} from '../abi/aaveV3PoolEvents.js';
 import { config } from '../config/index.js';
-import { CandidateManager } from './CandidateManager.js';
-import type { SubgraphService } from './SubgraphService.js';
 import {
   realtimeBlocksReceived,
   realtimeAaveLogsReceived,
@@ -17,6 +22,9 @@ import {
   realtimeCandidateCount,
   realtimeMinHealthFactor
 } from '../metrics/index.js';
+
+import { CandidateManager } from './CandidateManager.js';
+import type { SubgraphService } from './SubgraphService.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -257,18 +265,22 @@ export class RealTimeHFService extends EventEmitter {
       console.log('[realtime-hf] Subscribed to newHeads');
 
       // Subscribe to Aave Pool logs
-      // Create interface to get event signatures
-      const aaveIface = new Interface(AAVE_POOL_ABI);
+      // Get all registered event topics from EventRegistry
+      const aaveTopics = eventRegistry.getAllTopics().filter(topic => {
+        const entry = eventRegistry.get(topic);
+        // Filter to only Aave events (exclude Chainlink)
+        return entry && entry.name !== 'AnswerUpdated';
+      });
       
       const logsFilter = {
         address: config.aavePool,
         topics: [
-          [
-            // Borrow, Repay, Supply, Withdraw events
-            aaveIface.getEvent('Borrow')?.topicHash || '',
-            aaveIface.getEvent('Repay')?.topicHash || '',
-            aaveIface.getEvent('Supply')?.topicHash || '',
-            aaveIface.getEvent('Withdraw')?.topicHash || ''
+          aaveTopics.length > 0 ? aaveTopics : [
+            // Fallback to legacy event topics if registry is empty
+            new Interface(AAVE_POOL_ABI).getEvent('Borrow')?.topicHash || '',
+            new Interface(AAVE_POOL_ABI).getEvent('Repay')?.topicHash || '',
+            new Interface(AAVE_POOL_ABI).getEvent('Supply')?.topicHash || '',
+            new Interface(AAVE_POOL_ABI).getEvent('Withdraw')?.topicHash || ''
           ]
         ]
       };
@@ -281,13 +293,18 @@ export class RealTimeHFService extends EventEmitter {
       // Optional: Subscribe to Chainlink price feeds
       if (config.chainlinkFeeds) {
         const feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
-        const chainlinkIface = new Interface(CHAINLINK_AGG_ABI);
+        // Get AnswerUpdated topic from event registry
+        const answerUpdatedTopic = Array.from(eventRegistry.getAllTopics()).find(topic => {
+          const entry = eventRegistry.get(topic);
+          return entry && entry.name === 'AnswerUpdated';
+        });
+        
         for (const [token, feedAddress] of Object.entries(feeds)) {
           try {
             const priceFeedFilter = {
               address: feedAddress,
               topics: [
-                chainlinkIface.getEvent('AnswerUpdated')?.topicHash || ''
+                answerUpdatedTopic || new Interface(CHAINLINK_AGG_ABI).getEvent('AnswerUpdated')?.topicHash || ''
               ]
             };
             const priceSub = await this.provider.send('eth_subscribe', ['logs', priceFeedFilter]);
@@ -302,6 +319,7 @@ export class RealTimeHFService extends EventEmitter {
       }
 
       // Setup message handler
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       this.provider.on('message', (message: { type: string; data: any }) => {
         if (this.isShuttingDown) return;
         this.handleSubscriptionMessage(message).catch(err => {
@@ -319,6 +337,7 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Handle subscription messages (newHeads, logs)
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleSubscriptionMessage(message: { type: string; data: any }): Promise<void> {
     if (message.type === 'eth_subscription') {
       const result = message.data?.result;
@@ -340,6 +359,7 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Handle newHeads block notification - perform canonical recheck
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async handleNewHead(block: any): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[realtime-hf] New block ${block.number}`);
@@ -361,24 +381,77 @@ export class RealTimeHFService extends EventEmitter {
       this.metrics.aaveLogsReceived++;
       realtimeAaveLogsReceived.inc();
 
-      // Extract user address from log (varies by event)
-      const userAddress = this.extractUserFromLog(log);
-      if (userAddress) {
+      // Decode event using EventRegistry
+      const decoded = eventRegistry.decode(log.topics as string[], log.data);
+      
+      if (decoded) {
+        // Get block number for logging
+        const blockNumber = typeof log.blockNumber === 'string' 
+          ? parseInt(log.blockNumber, 16) 
+          : log.blockNumber;
+
+        // Log human-readable event details
         // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] Aave event detected for user ${userAddress}`);
+        console.log(`[realtime-hf] ${formatDecodedEvent(decoded, blockNumber)}`);
         
-        // Add/touch candidate
-        this.candidateManager.add(userAddress);
+        // Extract affected users
+        const users = extractUserFromAaveEvent(decoded);
         
-        // Perform targeted check
-        await this.checkCandidate(userAddress, 'event');
+        // Extract reserve (asset) for context
+        const reserve = extractReserveFromAaveEvent(decoded);
+        
+        // Handle based on event type
+        if (decoded.name === 'LiquidationCall') {
+          // Log liquidation but still check HF in case user is still liquidatable
+          // eslint-disable-next-line no-console
+          console.log(`[realtime-hf] LiquidationCall detected for user ${users[0]}, rechecking HF`);
+        }
+        
+        // For all user-affecting events, enqueue targeted HF recheck
+        if (users.length > 0) {
+          for (const user of users) {
+            // Add/touch candidate
+            this.candidateManager.add(user);
+            
+            // Perform targeted check for this specific user
+            await this.checkCandidate(user, 'event');
+          }
+        } else {
+          // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
+          if (decoded.name === 'ReserveDataUpdated' && reserve) {
+            // eslint-disable-next-line no-console
+            console.log(`[realtime-hf] ReserveDataUpdated for ${reserve}, checking low HF candidates`);
+            await this.checkLowHFCandidates('event');
+          }
+        }
+      } else {
+        // Fallback to legacy extraction if decode fails
+        const userAddress = this.extractUserFromLog(log);
+        if (userAddress) {
+          // eslint-disable-next-line no-console
+          console.log(`[realtime-hf] Aave event detected for user ${userAddress} (legacy)`);
+          
+          // Add/touch candidate
+          this.candidateManager.add(userAddress);
+          
+          // Perform targeted check
+          await this.checkCandidate(userAddress, 'event');
+        }
       }
     } else {
       // Chainlink price update
       this.metrics.priceUpdatesReceived++;
       realtimePriceUpdatesReceived.inc();
-      // eslint-disable-next-line no-console
-      console.log('[realtime-hf] Chainlink price update detected');
+      
+      // Try to decode Chainlink event for better logging
+      const decoded = eventRegistry.decode(log.topics as string[], log.data);
+      if (decoded && decoded.name === 'AnswerUpdated') {
+        // eslint-disable-next-line no-console
+        console.log(`[realtime-hf] ${formatDecodedEvent(decoded)}`);
+      } else {
+        // eslint-disable-next-line no-console
+        console.log('[realtime-hf] Chainlink price update detected');
+      }
       
       // Trigger selective rechecks on candidates with low HF
       await this.checkLowHFCandidates('price');
@@ -426,9 +499,9 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Check candidates with low HF (priority for price trigger)
+   * Check candidates with low HF (priority for price or event trigger)
    */
-  private async checkLowHFCandidates(triggerType: 'price'): Promise<void> {
+  private async checkLowHFCandidates(triggerType: 'event' | 'price'): Promise<void> {
     const candidates = this.candidateManager.getAll();
     const lowHF = candidates
       .filter(c => c.lastHF !== null && c.lastHF < 1.1)
