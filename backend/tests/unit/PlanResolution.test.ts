@@ -60,6 +60,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 1000000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 1000,
           collateralValueUsd: 0
         }
@@ -94,6 +95,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 500000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 500,
           collateralValueUsd: 0
         },
@@ -107,6 +109,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: ethers.parseUnits('1000', 18),
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 1000, // Largest debt
           collateralValueUsd: 0
         },
@@ -120,6 +123,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000
         }
@@ -159,6 +163,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 500000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 500,
           collateralValueUsd: 0
         },
@@ -172,6 +177,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: ethers.parseUnits('1000', 18),
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 1000,
           collateralValueUsd: 0
         },
@@ -185,6 +191,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000
         }
@@ -225,6 +232,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 1000000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 1000,
           collateralValueUsd: 0
         },
@@ -238,6 +246,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000 // Larger collateral
         },
@@ -251,6 +260,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 1000
         }
@@ -288,6 +298,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 1000000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 1000,
           collateralValueUsd: 0
         },
@@ -301,6 +312,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000
         }
@@ -340,6 +352,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 1000000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 1000,
           collateralValueUsd: 0
         },
@@ -353,6 +366,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000
         }
@@ -392,6 +406,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 5000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 5,
           collateralValueUsd: 0
         },
@@ -405,6 +420,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 50
         }
@@ -443,6 +459,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 50000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 50,
           collateralValueUsd: 0
         },
@@ -456,6 +473,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000
         }
@@ -495,6 +513,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: ethers.parseUnits('1.5', 18),
           usageAsCollateralEnabled: false,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 3000,
           collateralValueUsd: 0
         },
@@ -508,6 +527,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000
         }
@@ -548,6 +568,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 1000000000n,
           usageAsCollateralEnabled: false,
           priceInUsd: 1.0,
+          priceRaw: BigInt(Math.floor(1.0 * 1e8)),
           debtValueUsd: 1000,
           collateralValueUsd: 0
         },
@@ -561,6 +582,7 @@ describe('Liquidation Plan Resolution', () => {
           totalDebt: 0n,
           usageAsCollateralEnabled: true,
           priceInUsd: 2000,
+          priceRaw: BigInt(Math.floor(2000 * 1e8)),
           debtValueUsd: 0,
           collateralValueUsd: 2000
         }

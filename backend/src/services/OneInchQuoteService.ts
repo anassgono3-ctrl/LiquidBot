@@ -68,8 +68,17 @@ export class OneInchQuoteService {
     if (!request.fromToken || !request.toToken) {
       throw new Error('fromToken and toToken are required');
     }
-    if (!request.amount || request.amount === '0') {
-      throw new Error('amount must be greater than 0');
+    
+    // Validate amount is a valid non-zero number
+    let amountBigInt: bigint;
+    try {
+      amountBigInt = BigInt(request.amount || '0');
+    } catch {
+      throw new Error(`amount must be a valid integer string: ${request.amount}`);
+    }
+    
+    if (amountBigInt <= 0n) {
+      throw new Error(`amount must be greater than 0, got: ${request.amount}`);
     }
     if (request.slippageBps < 0 || request.slippageBps > 5000) {
       throw new Error('slippageBps must be between 0 and 5000 (0-50%)');

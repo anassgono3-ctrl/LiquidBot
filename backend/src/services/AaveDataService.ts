@@ -2,6 +2,7 @@
 import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
+import { calculateUsdValue } from '../utils/usdMath.js';
 
 // Aave Protocol Data Provider ABI (minimal interface)
 const PROTOCOL_DATA_PROVIDER_ABI = [
@@ -76,6 +77,7 @@ export interface ReserveData {
   totalDebt: bigint;
   usageAsCollateralEnabled: boolean;
   priceInUsd: number;
+  priceRaw: bigint;  // Raw oracle price in 1e8 format
   debtValueUsd: number;
   collateralValueUsd: number;
 }
@@ -293,12 +295,9 @@ export class AaveDataService {
         const priceRaw = await this.getAssetPrice(asset);
         const priceInUsd = Number(priceRaw) / 1e8;
 
-        // Calculate USD values with proper decimal handling
-        const debtValue = Number(totalDebt) / Math.pow(10, decimals);
-        const debtValueUsd = debtValue * priceInUsd;
-
-        const collateralValue = Number(userData.currentATokenBalance) / Math.pow(10, decimals);
-        const collateralValueUsd = collateralValue * priceInUsd;
+        // Calculate USD values using 1e18 normalization (same as plan resolver)
+        const debtValueUsd = calculateUsdValue(totalDebt, decimals, priceRaw);
+        const collateralValueUsd = calculateUsdValue(userData.currentATokenBalance, decimals, priceRaw);
 
         // Try to get symbol from a known mapping or use a placeholder
         const symbol = this.getSymbolForAsset(asset);
@@ -313,6 +312,7 @@ export class AaveDataService {
           totalDebt,
           usageAsCollateralEnabled: userData.usageAsCollateralEnabled,
           priceInUsd,
+          priceRaw,
           debtValueUsd,
           collateralValueUsd
         });
