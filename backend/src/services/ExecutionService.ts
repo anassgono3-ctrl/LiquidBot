@@ -9,6 +9,7 @@ import {
   realtimeDebtToCover,
   realtimeCloseFactorMode
 } from '../metrics/index.js';
+import { calculateUsdValue, formatTokenAmount } from '../utils/usdMath.js';
 
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 import { AaveDataService } from './AaveDataService.js';
@@ -203,9 +204,8 @@ export class ExecutionService {
         debtToCover = selectedDebt.totalDebt / 2n;
       }
 
-      // Calculate USD value with precise decimals
-      const debtToCoverValue = Number(debtToCover) / Math.pow(10, selectedDebt.decimals);
-      const debtToCoverUsd = debtToCoverValue * selectedDebt.priceInUsd;
+      // Calculate USD value using 1e18 normalization (canonical implementation)
+      const debtToCoverUsd = calculateUsdValue(debtToCover, selectedDebt.decimals, selectedDebt.priceRaw);
 
       // Gate by PROFIT_MIN_USD
       const profitMinUsd = config.profitMinUsd;
@@ -390,22 +390,87 @@ export class ExecutionService {
         };
       }
       
-      // Log profit components with dynamic bonus
+      // Step 3a: Calculate proper USD value using 1e18 math (matching plan resolver)
+      // Get decimals and price for debt asset
+      const debtDecimals = opportunity.principalReserve.decimals || 18;
+      let debtPriceRaw: bigint;
+      let debtToCoverUsdPrecise: number;
+      
+      try {
+        debtPriceRaw = await this.aaveDataService.getAssetPrice(debtAsset);
+        debtToCoverUsdPrecise = calculateUsdValue(debtToCover, debtDecimals, debtPriceRaw);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('[execution] Failed to fetch asset price, using estimated USD:', error instanceof Error ? error.message : error);
+        debtToCoverUsdPrecise = debtToCoverUsd;
+        debtPriceRaw = BigInt(0);
+      }
+
+      // Format human-readable amount
+      const debtToCoverHuman = formatTokenAmount(debtToCover, debtDecimals);
+
+      // Calculate expected collateral amount with bonus
+      // collateralAmount = debtToCover * (1 + liquidationBonus) * (priceDebt / priceCollateral)
+      const collateralAsset = opportunity.collateralReserve.id;
+      const collateralDecimals = opportunity.collateralReserve.decimals || 18;
+      let expectedCollateralRaw: bigint;
+      
+      try {
+        const collateralPriceRaw = await this.aaveDataService.getAssetPrice(collateralAsset);
+        
+        // Calculate using precise 1e18 math
+        // First normalize debt to 1e18
+        const debtDecimalDiff = 18 - debtDecimals;
+        const debt1e18 = debtDecimalDiff >= 0 
+          ? debtToCover * BigInt(10 ** debtDecimalDiff)
+          : debtToCover / BigInt(10 ** Math.abs(debtDecimalDiff));
+        
+        // Multiply by price to get USD value in 1e18
+        const debtPrice1e18 = debtPriceRaw * BigInt(1e10); // Convert 1e8 to 1e18
+        const debtUsd1e18 = (debt1e18 * debtPrice1e18) / BigInt(1e18);
+        
+        // Apply liquidation bonus
+        const bonusBps = Math.round(liquidationBonusPct * 10000);
+        const debtWithBonus1e18 = (debtUsd1e18 * BigInt(10000 + bonusBps)) / BigInt(10000);
+        
+        // Convert back to collateral amount
+        const collateralPrice1e18 = collateralPriceRaw * BigInt(1e10);
+        const collateral1e18 = (debtWithBonus1e18 * BigInt(1e18)) / collateralPrice1e18;
+        
+        // Denormalize from 1e18 to collateral decimals
+        const collateralDecimalDiff = 18 - collateralDecimals;
+        expectedCollateralRaw = collateralDecimalDiff >= 0
+          ? collateral1e18 / BigInt(10 ** collateralDecimalDiff)
+          : collateral1e18 * BigInt(10 ** Math.abs(collateralDecimalDiff));
+          
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('[execution] Failed to calculate expected collateral, using opportunity data:', error instanceof Error ? error.message : error);
+        expectedCollateralRaw = BigInt(opportunity.collateralAmountRaw || '0');
+      }
+
+      // Pre-quote diagnostics: log exact inputs before calling quote service
       // eslint-disable-next-line no-console
-      console.log('[execution] Profit estimation:', {
-        debtToCoverUsd,
+      console.log('[execution] Pre-quote diagnostics:', {
+        debtToCoverRaw: debtToCover.toString(),
+        debtToCoverHuman,
+        debtToCoverUsd: debtToCoverUsdPrecise.toFixed(6),
+        expectedCollateralRaw: expectedCollateralRaw.toString(),
+        expectedCollateralHuman: formatTokenAmount(expectedCollateralRaw, collateralDecimals),
+        debtAsset,
+        collateralAsset,
         liquidationBonusPct,
         bonusBps: Math.round(liquidationBonusPct * 10000),
         closeFactorMode: config.closeFactorExecutionMode
       });
       
-      // Step 3: Get 1inch swap quote
+      // Step 3b: Get 1inch swap quote with raw collateral amount
       const slippageBps = Number(process.env.MAX_SLIPPAGE_BPS || 100); // 1% default
       
       const swapQuote = await this.oneInchService.getSwapCalldata({
-        fromToken: opportunity.collateralReserve.id,
-        toToken: opportunity.principalReserve.id,
-        amount: opportunity.collateralAmountRaw, // Use full collateral amount
+        fromToken: collateralAsset,
+        toToken: debtAsset,
+        amount: expectedCollateralRaw.toString(), // Pass raw BigInt as string
         slippageBps: slippageBps,
         fromAddress: this.executorAddress
       });
