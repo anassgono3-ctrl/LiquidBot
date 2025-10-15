@@ -397,7 +397,11 @@ export class ExecutionService {
       let debtToCoverUsdPrecise: number;
       
       try {
-        debtPriceRaw = await this.aaveDataService.getAssetPrice(debtAsset);
+        const aave = this.aaveDataService;
+        if (!aave) {
+          throw new Error('AaveDataService not initialized - cannot fetch asset price');
+        }
+        debtPriceRaw = await aave.getAssetPrice(debtAsset);
         debtToCoverUsdPrecise = calculateUsdValue(debtToCover, debtDecimals, debtPriceRaw);
       } catch (error) {
         // eslint-disable-next-line no-console
@@ -416,7 +420,11 @@ export class ExecutionService {
       let expectedCollateralRaw: bigint;
       
       try {
-        const collateralPriceRaw = await this.aaveDataService.getAssetPrice(collateralAsset);
+        const aave = this.aaveDataService;
+        if (!aave) {
+          throw new Error('AaveDataService not initialized - cannot fetch asset price');
+        }
+        const collateralPriceRaw = await aave.getAssetPrice(collateralAsset);
         
         // Calculate using precise 1e18 math
         // First normalize debt to 1e18
