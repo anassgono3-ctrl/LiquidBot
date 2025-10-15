@@ -120,7 +120,7 @@ export class ExecutionService {
    */
   async prepareActionableOpportunity(
     userAddress: string,
-    options?: {
+    _options?: {
       collateralAsset?: string;
       healthFactor?: number;
       blockNumber?: number;
