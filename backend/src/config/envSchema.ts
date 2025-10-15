@@ -187,7 +187,7 @@ export const env = (() => {
 
     // Profit estimation
     profitFeeBps: Number(parsed.PROFIT_FEE_BPS || 30),
-    profitMinUsd: Number(parsed.PROFIT_MIN_USD || 10),
+    profitMinUsd: Number(parsed.PROFIT_MIN_USD || 5),
 
     // Price oracle
     priceOracleMode: parsed.PRICE_ORACLE_MODE || 'coingecko',
