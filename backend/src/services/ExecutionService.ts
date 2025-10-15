@@ -106,8 +106,16 @@ export class ExecutionService {
    * Prepare an actionable opportunity by resolving debt asset and liquidation plan.
    * Returns null if the opportunity cannot be resolved or is not actionable.
    * 
+   * Implementation follows the spec:
+   * - Enumerate all reserves and select target debt asset (prioritize LIQUIDATION_DEBT_ASSETS, else largest USD)
+   * - Select collateral from reserves with aToken balance > 0 and collateral enabled (largest USD)
+   * - Fetch decimals, liquidation bonus from pool config
+   * - Compute debtToCoverRaw based on close factor mode (fixed50 or full)
+   * - Compute USD with precise math using token decimals and oracle prices
+   * - Gate by PROFIT_MIN_USD - return null if below threshold
+   * 
    * @param userAddress The user address
-   * @param options Additional options (collateralAsset hint, healthFactor, etc.)
+   * @param options Additional options (healthFactor, blockNumber, triggerType)
    * @returns ActionableOpportunity or null if not actionable
    */
   async prepareActionableOpportunity(
@@ -134,7 +142,7 @@ export class ExecutionService {
     }
 
     try {
-      // Get user account data to find debt assets
+      // Get user account data to check if liquidatable
       const accountData = await this.aaveDataService.getUserAccountData(userAddress);
       
       // Check if user has any debt
@@ -142,77 +150,83 @@ export class ExecutionService {
         return null;
       }
 
-      // For now, we'll use a simple heuristic: check common stablecoins on Base
-      // In a production system, you'd want to query all reserves and check debt balances
-      const commonDebtAssets = [
-        { address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC' },  // USDC on Base
-        { address: '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb', symbol: 'DAI' },   // DAI on Base
-        { address: '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA', symbol: 'USDbC' }, // USDbC on Base
-      ];
+      // Get all reserves with user positions (debt or collateral)
+      const reserves = await this.aaveDataService.getAllUserReserves(userAddress);
 
-      let debtAsset: string | null = null;
-      let debtAssetSymbol: string | null = null;
-      let totalDebt = 0n;
+      // Separate debt and collateral reserves
+      const debtReserves = reserves.filter(r => r.totalDebt > 0n);
+      const collateralReserves = reserves.filter(r => r.aTokenBalance > 0n && r.usageAsCollateralEnabled);
 
-      // Try each common debt asset
-      for (const asset of commonDebtAssets) {
-        try {
-          const debt = await this.aaveDataService.getTotalDebt(asset.address, userAddress);
-          if (debt > 0n) {
-            debtAsset = asset.address;
-            debtAssetSymbol = asset.symbol;
-            totalDebt = debt;
-            break;
-          }
-        } catch (err) {
-          // Continue to next asset
-          continue;
-        }
-      }
-
-      if (!debtAsset || !debtAssetSymbol || totalDebt === 0n) {
-        // Could not find any debt asset
+      if (debtReserves.length === 0) {
         return null;
       }
 
-      // Determine collateral asset (use hint if provided, otherwise default to common collateral)
-      const collateralAsset = options?.collateralAsset || '0x4200000000000000000000000000000000000006'; // WETH on Base
-      const collateralSymbol = 'WETH';
-
-      // Fetch liquidation bonus for collateral
-      let liquidationBonusPct = 0.05; // Default 5%
-      try {
-        liquidationBonusPct = await this.aaveDataService.getLiquidationBonusPct(collateralAsset);
-      } catch (err) {
-        // Use default if fetch fails
-        // eslint-disable-next-line no-console
-        console.warn('[execution] Failed to fetch liquidation bonus, using default 5%');
+      if (collateralReserves.length === 0) {
+        return null;
       }
+
+      // Select debt asset
+      // 1. Check LIQUIDATION_DEBT_ASSETS preference
+      let selectedDebt = null;
+      const preferredDebtAssets = config.liquidationDebtAssets;
+      
+      if (preferredDebtAssets.length > 0) {
+        // Find first preferred asset that user has debt in
+        for (const preferredAsset of preferredDebtAssets) {
+          const found = debtReserves.find(r => r.asset.toLowerCase() === preferredAsset.toLowerCase());
+          if (found) {
+            selectedDebt = found;
+            break;
+          }
+        }
+      }
+      
+      // 2. If no preferred asset or not found, select largest debt by USD value
+      if (!selectedDebt) {
+        selectedDebt = debtReserves.reduce((max, r) => r.debtValueUsd > max.debtValueUsd ? r : max);
+      }
+
+      // Select collateral asset - largest by USD value
+      const selectedCollateral = collateralReserves.reduce((max, r) => r.collateralValueUsd > max.collateralValueUsd ? r : max);
+
+      // Fetch liquidation bonus for the selected collateral
+      const liquidationBonusPct = await this.aaveDataService.getLiquidationBonusPct(selectedCollateral.asset);
 
       // Calculate debtToCover based on close factor mode
       const mode = config.closeFactorExecutionMode;
       let debtToCover: bigint;
       
       if (mode === 'full') {
-        debtToCover = totalDebt;
+        debtToCover = selectedDebt.totalDebt;
       } else {
         // fixed50: liquidate 50% of debt
-        debtToCover = totalDebt / 2n;
+        debtToCover = selectedDebt.totalDebt / 2n;
       }
 
-      // Estimate USD value (rough estimate, would need price oracle for accurate value)
-      // For now, assume $1 for stablecoins
-      const debtToCoverUsd = Number(debtToCover) / 1e6; // Assuming 6 decimals for USDC
+      // Calculate USD value with precise decimals
+      const debtToCoverValue = Number(debtToCover) / Math.pow(10, selectedDebt.decimals);
+      const debtToCoverUsd = debtToCoverValue * selectedDebt.priceInUsd;
+
+      // Gate by PROFIT_MIN_USD
+      const profitMinUsd = config.profitMinUsd;
+      if (debtToCoverUsd < profitMinUsd) {
+        // Below minimum threshold - not actionable
+        return null;
+      }
+
+      // Update metrics
+      realtimeLiquidationBonusBps.set(liquidationBonusPct * 10000);
+      realtimeDebtToCover.observe(debtToCoverUsd);
 
       return {
-        debtAsset,
-        debtAssetSymbol,
-        totalDebt,
+        debtAsset: selectedDebt.asset,
+        debtAssetSymbol: selectedDebt.symbol,
+        totalDebt: selectedDebt.totalDebt,
         debtToCover,
         debtToCoverUsd,
         liquidationBonusPct,
-        collateralAsset,
-        collateralSymbol
+        collateralAsset: selectedCollateral.asset,
+        collateralSymbol: selectedCollateral.symbol
       };
     } catch (error) {
       // eslint-disable-next-line no-console

@@ -122,110 +122,73 @@ if (config.useRealtimeHF) {
       return;
     }
     
-    // Prepare actionable opportunity (resolve debt/collateral plan)
-    if (config.notifyOnlyWhenActionable) {
-      const actionablePlan = await executionService.prepareActionableOpportunity(userAddr, {
-        healthFactor: event.healthFactor,
-        blockNumber: event.blockNumber,
-        triggerType: event.triggerType
-      });
-      
-      if (!actionablePlan) {
-        // Cannot resolve debt/collateral plan - log once per block and skip
-        logger.info(`[realtime-hf] skip notify (unresolved plan) user=${userAddr} block=${event.blockNumber}`);
-        skippedUnresolvedPlanTotal.inc();
+    // Always resolve actionable opportunity (debt/collateral plan)
+    // This ensures we never notify or execute without a fully resolved plan
+    const actionablePlan = await executionService.prepareActionableOpportunity(userAddr, {
+      healthFactor: event.healthFactor,
+      blockNumber: event.blockNumber,
+      triggerType: event.triggerType
+    });
+    
+    if (!actionablePlan) {
+      // Cannot resolve debt/collateral plan - log once per block and skip
+      // Reasons: no debt, no collateral, below PROFIT_MIN_USD, or resolve failure
+      logger.info(`[realtime-hf] skip notify (unresolved plan) user=${userAddr} block=${event.blockNumber}`);
+      skippedUnresolvedPlanTotal.inc();
+      return;
+    }
+    
+    // Build enriched opportunity with resolved plan
+    logger.info(`[realtime-hf] notify actionable user=${userAddr} debtAsset=${actionablePlan.debtAssetSymbol} collateral=${actionablePlan.collateralSymbol} debtToCover=$${actionablePlan.debtToCoverUsd.toFixed(2)} bonusBps=${Math.round(actionablePlan.liquidationBonusPct * 10000)}`);
+    actionableOpportunitiesTotal.inc();
+    
+    const opportunity = {
+      id: `realtime-${userAddr}-${event.timestamp}`,
+      txHash: null,
+      user: userAddr,
+      liquidator: 'bot',
+      timestamp: Math.floor(event.timestamp / 1000),
+      collateralAmountRaw: '0',
+      principalAmountRaw: actionablePlan.totalDebt.toString(),
+      collateralReserve: { id: actionablePlan.collateralAsset, symbol: actionablePlan.collateralSymbol, decimals: 18 },
+      principalReserve: { id: actionablePlan.debtAsset, symbol: actionablePlan.debtAssetSymbol, decimals: 6 },
+      healthFactor: event.healthFactor,
+      triggerSource: 'realtime' as const,
+      triggerType: event.triggerType,
+      debtToCover: actionablePlan.debtToCover.toString(),
+      debtToCoverUsd: actionablePlan.debtToCoverUsd,
+      bonusPct: actionablePlan.liquidationBonusPct
+    };
+    
+    // Track notification
+    lastNotifiedBlock.set(userAddr, event.blockNumber);
+    
+    // Send Telegram notification
+    await notificationService.notifyOpportunity(opportunity);
+    
+    // Execute if enabled and not already in-flight
+    if (config.executionEnabled) {
+      if (config.executionInflightLock && inflightExecutions.has(userAddr)) {
+        logger.info(`[realtime-hf] Skip execution - already in-flight for user=${userAddr}`);
         return;
       }
       
-      // Build enriched opportunity with resolved plan
-      logger.info(`[realtime-hf] notify actionable user=${userAddr} debtAsset=${actionablePlan.debtAssetSymbol} debtToCover=${actionablePlan.debtToCoverUsd.toFixed(2)} bonusBps=${Math.round(actionablePlan.liquidationBonusPct * 10000)}`);
-      actionableOpportunitiesTotal.inc();
-      
-      const opportunity = {
-        id: `realtime-${userAddr}-${event.timestamp}`,
-        txHash: null,
-        user: userAddr,
-        liquidator: 'bot',
-        timestamp: Math.floor(event.timestamp / 1000),
-        collateralAmountRaw: '0',
-        principalAmountRaw: actionablePlan.totalDebt.toString(),
-        collateralReserve: { id: actionablePlan.collateralAsset, symbol: actionablePlan.collateralSymbol, decimals: 18 },
-        principalReserve: { id: actionablePlan.debtAsset, symbol: actionablePlan.debtAssetSymbol, decimals: 6 },
-        healthFactor: event.healthFactor,
-        triggerSource: 'realtime' as const,
-        triggerType: event.triggerType,
-        debtToCover: actionablePlan.debtToCover.toString(),
-        debtToCoverUsd: actionablePlan.debtToCoverUsd,
-        bonusPct: actionablePlan.liquidationBonusPct
-      };
-      
-      // Track notification
-      lastNotifiedBlock.set(userAddr, event.blockNumber);
-      
-      // Send Telegram notification
-      await notificationService.notifyOpportunity(opportunity);
-      
-      // Execute if enabled and not already in-flight
-      if (config.executionEnabled) {
-        if (config.executionInflightLock && inflightExecutions.has(userAddr)) {
-          logger.info(`[realtime-hf] Skip execution - already in-flight for user=${userAddr}`);
-          return;
-        }
-        
-        try {
-          inflightExecutions.add(userAddr);
-          const result = await executionService.execute(opportunity);
-          logger.info(`[realtime-hf] Execution result:`, { 
-            user: userAddr, 
-            success: result.success, 
-            reason: result.reason,
-            simulated: result.simulated
-          });
-        } catch (error) {
-          logger.error(`[realtime-hf] Execution error:`, { 
-            user: userAddr,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        } finally {
-          inflightExecutions.delete(userAddr);
-        }
-      }
-    } else {
-      // Legacy mode: notify without resolving plan
-      logger.info(`[realtime-hf] Liquidatable event: user=${userAddr} HF=${event.healthFactor.toFixed(4)} trigger=${event.triggerType}`);
-      
-      const opportunity = {
-        id: `realtime-${userAddr}-${event.timestamp}`,
-        txHash: null,
-        user: userAddr,
-        liquidator: 'bot',
-        timestamp: Math.floor(event.timestamp / 1000),
-        collateralAmountRaw: '0',
-        principalAmountRaw: '0',
-        collateralReserve: { id: 'unknown', symbol: null, decimals: null },
-        principalReserve: { id: 'unknown', symbol: null, decimals: null },
-        healthFactor: event.healthFactor,
-        triggerSource: 'realtime' as const,
-        triggerType: event.triggerType
-      };
-      
-      await notificationService.notifyOpportunity(opportunity);
-      
-      if (config.executionEnabled) {
-        try {
-          const result = await executionService.execute(opportunity);
-          logger.info(`[realtime-hf] Execution result:`, { 
-            user: userAddr, 
-            success: result.success, 
-            reason: result.reason,
-            simulated: result.simulated
-          });
-        } catch (error) {
-          logger.error(`[realtime-hf] Execution error:`, { 
-            user: userAddr,
-            error: error instanceof Error ? error.message : String(error)
-          });
-        }
+      try {
+        inflightExecutions.add(userAddr);
+        const result = await executionService.execute(opportunity);
+        logger.info(`[realtime-hf] Execution result:`, { 
+          user: userAddr, 
+          success: result.success, 
+          reason: result.reason,
+          simulated: result.simulated
+        });
+      } catch (error) {
+        logger.error(`[realtime-hf] Execution error:`, { 
+          user: userAddr,
+          error: error instanceof Error ? error.message : String(error)
+        });
+      } finally {
+        inflightExecutions.delete(userAddr);
       }
     }
   });

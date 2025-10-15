@@ -20,6 +20,12 @@ const POOL_ABI = [
   'function getUserAccountData(address user) external view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)'
 ];
 
+// Aave UI Pool Data Provider ABI (for getting all reserves list)
+const UI_POOL_DATA_PROVIDER_ABI = [
+  'function getReservesList(address provider) external view returns (address[] memory)',
+  'function getUserReservesData(address provider, address user) external view returns (tuple(address underlyingAsset, uint256 scaledATokenBalance, bool usageAsCollateralEnabledOnUser, uint256 stableBorrowRate, uint256 scaledVariableDebt, uint256 principalStableDebt, uint256 stableBorrowLastUpdateTimestamp)[] memory, uint8)'
+];
+
 export interface ReserveTokenAddresses {
   aTokenAddress: string;
   stableDebtTokenAddress: string;
@@ -60,6 +66,20 @@ export interface UserAccountData {
   healthFactor: bigint;
 }
 
+export interface ReserveData {
+  asset: string;
+  symbol: string;
+  decimals: number;
+  aTokenBalance: bigint;
+  stableDebt: bigint;
+  variableDebt: bigint;
+  totalDebt: bigint;
+  usageAsCollateralEnabled: boolean;
+  priceInUsd: number;
+  debtValueUsd: number;
+  collateralValueUsd: number;
+}
+
 /**
  * AaveDataService provides access to live Aave V3 protocol data.
  * Used for fetching reserve configurations, debt balances, and oracle prices.
@@ -69,6 +89,7 @@ export class AaveDataService {
   private protocolDataProvider: ethers.Contract | null = null;
   private oracle: ethers.Contract | null = null;
   private pool: ethers.Contract | null = null;
+  private uiPoolDataProvider: ethers.Contract | null = null;
 
   constructor(provider?: ethers.JsonRpcProvider) {
     if (provider) {
@@ -100,6 +121,12 @@ export class AaveDataService {
     this.pool = new ethers.Contract(
       config.aavePool,
       POOL_ABI,
+      this.provider
+    );
+
+    this.uiPoolDataProvider = new ethers.Contract(
+      config.aaveUiPoolDataProvider,
+      UI_POOL_DATA_PROVIDER_ABI,
       this.provider
     );
   }
@@ -219,5 +246,98 @@ export class AaveDataService {
     // e.g., 10500 means 5% bonus (105% of debt = 1.05)
     const bonusBps = Number(config.liquidationBonus) - 10000;
     return bonusBps / 10000;
+  }
+
+  /**
+   * Get list of all reserves in the protocol
+   */
+  async getReservesList(): Promise<string[]> {
+    if (!this.uiPoolDataProvider) {
+      throw new Error('AaveDataService not initialized with provider');
+    }
+
+    return await this.uiPoolDataProvider.getReservesList(config.aaveAddressesProvider);
+  }
+
+  /**
+   * Get all reserves data for a user (debts and collateral)
+   * Returns enriched reserve data with symbols, decimals, prices, and USD values
+   */
+  async getAllUserReserves(userAddress: string): Promise<ReserveData[]> {
+    if (!this.protocolDataProvider || !this.oracle) {
+      throw new Error('AaveDataService not initialized with provider');
+    }
+
+    // Get all reserves in the protocol
+    const reserves = await this.getReservesList();
+    
+    // Fetch user data for each reserve
+    const results: ReserveData[] = [];
+    
+    for (const asset of reserves) {
+      try {
+        // Get user reserve data
+        const userData = await this.getUserReserveData(asset, userAddress);
+        const totalDebt = userData.currentStableDebt + userData.currentVariableDebt;
+        
+        // Skip reserves with no position (no debt and no collateral)
+        if (totalDebt === 0n && userData.currentATokenBalance === 0n) {
+          continue;
+        }
+
+        // Get reserve configuration for decimals
+        const reserveConfig = await this.getReserveConfigurationData(asset);
+        const decimals = Number(reserveConfig.decimals);
+
+        // Get price from oracle (in USD with 8 decimals)
+        const priceRaw = await this.getAssetPrice(asset);
+        const priceInUsd = Number(priceRaw) / 1e8;
+
+        // Calculate USD values with proper decimal handling
+        const debtValue = Number(totalDebt) / Math.pow(10, decimals);
+        const debtValueUsd = debtValue * priceInUsd;
+
+        const collateralValue = Number(userData.currentATokenBalance) / Math.pow(10, decimals);
+        const collateralValueUsd = collateralValue * priceInUsd;
+
+        // Try to get symbol from a known mapping or use a placeholder
+        const symbol = this.getSymbolForAsset(asset);
+
+        results.push({
+          asset,
+          symbol,
+          decimals,
+          aTokenBalance: userData.currentATokenBalance,
+          stableDebt: userData.currentStableDebt,
+          variableDebt: userData.currentVariableDebt,
+          totalDebt,
+          usageAsCollateralEnabled: userData.usageAsCollateralEnabled,
+          priceInUsd,
+          debtValueUsd,
+          collateralValueUsd
+        });
+      } catch (error) {
+        // Skip reserves that fail (might be paused, frozen, or not active)
+        continue;
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * Map asset address to symbol (Base mainnet)
+   */
+  private getSymbolForAsset(asset: string): string {
+    const knownAssets: Record<string, string> = {
+      '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
+      '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
+      '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca': 'USDbC',
+      '0x4200000000000000000000000000000000000006': 'WETH',
+      '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 'cbBTC',
+      '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': 'cbETH',
+    };
+
+    return knownAssets[asset.toLowerCase()] || 'UNKNOWN';
   }
 }
