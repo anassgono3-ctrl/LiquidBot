@@ -88,6 +88,21 @@ export class RealTimeHFService extends EventEmitter {
   private userStates = new Map<string, UserState>();
   private lastEmitBlock = new Map<string, number>();
 
+  // Per-block dedupe tracking (Goal 3)
+  private seenUsersThisBlock = new Set<string>();
+  private currentBlockNumber: number | null = null;
+
+  // Per-block gating for price and reserve triggers (Goal 5)
+  private lastPriceCheckBlock: number | null = null;
+  private lastReserveCheckBlock: number | null = null;
+
+  // Adaptive rate-limit handling (Goal 4)
+  private currentChunkSize = 120;
+  private rateLimitBackoffMs = 0;
+  private consecutiveRateLimits = 0;
+  private basePendingTickMs = 250;
+  private currentPendingTickMs = 250;
+
   // Metrics
   private metrics = {
     blocksReceived: 0,
@@ -104,6 +119,10 @@ export class RealTimeHFService extends EventEmitter {
     this.candidateManager = new CandidateManager({ maxCandidates: config.candidateMax });
     this.subgraphService = options.subgraphService;
     this.skipWsConnection = options.skipWsConnection || false;
+    
+    // Initialize adaptive settings
+    this.basePendingTickMs = config.flashblocksTickMs;
+    this.currentPendingTickMs = config.flashblocksTickMs;
   }
 
   /**
@@ -380,21 +399,29 @@ export class RealTimeHFService extends EventEmitter {
     this.metrics.blocksReceived++;
     realtimeBlocksReceived.inc();
 
+    // Clear per-block tracking when entering new block (Goal 3)
+    if (this.currentBlockNumber !== blockNumber) {
+      this.seenUsersThisBlock.clear();
+      this.currentBlockNumber = blockNumber;
+      this.lastPriceCheckBlock = null;
+      this.lastReserveCheckBlock = null;
+    }
+
     // Perform batch check on all candidates
     await this.checkAllCandidates('head');
   }
 
   /**
    * Start pending block polling (Flashblocks mode)
+   * Uses adaptive tick interval that increases during rate-limit bursts (Goal 4)
    */
   private startPendingBlockPolling(): void {
     if (!this.provider) return;
 
-    const tickMs = config.flashblocksTickMs;
     // eslint-disable-next-line no-console
-    console.log(`[realtime-hf] Starting pending block polling (tick=${tickMs}ms)`);
+    console.log(`[realtime-hf] Starting pending block polling (tick=${this.currentPendingTickMs}ms)`);
 
-    this.pendingBlockTimer = setInterval(async () => {
+    const pollFn = async () => {
       if (this.isShuttingDown || !this.provider) return;
 
       try {
@@ -407,7 +434,15 @@ export class RealTimeHFService extends EventEmitter {
       } catch (err) {
         // Silently ignore errors in pending block queries (expected for some providers)
       }
-    }, tickMs);
+
+      // Re-schedule with current adaptive tick interval
+      if (!this.isShuttingDown) {
+        this.pendingBlockTimer = setTimeout(pollFn, this.currentPendingTickMs);
+      }
+    };
+
+    // Start initial poll
+    this.pendingBlockTimer = setTimeout(pollFn, this.currentPendingTickMs);
   }
 
   /**
@@ -459,6 +494,14 @@ export class RealTimeHFService extends EventEmitter {
         } else {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
+            // Per-block gating: at most one low-HF recheck per block from reserve updates (Goal 5)
+            if (this.lastReserveCheckBlock === blockNumber) {
+              // eslint-disable-next-line no-console
+              console.log(`[realtime-hf] ReserveDataUpdated for ${reserve} - skipping (already checked this block)`);
+              return;
+            }
+            this.lastReserveCheckBlock = blockNumber;
+            
             // eslint-disable-next-line no-console
             console.log(`[realtime-hf] ReserveDataUpdated for ${reserve}, checking low HF candidates`);
             await this.checkLowHFCandidates('event');
@@ -492,6 +535,18 @@ export class RealTimeHFService extends EventEmitter {
         // eslint-disable-next-line no-console
         console.log('[realtime-hf] Chainlink price update detected');
       }
+      
+      // Per-block gating: prevent multiple price-triggered rechecks in same block (Goal 5)
+      const currentBlock = typeof log.blockNumber === 'string' 
+        ? parseInt(log.blockNumber, 16) 
+        : log.blockNumber;
+      
+      if (this.lastPriceCheckBlock === currentBlock) {
+        // eslint-disable-next-line no-console
+        console.log(`[realtime-hf] Price update - skipping recheck (already checked this block)`);
+        return;
+      }
+      this.lastPriceCheckBlock = currentBlock;
       
       // Trigger selective rechecks on candidates with low HF
       await this.checkLowHFCandidates('price');
@@ -560,44 +615,159 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Perform read-only Multicall3 aggregate3 call with automatic chunking
+   * Detect if an error is a provider rate limit error (Goal 4)
+   */
+  private isRateLimitError(err: unknown): boolean {
+    if (!err) return false;
+    const errStr = String(err).toLowerCase();
+    // Common rate limit error codes and messages
+    return errStr.includes('-32005') || // RPS limit
+           errStr.includes('rate limit') ||
+           errStr.includes('too many requests') ||
+           errStr.includes('429');
+  }
+
+  /**
+   * Handle rate limit detection - adjust adaptive parameters (Goal 4)
+   */
+  private handleRateLimit(): void {
+    this.consecutiveRateLimits++;
+    
+    // Adaptive chunking: reduce chunk size on repeated failures
+    if (this.consecutiveRateLimits >= 2 && this.currentChunkSize > 50) {
+      const newChunkSize = Math.max(50, Math.floor(this.currentChunkSize * 0.67));
+      // eslint-disable-next-line no-console
+      console.log(`[realtime-hf] Rate limit detected - reducing chunk size ${this.currentChunkSize} -> ${newChunkSize}`);
+      this.currentChunkSize = newChunkSize;
+    }
+    
+    // Adaptive flashblock tick: increase pending polling interval
+    if (this.consecutiveRateLimits >= 2 && this.currentPendingTickMs < this.basePendingTickMs * 4) {
+      const newTickMs = Math.min(this.basePendingTickMs * 4, this.currentPendingTickMs * 2);
+      // eslint-disable-next-line no-console
+      console.log(`[realtime-hf] Rate limit burst - increasing pending tick ${this.currentPendingTickMs}ms -> ${newTickMs}ms`);
+      this.currentPendingTickMs = newTickMs;
+    }
+  }
+
+  /**
+   * Clear rate limit tracking when operations succeed (Goal 4)
+   */
+  private clearRateLimitTracking(): void {
+    if (this.consecutiveRateLimits > 0) {
+      this.consecutiveRateLimits = 0;
+      
+      // Restore chunk size gradually
+      if (this.currentChunkSize < 120) {
+        this.currentChunkSize = Math.min(120, this.currentChunkSize + 10);
+      }
+      
+      // Restore pending tick gradually
+      if (this.currentPendingTickMs > this.basePendingTickMs) {
+        this.currentPendingTickMs = Math.max(this.basePendingTickMs, Math.floor(this.currentPendingTickMs * 0.8));
+      }
+    }
+  }
+
+  /**
+   * Perform read-only Multicall3 aggregate3 call with automatic chunking,
+   * rate-limit detection, and jittered backoff retry (Goal 4)
    */
   private async multicallAggregate3ReadOnly(
     calls: Array<{ target: string; allowFailure: boolean; callData: string }>,
-    chunkSize = 120
+    chunkSize?: number
   ): Promise<Array<{ success: boolean; returnData: string }>> {
     if (!this.multicall3 || !this.provider) {
       throw new Error('[realtime-hf] Multicall3 or provider not initialized');
     }
 
-    // If calls fit in single batch, execute directly
-    if (calls.length <= chunkSize) {
-      try {
-        const results = await this.multicall3.aggregate3.staticCall(calls);
-        return results;
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error('[realtime-hf] Multicall3 staticCall failed:', err);
-        throw err;
+    // Use adaptive chunk size if not specified
+    const effectiveChunkSize = chunkSize || this.currentChunkSize;
+
+    // If calls fit in single batch, execute with retry
+    if (calls.length <= effectiveChunkSize) {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const results = await this.multicall3.aggregate3.staticCall(calls);
+          this.clearRateLimitTracking();
+          return results;
+        } catch (err) {
+          if (this.isRateLimitError(err)) {
+            this.handleRateLimit();
+            
+            if (attempt < 2) {
+              // Jittered exponential backoff
+              const baseDelay = 1000 * Math.pow(2, attempt);
+              const jitter = Math.random() * baseDelay * 0.3; // ±30% jitter
+              const delayMs = Math.floor(baseDelay + jitter);
+              // eslint-disable-next-line no-console
+              console.log(`[realtime-hf] Rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
+              await new Promise(resolve => setTimeout(resolve, delayMs));
+              continue;
+            } else {
+              // Max retries reached - defer to next tick
+              // eslint-disable-next-line no-console
+              console.warn('[realtime-hf] Rate limit persists after retries - deferring chunk to next tick');
+              return calls.map(() => ({ success: false, returnData: '0x' }));
+            }
+          } else {
+            // Non rate-limit error
+            // eslint-disable-next-line no-console
+            console.error('[realtime-hf] Multicall3 staticCall failed:', err);
+            throw err;
+          }
+        }
       }
     }
 
     // Split into chunks for large batches
     // eslint-disable-next-line no-console
-    console.log(`[realtime-hf] Chunking ${calls.length} calls into batches of ${chunkSize}`);
+    console.log(`[realtime-hf] Chunking ${calls.length} calls into batches of ${effectiveChunkSize}`);
     
     const allResults: Array<{ success: boolean; returnData: string }> = [];
-    for (let i = 0; i < calls.length; i += chunkSize) {
-      const chunk = calls.slice(i, i + chunkSize);
-      try {
-        const results = await this.multicall3.aggregate3.staticCall(chunk);
-        allResults.push(...results);
+    for (let i = 0; i < calls.length; i += effectiveChunkSize) {
+      const chunk = calls.slice(i, i + effectiveChunkSize);
+      const chunkNum = Math.floor(i / effectiveChunkSize) + 1;
+      const totalChunks = Math.ceil(calls.length / effectiveChunkSize);
+      
+      // Retry logic for each chunk
+      let chunkSuccess = false;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          const results = await this.multicall3.aggregate3.staticCall(chunk);
+          allResults.push(...results);
+          this.clearRateLimitTracking();
+          // eslint-disable-next-line no-console
+          console.log(`[realtime-hf] Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls)`);
+          chunkSuccess = true;
+          break;
+        } catch (err) {
+          if (this.isRateLimitError(err)) {
+            this.handleRateLimit();
+            
+            if (attempt < 2) {
+              // Jittered exponential backoff
+              const baseDelay = 1000 * Math.pow(2, attempt);
+              const jitter = Math.random() * baseDelay * 0.3;
+              const delayMs = Math.floor(baseDelay + jitter);
+              // eslint-disable-next-line no-console
+              console.log(`[realtime-hf] Chunk ${chunkNum} rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
+              await new Promise(resolve => setTimeout(resolve, delayMs));
+              continue;
+            }
+          } else {
+            // Non rate-limit error
+            // eslint-disable-next-line no-console
+            console.error(`[realtime-hf] Multicall3 chunk ${chunkNum} failed:`, err);
+          }
+          break;
+        }
+      }
+      
+      // If chunk failed after retries, return failure results to avoid crashing
+      if (!chunkSuccess) {
         // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] Chunk ${Math.floor(i / chunkSize) + 1}/${Math.ceil(calls.length / chunkSize)} complete (${chunk.length} calls)`);
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.error(`[realtime-hf] Multicall3 chunk ${Math.floor(i / chunkSize) + 1} failed:`, err);
-        // Return failure results for this chunk to avoid crashing
+        console.warn(`[realtime-hf] Chunk ${chunkNum} failed - deferring to next tick`);
         const failedResults = chunk.map(() => ({ success: false, returnData: '0x' }));
         allResults.push(...failedResults);
       }
@@ -726,10 +896,19 @@ export class RealTimeHFService extends EventEmitter {
               realtimeMinHealthFactor.set(this.metrics.minHF);
             }
 
+            // Per-block dedupe: emit at most once per user per block (Goal 3)
+            if (this.seenUsersThisBlock.has(userAddress)) {
+              // Already emitted for this user in this block - skip
+              continue;
+            }
+
             // Check if we should emit based on edge-triggering and hysteresis
             const emitDecision = this.shouldEmit(userAddress, healthFactor, blockNumber);
             
             if (emitDecision.shouldEmit) {
+              // Track that we've seen this user in this block
+              this.seenUsersThisBlock.add(userAddress);
+              
               // eslint-disable-next-line no-console
               console.log(`[realtime-hf] emit liquidatable user=${userAddress} hf=${healthFactor.toFixed(4)} reason=${emitDecision.reason} block=${blockNumber}`);
 
@@ -759,8 +938,12 @@ export class RealTimeHFService extends EventEmitter {
       // Update candidate count gauge
       realtimeCandidateCount.set(this.candidateManager.size());
 
-      // eslint-disable-next-line no-console
-      console.log(`[realtime-hf] Batch check complete: ${addresses.length} candidates, minHF=${minHF?.toFixed(4) || 'N/A'}, trigger=${triggerType}`);
+      // Reduce noisy 'Batch check complete' logs to debug level (Goal 7)
+      // Only log if we found liquidatable users or in verbose mode
+      if (minHF && minHF < 1.0) {
+        // eslint-disable-next-line no-console
+        console.log(`[realtime-hf] Batch check complete: ${addresses.length} candidates, minHF=${minHF.toFixed(4)}, trigger=${triggerType}`);
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[realtime-hf] Batch check failed:', err);
