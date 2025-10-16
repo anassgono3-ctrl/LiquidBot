@@ -121,6 +121,7 @@ export class ExecutionService {
    */
   async prepareActionableOpportunity(
     userAddress: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _options?: {
       collateralAsset?: string;
       healthFactor?: number;

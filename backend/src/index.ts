@@ -12,16 +12,12 @@ import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
 import { 
   registry, 
-  opportunitiesGeneratedTotal, 
-  opportunityProfitEstimate,
   actionableOpportunitiesTotal,
   skippedUnresolvedPlanTotal
 } from "./metrics/index.js";
 import { buildInfo } from "./buildInfo.js";
-import { OpportunityService } from "./services/OpportunityService.js";
 import { NotificationService } from "./services/NotificationService.js";
 import { ExecutionService } from "./services/ExecutionService.js";
-import { RiskManager } from "./services/RiskManager.js";
 import { RealTimeHFService } from "./services/RealTimeHFService.js";
 import type { LiquidatableEvent } from "./services/RealTimeHFService.js";
 
@@ -42,13 +38,11 @@ app.use(rateLimiter);
 // Collect default metrics
 promClient.collectDefaultMetrics({ register: registry });
 
-// Initialize opportunity and notification services
-const opportunityService = new OpportunityService();
+// Initialize notification service
 const notificationService = new NotificationService();
 
-// Initialize execution scaffold
+// Initialize execution service
 const executionService = new ExecutionService();
-const riskManager = new RiskManager();
 
 // Initialize real-time HF service (only when enabled via config)
 let realtimeHFService: RealTimeHFService | undefined;
