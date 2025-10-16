@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-const booleanString = z.enum(['true', 'false']).transform(v => v === 'true');
 const isTest = (process.env.NODE_ENV || '').toLowerCase() === 'test';
 
 // Inject test defaults BEFORE schema parsing so Zod doesn't throw for test runs.
@@ -16,22 +15,6 @@ export const rawEnvSchema = z.object({
 
   API_KEY: z.string().min(3, 'API_KEY required'),
   JWT_SECRET: z.string().min(8, 'JWT_SECRET too short'),
-
-  USE_MOCK_SUBGRAPH: z.string().optional().default('false'),
-  GRAPH_API_KEY: z.string().optional(),
-  SUBGRAPH_DEPLOYMENT_ID: z.string().optional(),
-
-  SUBGRAPH_POLL_INTERVAL_MS: z.string().optional(),
-  SUBGRAPH_DEBUG_ERRORS: z.string().optional(),
-
-  LIQUIDATION_POLL_LIMIT: z.string().optional(),
-  LIQUIDATION_TRACK_MAX: z.string().optional(),
-
-  SUBGRAPH_FAILURE_THRESHOLD: z.string().optional(),
-  SUBGRAPH_RETRY_ATTEMPTS: z.string().optional(),
-  SUBGRAPH_RETRY_BASE_MS: z.string().optional(),
-  SUBGRAPH_RATE_LIMIT_CAPACITY: z.string().optional(),
-  SUBGRAPH_RATE_LIMIT_INTERVAL_MS: z.string().optional(),
 
   AAVE_POOL_ADDRESS: z.string().optional(),
   
@@ -71,24 +54,12 @@ export const rawEnvSchema = z.object({
   HEALTH_MAX_BATCH: z.string().optional(),
   HEALTH_QUERY_MODE: z.string().optional(),
 
-  // Poll configuration
-  POLL_LIMIT: z.string().optional(),
-  IGNORE_BOOTSTRAP_BATCH: z.string().optional(),
-
   // Gas cost estimation
   GAS_COST_USD: z.string().optional(),
 
   // Chainlink price feeds
   CHAINLINK_RPC_URL: z.string().optional(),
   CHAINLINK_FEEDS: z.string().optional(),
-
-  // At-risk user scanning
-  AT_RISK_SCAN_LIMIT: z.string().optional(),
-  AT_RISK_WARN_THRESHOLD: z.string().optional(),
-  AT_RISK_LIQ_THRESHOLD: z.string().optional(),
-  AT_RISK_DUST_EPSILON: z.string().optional(),
-  AT_RISK_NOTIFY_WARN: z.string().optional(),
-  AT_RISK_NOTIFY_CRITICAL: z.string().optional(),
 
   // Execution scaffold
   EXECUTION_ENABLED: z.string().optional(),
@@ -135,28 +106,12 @@ export const rawEnvSchema = z.object({
 
 export const env = (() => {
   const parsed = rawEnvSchema.parse(process.env);
-  const useMock = booleanString.parse(parsed.USE_MOCK_SUBGRAPH || 'false');
 
   return {
     port: Number(parsed.PORT || 3000),
     nodeEnv: parsed.NODE_ENV || 'development',
     apiKey: parsed.API_KEY,
     jwtSecret: parsed.JWT_SECRET,
-    useMockSubgraph: useMock,
-
-    graphApiKey: parsed.GRAPH_API_KEY,
-    subgraphDeploymentId: parsed.SUBGRAPH_DEPLOYMENT_ID,
-    subgraphPollIntervalMs: Number(parsed.SUBGRAPH_POLL_INTERVAL_MS || 15000),
-    subgraphDebugErrors: (parsed.SUBGRAPH_DEBUG_ERRORS || '').toLowerCase() === 'true',
-
-    liquidationPollLimit: Number(parsed.LIQUIDATION_POLL_LIMIT || 50),
-    liquidationTrackMax: Number(parsed.LIQUIDATION_TRACK_MAX || 5000),
-
-    subgraphFailureThreshold: Number(parsed.SUBGRAPH_FAILURE_THRESHOLD || 5),
-    subgraphRetryAttempts: Number(parsed.SUBGRAPH_RETRY_ATTEMPTS || 3),
-    subgraphRetryBaseMs: Number(parsed.SUBGRAPH_RETRY_BASE_MS || 150),
-    subgraphRateLimitCapacity: Number(parsed.SUBGRAPH_RATE_LIMIT_CAPACITY || 30),
-    subgraphRateLimitIntervalMs: Number(parsed.SUBGRAPH_RATE_LIMIT_INTERVAL_MS || 10000),
 
     aavePoolAddress: parsed.AAVE_POOL_ADDRESS || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
     
@@ -196,24 +151,12 @@ export const env = (() => {
     healthMaxBatch: Number(parsed.HEALTH_MAX_BATCH || 25),
     healthQueryMode: parsed.HEALTH_QUERY_MODE || 'on_demand',
 
-    // Poll configuration
-    pollLimit: Number(parsed.POLL_LIMIT || 5),
-    ignoreBootstrapBatch: (parsed.IGNORE_BOOTSTRAP_BATCH || 'true').toLowerCase() === 'true',
-
     // Gas cost estimation (default 0.5 USD)
     gasCostUsd: Number(parsed.GAS_COST_USD || 0.5),
 
     // Chainlink price feeds
     chainlinkRpcUrl: parsed.CHAINLINK_RPC_URL,
     chainlinkFeeds: parsed.CHAINLINK_FEEDS,
-
-    // At-risk user scanning
-    atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),
-    atRiskWarnThreshold: Number(parsed.AT_RISK_WARN_THRESHOLD || 1.05),
-    atRiskLiqThreshold: Number(parsed.AT_RISK_LIQ_THRESHOLD || 1.0),
-    atRiskDustEpsilon: Number(parsed.AT_RISK_DUST_EPSILON || 1e-9),
-    atRiskNotifyWarn: (parsed.AT_RISK_NOTIFY_WARN || 'false').toLowerCase() === 'true',
-    atRiskNotifyCritical: (parsed.AT_RISK_NOTIFY_CRITICAL || 'true').toLowerCase() === 'true',
 
     // Execution scaffold
     executionEnabled: (parsed.EXECUTION_ENABLED || 'false').toLowerCase() === 'true',

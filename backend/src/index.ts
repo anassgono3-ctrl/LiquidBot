@@ -178,9 +178,7 @@ app.get("/health", (_req, res) => {
 });
 
 // API routes (minimal auth check only)
-app.use("/api/v1", authenticate, (req, res) => {
-  res.json({ message: "API v1 - real-time liquidation detection only" });
-});
+app.use("/api/v1", authenticate, buildRoutes());
 
 // Initialize WebSocket server
 const { wss } = initWebSocketServer(httpServer);
