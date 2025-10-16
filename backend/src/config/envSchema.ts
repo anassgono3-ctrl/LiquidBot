@@ -125,17 +125,34 @@ export const rawEnvSchema = z.object({
   CANDIDATE_MAX: z.string().optional(),
   HYSTERESIS_BPS: z.string().optional(),
   NOTIFY_ONLY_WHEN_ACTIONABLE: z.string().optional(),
-  EXECUTION_INFLIGHT_LOCK: z.string().optional()
+  EXECUTION_INFLIGHT_LOCK: z.string().optional(),
+
+  // Subgraph usage gating
+  USE_SUBGRAPH: z.string().optional(),
+
+  // On-chain backfill for candidate discovery
+  REALTIME_INITIAL_BACKFILL_ENABLED: z.string().optional(),
+  REALTIME_INITIAL_BACKFILL_BLOCKS: z.string().optional(),
+  REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS: z.string().optional(),
+  REALTIME_INITIAL_BACKFILL_MAX_LOGS: z.string().optional(),
+
+  // Subgraph paging (when USE_SUBGRAPH=true)
+  SUBGRAPH_PAGE_SIZE: z.string().optional(),
+
+  // Head-check paging/rotation
+  HEAD_CHECK_PAGE_STRATEGY: z.string().optional(),
+  HEAD_CHECK_PAGE_SIZE: z.string().optional()
 });
 
 export const env = (() => {
   const parsed = rawEnvSchema.parse(process.env);
   const useMock = booleanString.parse(parsed.USE_MOCK_SUBGRAPH || 'false');
+  const useSubgraph = (parsed.USE_SUBGRAPH || 'false').toLowerCase() === 'true';
 
-  // Only enforce gateway secrets when not mocking AND not in test mode
-  if (!useMock && !isTest) {
-    if (!parsed.GRAPH_API_KEY) throw new Error('GRAPH_API_KEY required when USE_MOCK_SUBGRAPH=false');
-    if (!parsed.SUBGRAPH_DEPLOYMENT_ID) throw new Error('SUBGRAPH_DEPLOYMENT_ID required when USE_MOCK_SUBGRAPH=false');
+  // Only enforce gateway secrets when USE_SUBGRAPH=true AND not mocking AND not in test mode
+  if (useSubgraph && !useMock && !isTest) {
+    if (!parsed.GRAPH_API_KEY) throw new Error('GRAPH_API_KEY required when USE_SUBGRAPH=true and USE_MOCK_SUBGRAPH=false');
+    if (!parsed.SUBGRAPH_DEPLOYMENT_ID) throw new Error('SUBGRAPH_DEPLOYMENT_ID required when USE_SUBGRAPH=true and USE_MOCK_SUBGRAPH=false');
   }
 
   return {
@@ -257,6 +274,22 @@ export const env = (() => {
     candidateMax: Number(parsed.CANDIDATE_MAX || 300),
     hysteresisBps: Number(parsed.HYSTERESIS_BPS || 20),
     notifyOnlyWhenActionable: (parsed.NOTIFY_ONLY_WHEN_ACTIONABLE || 'true').toLowerCase() === 'true',
-    executionInflightLock: (parsed.EXECUTION_INFLIGHT_LOCK || 'true').toLowerCase() === 'true'
+    executionInflightLock: (parsed.EXECUTION_INFLIGHT_LOCK || 'true').toLowerCase() === 'true',
+
+    // Subgraph usage gating
+    useSubgraph: (parsed.USE_SUBGRAPH || 'false').toLowerCase() === 'true',
+
+    // On-chain backfill for candidate discovery
+    realtimeInitialBackfillEnabled: (parsed.REALTIME_INITIAL_BACKFILL_ENABLED || 'true').toLowerCase() === 'true',
+    realtimeInitialBackfillBlocks: Number(parsed.REALTIME_INITIAL_BACKFILL_BLOCKS || 50000),
+    realtimeInitialBackfillChunkBlocks: Number(parsed.REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS || 2000),
+    realtimeInitialBackfillMaxLogs: Number(parsed.REALTIME_INITIAL_BACKFILL_MAX_LOGS || 20000),
+
+    // Subgraph paging (when USE_SUBGRAPH=true)
+    subgraphPageSize: Math.max(50, Math.min(200, Number(parsed.SUBGRAPH_PAGE_SIZE || 100))),
+
+    // Head-check paging/rotation
+    headCheckPageStrategy: (parsed.HEAD_CHECK_PAGE_STRATEGY || 'paged') as 'all' | 'paged',
+    headCheckPageSize: Number(parsed.HEAD_CHECK_PAGE_SIZE || 250)
   };
 })();

@@ -5,7 +5,8 @@ Backend services for the Aave V3 Base liquidation protection service.
 ## Overview
 
 The LiquidBot backend provides:
-- Real-time liquidation event monitoring via Aave V3 Base subgraph
+- **On-chain liquidation discovery** (default) via real-time event monitoring and startup backfill
+- **Optional subgraph integration** for candidate seeding when enabled
 - **On-demand health factor resolution** (per liquidation, no bulk snapshots)
 - **Liquidation opportunity detection with profit estimation**
 - **Telegram notifications for profitable opportunities**
@@ -16,6 +17,83 @@ The LiquidBot backend provides:
 - Prometheus metrics for monitoring
 
 **Note**: Bulk health monitoring has been disabled. Health factors are now computed on-demand only when new liquidation events are detected, reducing API quota consumption by >95%.
+
+## Candidate Discovery Modes
+
+LiquidBot supports two discovery modes controlled by the `USE_SUBGRAPH` environment variable:
+
+### Default Mode (USE_SUBGRAPH=false)
+- **On-chain discovery only** - No subgraph dependency
+- **Startup backfill**: Scans recent Aave Pool events to seed initial candidates
+- **Real-time events**: Monitors Borrow, Repay, Supply, Withdraw events for new users
+- **Head-check paging**: Rotates through candidates efficiently to reduce RPC load
+- Best for production with limited RPC quotas
+
+### Optional Subgraph Mode (USE_SUBGRAPH=true)
+- **Subgraph seeding**: Periodically fetches users from Aave subgraph
+- **Paged queries**: Supports multiple pages up to `CANDIDATE_MAX`
+- **Real-time events**: Still monitors on-chain events for immediate updates
+- Requires `GRAPH_API_KEY` and `SUBGRAPH_DEPLOYMENT_ID`
+- Note: Subgraph is for discovery only; prices come from on-chain sources
+
+## Configuration
+
+Key environment variables:
+
+### Subgraph Feature Gating
+```bash
+# Master switch for subgraph (default: false)
+USE_SUBGRAPH=false
+
+# When USE_SUBGRAPH=true, these are required:
+GRAPH_API_KEY=your_gateway_key
+SUBGRAPH_DEPLOYMENT_ID=GQFbb95cE6d8mV989mL5figjaGaKCQB3xqYrr1bRyXqF
+```
+
+### On-Chain Backfill (default path)
+```bash
+# Enable startup backfill (default: true)
+REALTIME_INITIAL_BACKFILL_ENABLED=true
+# Blocks to scan backward (default: 50000)
+REALTIME_INITIAL_BACKFILL_BLOCKS=50000
+# Chunk size for log queries (default: 2000)
+REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS=2000
+# Max logs to scan (default: 20000)
+REALTIME_INITIAL_BACKFILL_MAX_LOGS=20000
+```
+
+### Head-Check Paging/Rotation
+```bash
+# Strategy: 'all' or 'paged' (default: paged)
+HEAD_CHECK_PAGE_STRATEGY=paged
+# Candidates per head cycle (default: 250)
+HEAD_CHECK_PAGE_SIZE=250
+```
+
+### Subgraph Paging (when USE_SUBGRAPH=true)
+```bash
+# Page size for subgraph queries (50-200, default: 100)
+SUBGRAPH_PAGE_SIZE=100
+```
+
+### Trade-offs
+
+**On-Chain Backfill**:
+- ✅ No external dependencies
+- ✅ Works with any RPC provider
+- ⚠️ Startup time depends on block range
+- ⚠️ May miss users inactive during backfill window
+
+**Subgraph Seeding**:
+- ✅ Comprehensive user discovery
+- ✅ Fast startup
+- ⚠️ Requires Graph API key
+- ⚠️ Additional rate limits to manage
+
+**Head-Check Paging**:
+- ✅ Reduces RPC load by ~75% (250/1000+ candidates per block)
+- ✅ Always includes low-HF candidates (<1.1)
+- ⚠️ Full candidate rotation takes multiple blocks
 
 ## Quick Start
 

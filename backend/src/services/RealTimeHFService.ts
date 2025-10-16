@@ -26,6 +26,7 @@ import {
 
 import { CandidateManager } from './CandidateManager.js';
 import type { SubgraphService } from './SubgraphService.js';
+import { OnChainBackfillService } from './OnChainBackfillService.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -76,6 +77,7 @@ export class RealTimeHFService extends EventEmitter {
   private aavePool: Contract | null = null;
   private candidateManager: CandidateManager;
   private subgraphService?: SubgraphService;
+  private backfillService?: OnChainBackfillService;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -102,6 +104,9 @@ export class RealTimeHFService extends EventEmitter {
   private consecutiveRateLimits = 0;
   private basePendingTickMs = 250;
   private currentPendingTickMs = 250;
+
+  // Head-check paging/rotation
+  private headCheckRotatingIndex = 0;
 
   // Metrics
   private metrics = {
@@ -144,7 +149,11 @@ export class RealTimeHFService extends EventEmitter {
       aavePool: config.aavePool,
       hfThresholdBps: config.executionHfThresholdBps,
       seedInterval: config.realtimeSeedIntervalSec,
-      candidateMax: config.candidateMax
+      candidateMax: config.candidateMax,
+      useSubgraph: config.useSubgraph,
+      backfillEnabled: config.realtimeInitialBackfillEnabled,
+      headCheckPageStrategy: config.headCheckPageStrategy,
+      headCheckPageSize: config.headCheckPageSize
     });
 
     if (!this.skipWsConnection) {
@@ -153,8 +162,11 @@ export class RealTimeHFService extends EventEmitter {
       await this.setupRealtime();
     }
 
-    // Start periodic seeding from subgraph
-    if (this.subgraphService) {
+    // Perform initial candidate seeding
+    await this.performInitialSeeding();
+
+    // Start periodic seeding from subgraph if enabled
+    if (config.useSubgraph && this.subgraphService) {
       this.startPeriodicSeeding();
     }
 
@@ -584,13 +596,108 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Check all candidates via Multicall3 batch
+   * Perform initial candidate seeding on startup
+   */
+  private async performInitialSeeding(): Promise<void> {
+    const seedBefore = this.candidateManager.size();
+    let newCount = 0;
+
+    // Priority 1: Subgraph seeding (if enabled)
+    if (config.useSubgraph && this.subgraphService) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[realtime-hf] Initial seeding from subgraph...');
+        await this.seedFromSubgraph();
+        newCount = this.candidateManager.size() - seedBefore;
+        // eslint-disable-next-line no-console
+        console.log(`[realtime-hf] seed_source=subgraph candidates_total=${this.candidateManager.size()} new=${newCount}`);
+        return; // Subgraph seeding is sufficient, skip on-chain backfill
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[realtime-hf] Subgraph seeding failed, falling back to on-chain backfill:', err);
+      }
+    }
+
+    // Priority 2: On-chain backfill (default path when USE_SUBGRAPH=false)
+    if (config.realtimeInitialBackfillEnabled && config.wsRpcUrl) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log('[realtime-hf] Initial seeding from on-chain backfill...');
+        
+        this.backfillService = new OnChainBackfillService();
+        await this.backfillService.initialize(config.wsRpcUrl);
+        
+        const result = await this.backfillService.backfill();
+        
+        // Add discovered users to candidate manager
+        this.candidateManager.addBulk(result.users);
+        newCount = this.candidateManager.size() - seedBefore;
+        
+        // eslint-disable-next-line no-console
+        console.log(`[realtime-hf] seed_source=onchain_backfill candidates_total=${this.candidateManager.size()} new=${newCount}`);
+        
+        // Cleanup backfill service
+        await this.backfillService.cleanup();
+        this.backfillService = undefined;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[realtime-hf] On-chain backfill failed:', err);
+      }
+    }
+
+    if (newCount === 0) {
+      // eslint-disable-next-line no-console
+      console.log('[realtime-hf] No initial candidates seeded, will rely on real-time events');
+    }
+  }
+
+  /**
+   * Check all candidates via Multicall3 batch with paging/rotation support
    */
   private async checkAllCandidates(triggerType: 'event' | 'head' | 'price'): Promise<void> {
-    const addresses = this.candidateManager.getAddresses();
-    if (addresses.length === 0) return;
+    const allAddresses = this.candidateManager.getAddresses();
+    if (allAddresses.length === 0) return;
 
-    await this.batchCheckCandidates(addresses, triggerType);
+    // Determine which addresses to check based on strategy
+    let addressesToCheck: string[];
+    
+    if (config.headCheckPageStrategy === 'all') {
+      // Check all candidates every head
+      addressesToCheck = allAddresses;
+    } else {
+      // Paged strategy: rotate through candidates
+      const pageSize = config.headCheckPageSize;
+      const totalCandidates = allAddresses.length;
+      
+      // Get current page window
+      const startIdx = this.headCheckRotatingIndex % totalCandidates;
+      const endIdx = Math.min(startIdx + pageSize, totalCandidates);
+      const windowAddresses = allAddresses.slice(startIdx, endIdx);
+      
+      // If we need more addresses to fill the page, wrap around
+      if (windowAddresses.length < pageSize && totalCandidates > pageSize) {
+        const remaining = pageSize - windowAddresses.length;
+        const wrapAddresses = allAddresses.slice(0, Math.min(remaining, totalCandidates));
+        windowAddresses.push(...wrapAddresses);
+      }
+      
+      // Always include low-HF candidates (<1.1) even if outside current page
+      const candidates = this.candidateManager.getAll();
+      const lowHfAddresses = candidates
+        .filter(c => c.lastHF !== null && c.lastHF < 1.1 && !windowAddresses.includes(c.address))
+        .map(c => c.address);
+      
+      addressesToCheck = [...windowAddresses, ...lowHfAddresses];
+      
+      // Update rotating index for next iteration
+      this.headCheckRotatingIndex = (this.headCheckRotatingIndex + pageSize) % totalCandidates;
+      
+      // Log paging info
+      // eslint-disable-next-line no-console
+      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} lowHf=${lowHfAddresses.length}`);
+    }
+
+    await this.batchCheckCandidates(addressesToCheck, triggerType);
   }
 
   /**
@@ -938,9 +1045,8 @@ export class RealTimeHFService extends EventEmitter {
       // Update candidate count gauge
       realtimeCandidateCount.set(this.candidateManager.size());
 
-      // Reduce noisy 'Batch check complete' logs to debug level (Goal 7)
-      // Only log if we found liquidatable users or in verbose mode
-      if (minHF && minHF < 1.0) {
+      // Log minimum HF when < 1.0 (requirement 5)
+      if (minHF !== null && minHF < 1.0) {
         // eslint-disable-next-line no-console
         console.log(`[realtime-hf] Batch check complete: ${addresses.length} candidates, minHF=${minHF.toFixed(4)}, trigger=${triggerType}`);
       }
@@ -953,9 +1059,13 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Start periodic seeding from subgraph
+   * Start periodic seeding from subgraph (only when USE_SUBGRAPH=true)
    */
   private startPeriodicSeeding(): void {
+    if (!config.useSubgraph) {
+      return;
+    }
+
     const intervalMs = config.realtimeSeedIntervalSec * 1000;
     
     // Initial seed
@@ -990,16 +1100,16 @@ export class RealTimeHFService extends EventEmitter {
     if (!this.subgraphService || this.isShuttingDown) return;
 
     try {
-      // eslint-disable-next-line no-console
-      console.log('[realtime-hf] Seeding candidates from subgraph...');
+      const seedBefore = this.candidateManager.size();
 
-      // Query users with borrowing activity
-      const users = await this.subgraphService.getUsersWithBorrowing(config.candidateMax);
+      // Query users with borrowing activity (with paging support)
+      const users = await this.subgraphService.getUsersWithBorrowing(config.candidateMax, true);
       
       if (users.length > 0) {
         this.candidateManager.addBulk(users.map(u => u.id));
+        const newCount = this.candidateManager.size() - seedBefore;
         // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] Seeded ${users.length} candidates from subgraph`);
+        console.log(`[realtime-hf] seed_source=subgraph candidates_total=${this.candidateManager.size()} new=${newCount}`);
       }
     } catch (err) {
       // eslint-disable-next-line no-console

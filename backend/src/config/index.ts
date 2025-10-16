@@ -148,6 +148,22 @@ export const config = {
   get hysteresisBps() { return env.hysteresisBps; },
   get notifyOnlyWhenActionable() { return env.notifyOnlyWhenActionable; },
   get executionInflightLock() { return env.executionInflightLock; },
+
+  // Subgraph usage gating
+  get useSubgraph() { return env.useSubgraph; },
+
+  // On-chain backfill for candidate discovery
+  get realtimeInitialBackfillEnabled() { return env.realtimeInitialBackfillEnabled; },
+  get realtimeInitialBackfillBlocks() { return env.realtimeInitialBackfillBlocks; },
+  get realtimeInitialBackfillChunkBlocks() { return env.realtimeInitialBackfillChunkBlocks; },
+  get realtimeInitialBackfillMaxLogs() { return env.realtimeInitialBackfillMaxLogs; },
+
+  // Subgraph paging (when USE_SUBGRAPH=true)
+  get subgraphPageSize() { return env.subgraphPageSize; },
+
+  // Head-check paging/rotation
+  get headCheckPageStrategy() { return env.headCheckPageStrategy; },
+  get headCheckPageSize() { return env.headCheckPageSize; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },
