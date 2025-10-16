@@ -25,7 +25,6 @@ import {
 } from '../metrics/index.js';
 
 import { CandidateManager } from './CandidateManager.js';
-import type { SubgraphService } from './SubgraphService.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -45,7 +44,6 @@ const CHAINLINK_AGG_ABI = [
 ];
 
 export interface RealTimeHFServiceOptions {
-  subgraphService?: SubgraphService;
   skipWsConnection?: boolean; // for testing
 }
 
@@ -75,12 +73,10 @@ export class RealTimeHFService extends EventEmitter {
   private multicall3: Contract | null = null;
   private aavePool: Contract | null = null;
   private candidateManager: CandidateManager;
-  private subgraphService?: SubgraphService;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
   private reconnectTimer?: NodeJS.Timeout;
-  private seedTimer?: NodeJS.Timeout;
   private pendingBlockTimer?: NodeJS.Timeout;
   private skipWsConnection: boolean;
 
@@ -117,7 +113,6 @@ export class RealTimeHFService extends EventEmitter {
   constructor(options: RealTimeHFServiceOptions = {}) {
     super();
     this.candidateManager = new CandidateManager({ maxCandidates: config.candidateMax });
-    this.subgraphService = options.subgraphService;
     this.skipWsConnection = options.skipWsConnection || false;
     
     // Initialize adaptive settings
@@ -143,19 +138,20 @@ export class RealTimeHFService extends EventEmitter {
       multicall3: config.multicall3Address,
       aavePool: config.aavePool,
       hfThresholdBps: config.executionHfThresholdBps,
-      seedInterval: config.realtimeSeedIntervalSec,
-      candidateMax: config.candidateMax
+      candidateMax: config.candidateMax,
+      backfillEnabled: config.realtimeInitialBackfillEnabled,
+      backfillBlocks: config.realtimeInitialBackfillBlocks
     });
 
     if (!this.skipWsConnection) {
       await this.setupProvider();
       await this.setupContracts();
       await this.setupRealtime();
-    }
-
-    // Start periodic seeding from subgraph
-    if (this.subgraphService) {
-      this.startPeriodicSeeding();
+      
+      // Perform initial on-chain backfill to seed candidates
+      if (config.realtimeInitialBackfillEnabled) {
+        await this.backfillFromOnChain();
+      }
     }
 
     // eslint-disable-next-line no-console
@@ -173,7 +169,6 @@ export class RealTimeHFService extends EventEmitter {
     console.log('[realtime-hf] Shutting down...');
 
     // Clear timers
-    if (this.seedTimer) clearInterval(this.seedTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.pendingBlockTimer) clearInterval(this.pendingBlockTimer);
 
@@ -953,57 +948,102 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Start periodic seeding from subgraph
+   * Perform initial on-chain backfill to seed candidates from historical Aave Pool events
    */
-  private startPeriodicSeeding(): void {
-    const intervalMs = config.realtimeSeedIntervalSec * 1000;
-    
-    // Initial seed
-    this.seedFromSubgraph().catch(err => {
+  private async backfillFromOnChain(): Promise<void> {
+    if (!this.provider) {
       // eslint-disable-next-line no-console
-      console.error('[realtime-hf] Initial seed failed:', err);
-    });
-
-    // Periodic seed with jitter
-    this.seedTimer = setInterval(() => {
-      if (this.isShuttingDown) return;
-      
-      // Add jitter (±20% of interval)
-      const jitter = Math.random() * 0.4 - 0.2; // -0.2 to +0.2
-      const delay = Math.max(0, intervalMs * jitter);
-      
-      setTimeout(() => {
-        if (!this.isShuttingDown) {
-          this.seedFromSubgraph().catch(err => {
-            // eslint-disable-next-line no-console
-            console.error('[realtime-hf] Periodic seed failed:', err);
-          });
-        }
-      }, delay);
-    }, intervalMs);
-  }
-
-  /**
-   * Seed candidates from subgraph
-   */
-  private async seedFromSubgraph(): Promise<void> {
-    if (!this.subgraphService || this.isShuttingDown) return;
+      console.log('[realtime-hf] No provider available for backfill');
+      return;
+    }
 
     try {
+      const startTime = Date.now();
       // eslint-disable-next-line no-console
-      console.log('[realtime-hf] Seeding candidates from subgraph...');
+      console.log('[realtime-hf] Starting on-chain backfill for candidate seeding...');
 
-      // Query users with borrowing activity
-      const users = await this.subgraphService.getUsersWithBorrowing(config.candidateMax);
+      // Get current block
+      const latestBlock = await this.provider.getBlockNumber();
+      const backfillBlocks = config.realtimeInitialBackfillBlocks;
+      const fromBlock = Math.max(0, latestBlock - backfillBlocks);
       
-      if (users.length > 0) {
-        this.candidateManager.addBulk(users.map(u => u.id));
-        // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] Seeded ${users.length} candidates from subgraph`);
+      // eslint-disable-next-line no-console
+      console.log(`[realtime-hf] Backfill range: blocks ${fromBlock} to ${latestBlock} (${backfillBlocks} blocks)`);
+
+      // Build filter for Aave Pool events
+      const aaveTopics = eventRegistry.getAllTopics().filter(topic => {
+        const entry = eventRegistry.get(topic);
+        // Filter to only user-affecting Aave events (exclude Chainlink and non-user events)
+        return entry && ['Borrow', 'Repay', 'Supply', 'Withdraw'].includes(entry.name);
+      });
+
+      const filter = {
+        address: config.aavePool,
+        topics: [aaveTopics],
+        fromBlock,
+        toBlock: latestBlock
+      };
+
+      const chunkSize = config.realtimeInitialBackfillChunkBlocks;
+      const maxLogs = config.realtimeInitialBackfillMaxLogs;
+      let totalLogs = 0;
+      const uniqueUsers = new Set<string>();
+
+      // Iterate in chunks to respect provider limits
+      for (let start = fromBlock; start <= latestBlock; start += chunkSize) {
+        const end = Math.min(start + chunkSize - 1, latestBlock);
+        const chunkNum = Math.floor((start - fromBlock) / chunkSize) + 1;
+        const totalChunks = Math.ceil((latestBlock - fromBlock + 1) / chunkSize);
+
+        try {
+          const chunkFilter = { ...filter, fromBlock: start, toBlock: end };
+          const logs = await this.provider.getLogs(chunkFilter);
+          
+          // Process logs and extract users
+          for (const log of logs) {
+            totalLogs++;
+            
+            // Check max logs cap
+            if (totalLogs > maxLogs) {
+              // eslint-disable-next-line no-console
+              console.log(`[realtime-hf] Backfill stopped early: max logs limit (${maxLogs}) reached`);
+              break;
+            }
+
+            // Decode event and extract users
+            const decoded = eventRegistry.decode(log.topics as string[], log.data);
+            if (decoded) {
+              const users = extractUserFromAaveEvent(decoded);
+              for (const user of users) {
+                uniqueUsers.add(user.toLowerCase());
+              }
+            }
+          }
+
+          // eslint-disable-next-line no-console
+          console.log(`[realtime-hf] Backfill chunk ${chunkNum}/${totalChunks}: blocks ${start}-${end}, logs=${logs.length}, totalLogs=${totalLogs}, uniqueUsers=${uniqueUsers.size}`);
+
+          // Early exit if max logs reached
+          if (totalLogs > maxLogs) break;
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`[realtime-hf] Backfill chunk ${chunkNum} failed (blocks ${start}-${end}):`, err);
+          // Continue with next chunk
+        }
       }
+
+      // Add all discovered users to candidate manager
+      if (uniqueUsers.size > 0) {
+        this.candidateManager.addBulk(Array.from(uniqueUsers));
+      }
+
+      const duration = ((Date.now() - startTime) / 1000).toFixed(2);
+      // eslint-disable-next-line no-console
+      console.log(`[realtime-hf] On-chain backfill complete: ${totalLogs} logs scanned, ${uniqueUsers.size} unique users discovered, duration=${duration}s`);
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('[realtime-hf] Subgraph seed failed:', err);
+      console.error('[realtime-hf] On-chain backfill failed:', err);
+      // Don't crash the service - continue with empty candidate set
     }
   }
 

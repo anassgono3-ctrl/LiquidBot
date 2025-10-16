@@ -143,11 +143,16 @@ export const config = {
   get multicall3Address() { return env.multicall3Address; },
   get aavePool() { return env.aavePool; },
   get executionHfThresholdBps() { return env.executionHfThresholdBps; },
-  get realtimeSeedIntervalSec() { return env.realtimeSeedIntervalSec; },
   get candidateMax() { return env.candidateMax; },
   get hysteresisBps() { return env.hysteresisBps; },
   get notifyOnlyWhenActionable() { return env.notifyOnlyWhenActionable; },
   get executionInflightLock() { return env.executionInflightLock; },
+  
+  // On-chain backfill configuration
+  get realtimeInitialBackfillEnabled() { return env.realtimeInitialBackfillEnabled; },
+  get realtimeInitialBackfillBlocks() { return env.realtimeInitialBackfillBlocks; },
+  get realtimeInitialBackfillMaxLogs() { return env.realtimeInitialBackfillMaxLogs; },
+  get realtimeInitialBackfillChunkBlocks() { return env.realtimeInitialBackfillChunkBlocks; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },

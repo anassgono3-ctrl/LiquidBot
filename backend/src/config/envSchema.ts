@@ -121,22 +121,21 @@ export const rawEnvSchema = z.object({
   MULTICALL3_ADDRESS: z.string().optional(),
   AAVE_POOL: z.string().optional(),
   EXECUTION_HF_THRESHOLD_BPS: z.string().optional(),
-  REALTIME_SEED_INTERVAL_SEC: z.string().optional(),
   CANDIDATE_MAX: z.string().optional(),
   HYSTERESIS_BPS: z.string().optional(),
   NOTIFY_ONLY_WHEN_ACTIONABLE: z.string().optional(),
-  EXECUTION_INFLIGHT_LOCK: z.string().optional()
+  EXECUTION_INFLIGHT_LOCK: z.string().optional(),
+
+  // On-chain backfill configuration
+  REALTIME_INITIAL_BACKFILL_ENABLED: z.string().optional(),
+  REALTIME_INITIAL_BACKFILL_BLOCKS: z.string().optional(),
+  REALTIME_INITIAL_BACKFILL_MAX_LOGS: z.string().optional(),
+  REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS: z.string().optional()
 });
 
 export const env = (() => {
   const parsed = rawEnvSchema.parse(process.env);
   const useMock = booleanString.parse(parsed.USE_MOCK_SUBGRAPH || 'false');
-
-  // Only enforce gateway secrets when not mocking AND not in test mode
-  if (!useMock && !isTest) {
-    if (!parsed.GRAPH_API_KEY) throw new Error('GRAPH_API_KEY required when USE_MOCK_SUBGRAPH=false');
-    if (!parsed.SUBGRAPH_DEPLOYMENT_ID) throw new Error('SUBGRAPH_DEPLOYMENT_ID required when USE_MOCK_SUBGRAPH=false');
-  }
 
   return {
     port: Number(parsed.PORT || 3000),
@@ -253,10 +252,15 @@ export const env = (() => {
     multicall3Address: parsed.MULTICALL3_ADDRESS || '0xca11bde05977b3631167028862be2a173976ca11',
     aavePool: parsed.AAVE_POOL || '0xA238Dd80C259a72e81d7e4664a9801593F98d1c5',
     executionHfThresholdBps: Number(parsed.EXECUTION_HF_THRESHOLD_BPS || 9800),
-    realtimeSeedIntervalSec: Number(parsed.REALTIME_SEED_INTERVAL_SEC || 45),
     candidateMax: Number(parsed.CANDIDATE_MAX || 300),
     hysteresisBps: Number(parsed.HYSTERESIS_BPS || 20),
     notifyOnlyWhenActionable: (parsed.NOTIFY_ONLY_WHEN_ACTIONABLE || 'true').toLowerCase() === 'true',
-    executionInflightLock: (parsed.EXECUTION_INFLIGHT_LOCK || 'true').toLowerCase() === 'true'
+    executionInflightLock: (parsed.EXECUTION_INFLIGHT_LOCK || 'true').toLowerCase() === 'true',
+
+    // On-chain backfill configuration
+    realtimeInitialBackfillEnabled: (parsed.REALTIME_INITIAL_BACKFILL_ENABLED || 'true').toLowerCase() === 'true',
+    realtimeInitialBackfillBlocks: Number(parsed.REALTIME_INITIAL_BACKFILL_BLOCKS || 50000),
+    realtimeInitialBackfillMaxLogs: Number(parsed.REALTIME_INITIAL_BACKFILL_MAX_LOGS || 20000),
+    realtimeInitialBackfillChunkBlocks: Number(parsed.REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS || 2000)
   };
 })();
