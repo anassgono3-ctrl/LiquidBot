@@ -23,9 +23,10 @@ Liquidations are costly, stressful, and often preventable for leveraged DeFi use
 
 ### Monitoring Logic
 - **Alert Threshold**: Health Factor < 1.10
-- **Critical Threshold**: Health Factor < 1.05 (trigger protection)
-- Batch subgraph polling (1k positions per cycle)
-- Live price deltas via oracles to reduce query load
+- **Critical Threshold**: Health Factor < 0.98 (trigger liquidation execution)
+- Real-time on-chain event monitoring via WebSocket
+- Initial backfill from historical Aave Pool events (50k blocks default)
+- Chainlink price feed integration for selective low-HF rechecks
 - Adjustable risk models per subscription tier
 
 ## Revenue Model
@@ -65,13 +66,13 @@ All contracts include NatSpec documentation and event emission for off-chain ind
 
 ### Backend / Infrastructure (✅ MVP Implemented)
 - Node.js 18+ (TypeScript), Express REST API with auth middleware
-- GraphQL client for Aave V3 Base subgraph
+- Real-time on-chain monitoring via WebSocket (Aave Pool events + Chainlink price feeds)
 - PostgreSQL (Prisma ORM for subscriptions & protection logs)
 - Redis (BullMQ queues, rate limiting)
 - Prometheus metrics endpoint + Grafana dashboard stubs
 - Docker + Kubernetes deployment configurations
 - WebSocket server for real-time risk alerts (HF < 1.1)
-- Services: SubgraphService, HealthCalculator, FlashLoanService, SubscriptionService
+- Services: RealTimeHFService, HealthCalculator, FlashLoanService, SubscriptionService, ExecutionService
 
 ## Performance Targets
 
@@ -103,7 +104,7 @@ The MVP implementation includes all core functionality for liquidation protectio
 - ✅ EmergencyPause circuit breaker
 
 **Backend Services (4/4)**
-- ✅ SubgraphService (liquidation calls, reserves, users with debt)
+- ✅ RealTimeHFService (on-chain monitoring with WebSocket)
 - ✅ HealthCalculator (HF formula with edge case handling)
 - ✅ FlashLoanService (simulation + validation)
 - ✅ SubscriptionService (Prisma-backed CRUD)
@@ -160,6 +161,66 @@ npm run build
 # Run tests
 npm test
 ```
+
+### Configuration
+
+The bot uses on-chain monitoring exclusively - no subgraph dependency. Configure the following environment variables:
+
+#### Real-Time Monitoring (Required)
+```bash
+# WebSocket RPC endpoint for real-time block and event monitoring
+WS_RPC_URL=wss://base-mainnet.g.alchemy.com/v2/your-api-key
+USE_REALTIME_HF=true
+
+# Aave Pool address (Base mainnet)
+AAVE_POOL=0xA238Dd80C259a72e81d7e4664a9801593F98d1c5
+
+# Multicall3 for batch health checks
+MULTICALL3_ADDRESS=0xca11bde05977b3631167028862be2a173976ca11
+```
+
+#### On-Chain Backfill (Candidate Discovery)
+```bash
+# Enable initial backfill from historical Aave Pool events
+REALTIME_INITIAL_BACKFILL_ENABLED=true  # default: true
+
+# Number of blocks to scan backward for initial candidates
+REALTIME_INITIAL_BACKFILL_BLOCKS=50000  # default: 50000
+
+# Maximum logs to process (safety cap)
+REALTIME_INITIAL_BACKFILL_MAX_LOGS=20000  # default: 20000
+
+# Chunk size for paginated getLogs queries
+REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS=2000  # default: 2000
+```
+
+#### Health Factor Thresholds
+```bash
+# Liquidation trigger threshold (basis points, 9800 = 0.98 HF)
+EXECUTION_HF_THRESHOLD_BPS=9800  # default: 9800
+
+# Maximum candidates to track simultaneously
+CANDIDATE_MAX=300  # default: 300
+
+# Hysteresis for repeat notifications (basis points)
+HYSTERESIS_BPS=20  # default: 20 (0.2% HF change required)
+```
+
+#### Optional: Chainlink Price Feeds
+```bash
+# Comma-separated token:address pairs for price update monitoring
+# Format: TOKEN:0x... 
+CHAINLINK_FEEDS=WETH:0x...,USDC:0x...
+```
+
+#### Optional: Flashblocks (Pending Transaction Monitoring)
+```bash
+USE_FLASHBLOCKS=true
+FLASHBLOCKS_WS_URL=wss://base.flashblocks.io
+FLASHBLOCKS_TICK_MS=250
+```
+
+**Note:** All previous subgraph-related configuration (`GRAPH_API_KEY`, `SUBGRAPH_URL`, etc.) has been removed. The bot now relies solely on on-chain signals for candidate discovery and health checks.
 
 ## Testing
 
@@ -725,7 +786,6 @@ This is a **standalone diagnostic script** useful for:
 
 - [Project Specification](./docs/SPEC.md) - Comprehensive project specification
 - [Architecture](./docs/ARCHITECTURE.md) - Detailed architecture documentation
-- [Subgraph Queries](./docs/SUBGRAPH_QUERIES.md) - Aave V3 Base subgraph queries
 - [Security](./docs/SECURITY.md) - Security practices and risk mitigation
 
 ## Roadmap
@@ -734,7 +794,7 @@ This is a **standalone diagnostic script** useful for:
 - [x] Requirements documented
 - [x] Revenue model defined
 - [x] Architecture outlined
-- [x] Corrected subgraph query validated
+- [x] On-chain monitoring implementation (WebSocket + backfill)
 - [x] KPIs & success metrics enumerated
 - [x] Security + compliance considerations included
 
