@@ -135,6 +135,7 @@ export const rawEnvSchema = z.object({
   REALTIME_INITIAL_BACKFILL_BLOCKS: z.string().optional(),
   REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS: z.string().optional(),
   REALTIME_INITIAL_BACKFILL_MAX_LOGS: z.string().optional(),
+  BACKFILL_RPC_URL: z.string().optional(),
 
   // Subgraph paging (when USE_SUBGRAPH=true)
   SUBGRAPH_PAGE_SIZE: z.string().optional(),
@@ -284,6 +285,7 @@ export const env = (() => {
     realtimeInitialBackfillBlocks: Number(parsed.REALTIME_INITIAL_BACKFILL_BLOCKS || 50000),
     realtimeInitialBackfillChunkBlocks: Number(parsed.REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS || 2000),
     realtimeInitialBackfillMaxLogs: Number(parsed.REALTIME_INITIAL_BACKFILL_MAX_LOGS || 20000),
+    backfillRpcUrl: parsed.BACKFILL_RPC_URL,
 
     // Subgraph paging (when USE_SUBGRAPH=true)
     subgraphPageSize: Math.max(50, Math.min(200, Number(parsed.SUBGRAPH_PAGE_SIZE || 100))),

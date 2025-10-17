@@ -60,7 +60,22 @@ REALTIME_INITIAL_BACKFILL_BLOCKS=50000
 REALTIME_INITIAL_BACKFILL_CHUNK_BLOCKS=2000
 # Max logs to scan (default: 20000)
 REALTIME_INITIAL_BACKFILL_MAX_LOGS=20000
+# Optional dedicated RPC URL for backfill
+# Recommended: use HTTP for backfill, WS for real-time
+# If not set, reuses the WS_RPC_URL provider
+BACKFILL_RPC_URL=https://mainnet.base.org
 ```
+
+**Provider Selection Logic:**
+- If `BACKFILL_RPC_URL` is set:
+  - `http://` or `https://` → creates JsonRpcProvider for backfill
+  - `ws://` or `wss://` → creates WebSocketProvider for backfill
+- If `BACKFILL_RPC_URL` is NOT set:
+  - Reuses the already-connected provider from `WS_RPC_URL`
+  - Avoids creating a second provider connection
+- **Recommended setup:**
+  - `WS_RPC_URL=wss://...` for real-time event listeners
+  - `BACKFILL_RPC_URL=https://...` for backfill (reduces connection overhead, avoids wss issues)
 
 ### Head-Check Paging/Rotation
 ```bash
@@ -81,6 +96,8 @@ SUBGRAPH_PAGE_SIZE=100
 **On-Chain Backfill**:
 - ✅ No external dependencies
 - ✅ Works with any RPC provider
+- ✅ Smart provider selection: HTTP for backfill, WS for real-time
+- ✅ Provider reuse: Can share existing WS connection if BACKFILL_RPC_URL not set
 - ⚠️ Startup time depends on block range
 - ⚠️ May miss users inactive during backfill window
 

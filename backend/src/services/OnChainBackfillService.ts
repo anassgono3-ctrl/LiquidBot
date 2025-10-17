@@ -1,7 +1,7 @@
 // OnChainBackfillService: Startup on-chain backfill for candidate discovery
 // Scans Aave Pool logs to seed initial candidate set without relying on subgraph
 
-import { JsonRpcProvider, Interface } from 'ethers';
+import { JsonRpcProvider, WebSocketProvider, Interface, Provider } from 'ethers';
 
 import { eventRegistry, extractUserFromAaveEvent } from '../abi/aaveV3PoolEvents.js';
 import { config } from '../config/index.js';
@@ -25,7 +25,8 @@ export interface BackfillResult {
  * Scans Aave Pool events (Borrow, Repay, Supply, Withdraw) to discover active users.
  */
 export class OnChainBackfillService {
-  private provider: JsonRpcProvider | null = null;
+  private provider: Provider | null = null;
+  private isInjectedProvider = false;
   private aavePoolInterface: Interface;
 
   constructor() {
@@ -33,10 +34,34 @@ export class OnChainBackfillService {
   }
 
   /**
-   * Initialize the service with a provider
+   * Create a provider based on URL scheme
    */
-  async initialize(rpcUrl: string): Promise<void> {
-    this.provider = new JsonRpcProvider(rpcUrl);
+  private createProviderFromUrl(rpcUrl: string): Provider {
+    const urlLower = rpcUrl.toLowerCase();
+    
+    if (urlLower.startsWith('ws://') || urlLower.startsWith('wss://')) {
+      return new WebSocketProvider(rpcUrl);
+    } else if (urlLower.startsWith('http://') || urlLower.startsWith('https://')) {
+      return new JsonRpcProvider(rpcUrl);
+    } else {
+      throw new Error(`Unsupported protocol in RPC URL: ${rpcUrl}`);
+    }
+  }
+
+  /**
+   * Initialize the service with a provider
+   * @param providerOrUrl - Either a Provider instance to reuse, or an RPC URL string
+   */
+  async initialize(providerOrUrl: Provider | string): Promise<void> {
+    if (typeof providerOrUrl === 'string') {
+      // Create provider from URL
+      this.provider = this.createProviderFromUrl(providerOrUrl);
+      this.isInjectedProvider = false;
+    } else {
+      // Use injected provider
+      this.provider = providerOrUrl;
+      this.isInjectedProvider = true;
+    }
     
     // Verify provider connection
     try {
@@ -148,8 +173,9 @@ export class OnChainBackfillService {
       const durationMs = Date.now() - startTime;
       const users = Array.from(userSet);
 
+      // Success summary
       // eslint-disable-next-line no-console
-      console.log(`[backfill] Complete: logs_scanned=${totalLogs} unique_users=${users.length} duration_ms=${durationMs}`);
+      console.log(`[backfill] Seeded ${users.length} candidates from on-chain backfill (logs=${totalLogs}, window=${startBlock}..${currentBlock}, durationMs=${durationMs})`);
 
       return {
         logsScanned: totalLogs,
@@ -185,6 +211,8 @@ export class OnChainBackfillService {
       throw new Error('Provider not initialized');
     }
 
+    let lastError: unknown;
+    
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const logs = await this.provider.getLogs({
@@ -199,8 +227,10 @@ export class OnChainBackfillService {
           data: log.data
         }));
       } catch (err) {
+        lastError = err;
         const errStr = String(err).toLowerCase();
         const isRateLimit = errStr.includes('-32005') || 
+                           errStr.includes('429') ||
                            errStr.includes('rate limit') || 
                            errStr.includes('too many requests');
         
@@ -210,17 +240,24 @@ export class OnChainBackfillService {
           const jitter = Math.random() * baseDelay * 0.3;
           const delayMs = Math.floor(baseDelay + jitter);
           
+          // Single warning per attempt series
           // eslint-disable-next-line no-console
-          console.log(`[backfill] Rate limit (attempt ${attempt + 1}/${maxRetries}), retrying in ${delayMs}ms`);
+          console.warn(`[backfill] provider unavailable, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
           await new Promise(resolve => setTimeout(resolve, delayMs));
           continue;
+        }
+        
+        // Final failure or non-rate-limit error
+        if (attempt === maxRetries - 1) {
+          // eslint-disable-next-line no-console
+          console.error(`[backfill] failed after ${maxRetries} attempts: ${err instanceof Error ? err.message : String(err)}`);
         }
         
         throw err;
       }
     }
 
-    return [];
+    throw lastError;
   }
 
   /**
@@ -248,13 +285,17 @@ export class OnChainBackfillService {
    * Clean up resources
    */
   async cleanup(): Promise<void> {
-    if (this.provider) {
+    // Only destroy provider if we created it (not injected)
+    if (this.provider && !this.isInjectedProvider) {
       try {
-        this.provider.destroy();
+        if (this.provider instanceof WebSocketProvider) {
+          await this.provider.destroy();
+        }
+        // JsonRpcProvider doesn't need explicit destroy in ethers v6
       } catch (err) {
         // Ignore cleanup errors
       }
-      this.provider = null;
     }
+    this.provider = null;
   }
 }
