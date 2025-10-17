@@ -379,6 +379,7 @@ export class SubgraphService {
    * @deprecated DISABLED - Bulk user queries are no longer supported.
    * Use getSingleUserWithDebt(userId) for on-demand single-user queries only.
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async getUsersWithDebt(_first = 100): Promise<User[]> {
     throw new Error('getUsersWithDebt is DISABLED - use getSingleUserWithDebt(userId) for on-demand queries');
   }
@@ -387,6 +388,7 @@ export class SubgraphService {
    * @deprecated DISABLED - Bulk health snapshots are no longer supported.
    * Use OnDemandHealthFactor service for per-user health factor queries.
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   async getUserHealthSnapshot(_limit = 500): Promise<User[]> {
     throw new Error('getUserHealthSnapshot is DISABLED - use OnDemandHealthFactor service for on-demand queries');
   }
@@ -434,12 +436,93 @@ export class SubgraphService {
 
   /**
    * Get users with borrowing activity for real-time candidate seeding.
-   * Alias for getUsersPage to support real-time HF service.
-   * @param limit Maximum number of users to fetch (clamped to 200)
+   * Supports paging up to candidateMax when USE_SUBGRAPH=true.
+   * @param limit Maximum number of users to fetch (respects candidateMax)
+   * @param enablePaging When true, fetches multiple pages up to limit
    * @returns Array of user data with reserve information
    */
-  async getUsersWithBorrowing(limit: number): Promise<User[]> {
-    return this.getUsersPage(limit);
+  async getUsersWithBorrowing(limit: number, enablePaging = true): Promise<User[]> {
+    if (!enablePaging) {
+      // Legacy behavior: single page, clamped to 200
+      return this.getUsersPage(limit);
+    }
+
+    // Paging support: fetch multiple pages up to limit
+    const pageSize = config.subgraphPageSize;
+    const totalToFetch = Math.min(limit, config.candidateMax);
+    
+    if (this.mock || this.degraded) {
+      return [];
+    }
+    this.ensureLive();
+
+    const allUsers: User[] = [];
+    let pagesFetched = 0;
+    let skip = 0;
+
+    // eslint-disable-next-line no-console
+    console.log(`[subgraph] Fetching users with paging: total=${totalToFetch} pageSize=${pageSize}`);
+
+    while (allUsers.length < totalToFetch) {
+      const remaining = totalToFetch - allUsers.length;
+      const currentPageSize = Math.min(pageSize, remaining);
+
+      try {
+        const users = await this.perform('usersPageWithSkip', async () => {
+          const query = gql`
+            query UsersPageWithSkip($first: Int!, $skip: Int!) {
+              users(first: $first, skip: $skip, where: { borrowedReservesCount_gt: 0 }) {
+                id
+                borrowedReservesCount
+                reserves {
+                  currentATokenBalance
+                  currentVariableDebt
+                  currentStableDebt
+                  reserve {
+                    id
+                    symbol
+                    name
+                    decimals
+                    reserveLiquidationThreshold
+                    usageAsCollateralEnabled
+                    price { priceInEth }
+                  }
+                }
+              }
+            }
+          `;
+          const data = await this.client!.request<{ users: unknown[] }>(query, { 
+            first: currentPageSize, 
+            skip 
+          });
+
+          return z.array(UserSchema).parse(data.users);
+        });
+
+        if (users.length === 0) {
+          // No more users available
+          break;
+        }
+
+        allUsers.push(...users);
+        pagesFetched++;
+        skip += users.length;
+
+        // If we got fewer users than requested, we've exhausted the subgraph
+        if (users.length < currentPageSize) {
+          break;
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[subgraph] getUsersWithBorrowing page ${pagesFetched + 1} failed:`, err);
+        break;
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[subgraph] seed_source=subgraph pages_fetched=${pagesFetched} total_candidates=${allUsers.length}`);
+
+    return allUsers;
   }
 
   /**

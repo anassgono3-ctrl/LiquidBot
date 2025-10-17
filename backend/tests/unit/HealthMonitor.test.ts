@@ -1,9 +1,8 @@
 // Unit tests for HealthMonitor
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 import { HealthMonitor } from '../../src/services/HealthMonitor.js';
 import { SubgraphService } from '../../src/services/SubgraphService.js';
-import type { User } from '../../src/types/index.js';
 
 describe('HealthMonitor', () => {
   let healthMonitor: HealthMonitor;

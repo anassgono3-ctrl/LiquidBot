@@ -49,21 +49,28 @@ app.use(rateLimiter);
 // Collect default metrics
 promClient.collectDefaultMetrics({ register: registry });
 
-// Single service instance
-const subgraphService = new SubgraphService();
+// Single service instance - only when USE_SUBGRAPH=true
+let subgraphService: SubgraphService | undefined;
+
+if (config.useSubgraph) {
+  subgraphService = new SubgraphService();
+  logger.info('[subgraph] Service enabled (USE_SUBGRAPH=true)');
+} else {
+  logger.info('[subgraph] Service disabled (USE_SUBGRAPH=false) - relying on on-chain discovery');
+}
 
 // Initialize opportunity and notification services
 const opportunityService = new OpportunityService();
 const notificationService = new NotificationService();
-const healthMonitor = new HealthMonitor(subgraphService);
+const healthMonitor = new HealthMonitor(subgraphService || SubgraphService.createMock());
 
 // Initialize execution scaffold
 const executionService = new ExecutionService();
 const riskManager = new RiskManager();
 
-// Initialize on-demand health factor service (only when not mocking)
+// Initialize on-demand health factor service (only when USE_SUBGRAPH=true and not mocking)
 let onDemandHealthFactor: OnDemandHealthFactor | undefined;
-if (!config.useMockSubgraph) {
+if (config.useSubgraph && !config.useMockSubgraph) {
   const { endpoint, needsHeader } = config.resolveSubgraphEndpoint();
   let headers: Record<string, string> | undefined;
   if (needsHeader && config.graphApiKey) {
@@ -76,9 +83,9 @@ if (!config.useMockSubgraph) {
   });
 }
 
-// Initialize at-risk scanner (only when enabled via config)
+// Initialize at-risk scanner (only when enabled via config and USE_SUBGRAPH=true)
 let atRiskScanner: AtRiskScanner | undefined;
-if (config.atRiskScanLimit > 0) {
+if (config.useSubgraph && config.atRiskScanLimit > 0 && subgraphService) {
   const healthCalculator = new HealthCalculator();
   atRiskScanner = new AtRiskScanner(
     subgraphService,
@@ -98,7 +105,7 @@ if (config.atRiskScanLimit > 0) {
     `notifyWarn=${config.atRiskNotifyWarn} notifyCritical=${config.atRiskNotifyCritical}`
   );
 } else {
-  logger.info('[at-risk-scanner] Disabled (AT_RISK_SCAN_LIMIT=0)');
+  logger.info('[at-risk-scanner] Disabled (requires USE_SUBGRAPH=true and AT_RISK_SCAN_LIMIT>0)');
 }
 
 // Initialize real-time HF service (only when enabled via config)
@@ -122,21 +129,22 @@ if (config.useRealtimeHF) {
       return;
     }
     
-    // Always resolve actionable opportunity (debt/collateral plan)
-    // This ensures we never notify or execute without a fully resolved plan
-    const actionablePlan = await executionService.prepareActionableOpportunity(userAddr, {
+    // Always resolve actionable opportunity with explicit skip reasons
+    const result = await executionService.prepareActionableOpportunityWithReason(userAddr, {
       healthFactor: event.healthFactor,
       blockNumber: event.blockNumber,
       triggerType: event.triggerType
     });
     
-    if (!actionablePlan) {
-      // Cannot resolve debt/collateral plan - log once per block and skip
-      // Reasons: no debt, no collateral, below PROFIT_MIN_USD, or resolve failure
-      logger.info(`[realtime-hf] skip notify (unresolved plan) user=${userAddr} block=${event.blockNumber}`);
+    if (!result.success) {
+      // Cannot resolve plan - log with explicit reason
+      const details = result.details ? ` details=${result.details}` : '';
+      logger.info(`[notify] skip user=${userAddr} reason=${result.skipReason}${details}`);
       skippedUnresolvedPlanTotal.inc();
       return;
     }
+    
+    const actionablePlan = result.plan;
     
     // Build enriched opportunity with resolved plan
     logger.info(`[realtime-hf] notify actionable user=${userAddr} debtAsset=${actionablePlan.debtAssetSymbol} collateral=${actionablePlan.collateralSymbol} debtToCover=$${actionablePlan.debtToCoverUsd.toFixed(2)} bonusBps=${Math.round(actionablePlan.liquidationBonusPct * 10000)}`);
@@ -207,7 +215,7 @@ const opportunityStats = {
 
 // Warmup probe
 async function warmup() {
-  if (config.useMockSubgraph) return;
+  if (!config.useSubgraph || config.useMockSubgraph || !subgraphService) return;
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const client = (subgraphService as any).client;
@@ -239,9 +247,15 @@ app.get("/health", (_req, res) => {
       uptimeSeconds: Math.floor(process.uptime()),
       version: "0.1.0"
     },
-    build: buildInfo,
-    subgraph: subgraphService.healthStatus()
+    build: buildInfo
   };
+  
+  // Add subgraph health only when enabled
+  if (config.useSubgraph && subgraphService) {
+    healthData.subgraph = subgraphService.healthStatus();
+  } else {
+    healthData.subgraph = { mode: 'disabled', enabled: false };
+  }
   
   // Add liquidation tracker stats if poller is active
   if (subgraphPoller) {
@@ -274,14 +288,14 @@ app.get("/health", (_req, res) => {
 });
 
 // Inject the singleton service
-app.use("/api/v1", authenticate, buildRoutes(subgraphService));
+app.use("/api/v1", authenticate, buildRoutes(subgraphService || SubgraphService.createMock()));
 
 // Initialize WebSocket server
 const { wss, broadcastLiquidationEvent, broadcastOpportunityEvent } = initWebSocketServer(httpServer);
 
 let subgraphPoller: SubgraphPollerHandle | null = null;
 
-if (!config.useMockSubgraph) {
+if (config.useSubgraph && !config.useMockSubgraph && subgraphService) {
   const resolved = config.resolveSubgraphEndpoint();
   logger.info(`Subgraph resolved endpoint authMode=${resolved.mode} header=${resolved.needsHeader} url=${config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
   
@@ -407,6 +421,8 @@ if (!config.useMockSubgraph) {
   // Note: Bulk health monitoring has been disabled
   // Health factors are now resolved on-demand per liquidation event
   logger.info('[health-monitor] Bulk health monitoring disabled - using on-demand resolution');
+} else {
+  logger.info('[subgraph-poller] Disabled (USE_SUBGRAPH=false or in mock mode)');
 }
 
 // Graceful shutdown handling
@@ -436,7 +452,13 @@ httpServer.listen(port, async () => {
   logger.info(`LiquidBot backend listening on port ${port}`);
   logger.info(`WebSocket server available at ws://localhost:${port}/ws`);
   logger.info(`Build info: commit=${buildInfo.commit} node=${buildInfo.node} started=${buildInfo.startedAt}`);
-  logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
+  
+  // Log subgraph status
+  if (config.useSubgraph) {
+    logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
+  } else {
+    logger.info('Subgraph: DISABLED (USE_SUBGRAPH=false) - using on-chain discovery only');
+  }
   
   // Start real-time HF service if enabled
   if (realtimeHFService) {

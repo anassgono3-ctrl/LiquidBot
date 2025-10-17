@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { CandidateManager } from '../../src/services/CandidateManager.js';
 
 describe('CandidateManager', () => {

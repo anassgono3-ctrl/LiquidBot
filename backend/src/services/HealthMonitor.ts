@@ -20,6 +20,7 @@ export interface HealthBreachDetection {
  * This class is kept for compatibility but all methods are no-ops.
  */
 export class HealthMonitor {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   constructor(_subgraphService: SubgraphService) {
     // No-op: bulk monitoring disabled
   }

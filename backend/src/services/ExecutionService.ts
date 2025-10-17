@@ -121,6 +121,7 @@ export class ExecutionService {
    */
   async prepareActionableOpportunity(
     userAddress: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     _options?: {
       collateralAsset?: string;
       healthFactor?: number;
@@ -232,6 +233,137 @@ export class ExecutionService {
       // eslint-disable-next-line no-console
       console.error('[execution] Failed to prepare actionable opportunity:', error instanceof Error ? error.message : error);
       return null;
+    }
+  }
+
+  /**
+   * Prepare actionable opportunity with explicit skip reason.
+   * Returns actionable plan or skip reason for better logging.
+   * @param userAddress The user address
+   * @param options Additional options
+   * @returns Success with plan or failure with explicit skip reason
+   */
+  async prepareActionableOpportunityWithReason(
+    userAddress: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    options?: {
+      collateralAsset?: string;
+      healthFactor?: number;
+      blockNumber?: number;
+      triggerType?: 'event' | 'head' | 'price';
+    }
+  ): Promise<{
+    success: true;
+    plan: {
+      debtAsset: string;
+      debtAssetSymbol: string;
+      totalDebt: bigint;
+      debtToCover: bigint;
+      debtToCoverUsd: number;
+      liquidationBonusPct: number;
+      collateralAsset: string;
+      collateralSymbol: string;
+    };
+  } | {
+    success: false;
+    skipReason: 'service_unavailable' | 'no_debt' | 'no_collateral' | 'below_min_usd' | 'resolve_failed';
+    details?: string;
+  }> {
+    // Validate that AaveDataService is available
+    if (!this.aaveDataService || !this.aaveDataService.isInitialized()) {
+      return { success: false, skipReason: 'service_unavailable', details: 'AaveDataService not initialized' };
+    }
+
+    try {
+      // Get user account data to check if liquidatable
+      const accountData = await this.aaveDataService.getUserAccountData(userAddress);
+      
+      // Check if user has any debt
+      if (accountData.totalDebtBase === 0n) {
+        return { success: false, skipReason: 'no_debt' };
+      }
+
+      // Get all reserves with user positions (debt or collateral)
+      const reserves = await this.aaveDataService.getAllUserReserves(userAddress);
+
+      // Separate debt and collateral reserves
+      const debtReserves = reserves.filter(r => r.totalDebt > 0n);
+      const collateralReserves = reserves.filter(r => r.aTokenBalance > 0n && r.usageAsCollateralEnabled);
+
+      if (debtReserves.length === 0) {
+        return { success: false, skipReason: 'no_debt' };
+      }
+
+      if (collateralReserves.length === 0) {
+        return { success: false, skipReason: 'no_collateral' };
+      }
+
+      // Select debt asset
+      let selectedDebt = null;
+      const preferredDebtAssets = config.liquidationDebtAssets;
+      
+      if (preferredDebtAssets.length > 0) {
+        for (const preferredAsset of preferredDebtAssets) {
+          const found = debtReserves.find(r => r.asset.toLowerCase() === preferredAsset.toLowerCase());
+          if (found) {
+            selectedDebt = found;
+            break;
+          }
+        }
+      }
+      
+      if (!selectedDebt) {
+        selectedDebt = debtReserves.reduce((max, r) => r.debtValueUsd > max.debtValueUsd ? r : max);
+      }
+
+      // Select collateral asset
+      const selectedCollateral = collateralReserves.reduce((max, r) => r.collateralValueUsd > max.collateralValueUsd ? r : max);
+
+      // Fetch liquidation bonus
+      const liquidationBonusPct = await this.aaveDataService.getLiquidationBonusPct(selectedCollateral.asset);
+
+      // Calculate debtToCover
+      const mode = config.closeFactorExecutionMode;
+      let debtToCover: bigint;
+      
+      if (mode === 'full') {
+        debtToCover = selectedDebt.totalDebt;
+      } else {
+        debtToCover = selectedDebt.totalDebt / 2n;
+      }
+
+      // Calculate USD value
+      const debtToCoverUsd = calculateUsdValue(debtToCover, selectedDebt.decimals, selectedDebt.priceRaw);
+
+      // Gate by PROFIT_MIN_USD
+      const profitMinUsd = config.profitMinUsd;
+      if (debtToCoverUsd < profitMinUsd) {
+        return { success: false, skipReason: 'below_min_usd', details: `${debtToCoverUsd.toFixed(2)} < ${profitMinUsd}` };
+      }
+
+      // Update metrics
+      realtimeLiquidationBonusBps.set(liquidationBonusPct * 10000);
+      realtimeDebtToCover.observe(debtToCoverUsd);
+
+      return {
+        success: true,
+        plan: {
+          debtAsset: selectedDebt.asset,
+          debtAssetSymbol: selectedDebt.symbol,
+          totalDebt: selectedDebt.totalDebt,
+          debtToCover,
+          debtToCoverUsd,
+          liquidationBonusPct,
+          collateralAsset: selectedCollateral.asset,
+          collateralSymbol: selectedCollateral.symbol
+        }
+      };
+    } catch (error) {
+      return { 
+        success: false, 
+        skipReason: 'resolve_failed', 
+        details: error instanceof Error ? error.message : String(error) 
+      };
     }
   }
 
