@@ -619,13 +619,27 @@ export class RealTimeHFService extends EventEmitter {
     }
 
     // Priority 2: On-chain backfill (default path when USE_SUBGRAPH=false)
-    if (config.realtimeInitialBackfillEnabled && config.wsRpcUrl) {
+    if (config.realtimeInitialBackfillEnabled) {
       try {
         // eslint-disable-next-line no-console
         console.log('[realtime-hf] Initial seeding from on-chain backfill...');
         
         this.backfillService = new OnChainBackfillService();
-        await this.backfillService.initialize(config.wsRpcUrl);
+        
+        // Provider selection logic
+        if (config.backfillRpcUrl) {
+          // Use dedicated backfill RPC URL if provided
+          // eslint-disable-next-line no-console
+          console.log(`[realtime-hf] Using dedicated backfill RPC: ${config.backfillRpcUrl.substring(0, 20)}...`);
+          await this.backfillService.initialize(config.backfillRpcUrl);
+        } else if (this.provider) {
+          // Reuse existing connected provider
+          // eslint-disable-next-line no-console
+          console.log('[realtime-hf] Reusing connected provider for backfill');
+          await this.backfillService.initialize(this.provider);
+        } else {
+          throw new Error('No provider available for backfill (BACKFILL_RPC_URL not set and no WS provider)');
+        }
         
         const result = await this.backfillService.backfill();
         

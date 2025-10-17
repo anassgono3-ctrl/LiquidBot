@@ -157,6 +157,7 @@ export const config = {
   get realtimeInitialBackfillBlocks() { return env.realtimeInitialBackfillBlocks; },
   get realtimeInitialBackfillChunkBlocks() { return env.realtimeInitialBackfillChunkBlocks; },
   get realtimeInitialBackfillMaxLogs() { return env.realtimeInitialBackfillMaxLogs; },
+  get backfillRpcUrl() { return env.backfillRpcUrl; },
 
   // Subgraph paging (when USE_SUBGRAPH=true)
   get subgraphPageSize() { return env.subgraphPageSize; },
