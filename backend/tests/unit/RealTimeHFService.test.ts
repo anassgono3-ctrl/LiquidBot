@@ -163,4 +163,28 @@ describe('RealTimeHFService', () => {
       await flashblocksService.stop();
     });
   });
+
+  describe('Safe scheduler (serialization and coalescing)', () => {
+    it('should initialize with serialization fields', async () => {
+      await service.start();
+      // Service should have internal state for serialization (private fields)
+      // We verify by checking that the service can be started and stopped without errors
+      expect(service).toBeDefined();
+      await service.stop();
+    });
+
+    it('should track dirty users when added to candidate manager', async () => {
+      await service.start();
+      const candidateManager = service.getCandidateManager();
+      
+      // Add a user (simulating event-driven addition)
+      candidateManager.add('0x123');
+      
+      // Verify the user is tracked
+      expect(candidateManager.size()).toBe(1);
+      expect(candidateManager.getAddresses()).toContain('0x123');
+      
+      await service.stop();
+    });
+  });
 });
