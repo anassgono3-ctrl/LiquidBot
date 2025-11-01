@@ -71,6 +71,9 @@ interface UserState {
   lastBlock: number;
 }
 
+// Health factor threshold for priority checking (always check users below this)
+const LOW_HEALTH_FACTOR_THRESHOLD = 1.1;
+
 export class RealTimeHFService extends EventEmitter {
   private provider: WebSocketProvider | JsonRpcProvider | null = null;
   private multicall3: Contract | null = null;
@@ -107,6 +110,15 @@ export class RealTimeHFService extends EventEmitter {
 
   // Head-check paging/rotation
   private headCheckRotatingIndex = 0;
+
+  // Serialization + coalescing for head-check runs
+  private scanningHead = false;
+  private latestRequestedHeadBlock: number | null = null;
+  private currentRunId: string | null = null;
+
+  // Dirty-first scheduling: users/reserves touched by recent events
+  private dirtyUsers = new Set<string>();
+  private dirtyReserves = new Set<string>();
 
   // Metrics
   private metrics = {
@@ -303,10 +315,7 @@ export class RealTimeHFService extends EventEmitter {
       this.provider.on('block', (blockNumber: number) => {
         if (this.isShuttingDown) return;
         try {
-          this.handleNewBlock(blockNumber).catch(err => {
-            // eslint-disable-next-line no-console
-            console.error('[realtime-hf] Error handling block:', err);
-          });
+          this.requestHeadCheck(blockNumber);
         } catch (err) {
           // eslint-disable-next-line no-console
           console.error('[realtime-hf] Error in block listener:', err);
@@ -402,7 +411,79 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Request a head-check run. Coalesces multiple block notifications to the newest block.
+   * If a scan is already running, just updates latestRequestedHeadBlock and returns.
+   */
+  private requestHeadCheck(blockNumber: number): void {
+    // Update to newest block
+    if (this.latestRequestedHeadBlock === null || blockNumber > this.latestRequestedHeadBlock) {
+      this.latestRequestedHeadBlock = blockNumber;
+    }
+
+    // If already scanning, just update the block and return (coalesce)
+    if (this.scanningHead) {
+      return;
+    }
+
+    // Start the head-check loop
+    this.runHeadCheckLoop().catch(err => {
+      // eslint-disable-next-line no-console
+      console.error('[realtime-hf] Error in head-check loop:', err);
+    });
+  }
+
+  /**
+   * Serialized head-check loop: consumes newest block, runs performHeadCheck, repeats until no more blocks
+   */
+  private async runHeadCheckLoop(): Promise<void> {
+    this.scanningHead = true;
+
+    try {
+      while (this.latestRequestedHeadBlock !== null) {
+        const runBlock = this.latestRequestedHeadBlock;
+        this.latestRequestedHeadBlock = null;
+
+        // Generate unique run ID
+        this.currentRunId = `${Date.now()}-${runBlock}`;
+
+        // Perform the head check
+        await this.performHeadCheck(runBlock, this.currentRunId);
+      }
+    } finally {
+      this.scanningHead = false;
+      this.currentRunId = null;
+    }
+  }
+
+  /**
+   * Perform a single head-check run for the given block
+   */
+  private async performHeadCheck(blockNumber: number, runId: string): Promise<void> {
+    // eslint-disable-next-line no-console
+    console.log(`[realtime-hf] New block ${blockNumber} (run=${runId})`);
+
+    this.metrics.blocksReceived++;
+    realtimeBlocksReceived.inc();
+
+    // Clear per-block tracking when entering new block
+    if (this.currentBlockNumber !== blockNumber) {
+      this.seenUsersThisBlock.clear();
+      this.currentBlockNumber = blockNumber;
+      this.lastPriceCheckBlock = null;
+      this.lastReserveCheckBlock = null;
+    }
+
+    // Perform batch check on all candidates
+    await this.checkAllCandidates('head');
+
+    // Clear dirty sets after successful head-check
+    this.dirtyUsers.clear();
+    this.dirtyReserves.clear();
+  }
+
+  /**
    * Handle new block notification - perform canonical recheck
+   * @deprecated Use requestHeadCheck() instead. Kept for reference or future use.
    */
   private async handleNewBlock(blockNumber: number): Promise<void> {
     // eslint-disable-next-line no-console
@@ -500,12 +581,18 @@ export class RealTimeHFService extends EventEmitter {
             // Add/touch candidate
             this.candidateManager.add(user);
             
+            // Track as dirty for next head-check run
+            this.dirtyUsers.add(user.toLowerCase());
+            
             // Perform targeted check for this specific user
             await this.checkCandidate(user, 'event');
           }
         } else {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
+            // Track as dirty reserve
+            this.dirtyReserves.add(reserve.toLowerCase());
+            
             // Per-block gating: at most one low-HF recheck per block from reserve updates (Goal 5)
             if (this.lastReserveCheckBlock === blockNumber) {
               // eslint-disable-next-line no-console
@@ -528,6 +615,9 @@ export class RealTimeHFService extends EventEmitter {
           
           // Add/touch candidate
           this.candidateManager.add(userAddress);
+          
+          // Track as dirty for next head-check run
+          this.dirtyUsers.add(userAddress.toLowerCase());
           
           // Perform targeted check
           await this.checkCandidate(userAddress, 'event');
@@ -666,7 +756,7 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Check all candidates via Multicall3 batch with paging/rotation support
+   * Check all candidates via Multicall3 batch with paging/rotation support and dirty-first scheduling
    */
   private async checkAllCandidates(triggerType: 'event' | 'head' | 'price'): Promise<void> {
     const allAddresses = this.candidateManager.getAddresses();
@@ -679,11 +769,19 @@ export class RealTimeHFService extends EventEmitter {
       // Check all candidates every head
       addressesToCheck = allAddresses;
     } else {
-      // Paged strategy: rotate through candidates
+      // Paged strategy with dirty-first scheduling
       const pageSize = config.headCheckPageSize;
       const totalCandidates = allAddresses.length;
       
-      // Get current page window
+      // 1. Dirty-first: users touched by recent events
+      const dirtyFirst: string[] = [];
+      for (const addr of allAddresses) {
+        if (this.dirtyUsers.has(addr.toLowerCase())) {
+          dirtyFirst.push(addr);
+        }
+      }
+      
+      // 2. Get current page window
       const startIdx = this.headCheckRotatingIndex % totalCandidates;
       const endIdx = Math.min(startIdx + pageSize, totalCandidates);
       const windowAddresses = allAddresses.slice(startIdx, endIdx);
@@ -695,20 +793,49 @@ export class RealTimeHFService extends EventEmitter {
         windowAddresses.push(...wrapAddresses);
       }
       
-      // Always include low-HF candidates (<1.1) even if outside current page
+      // 3. Always include low-HF candidates even if outside current page
       const candidates = this.candidateManager.getAll();
       const lowHfAddresses = candidates
-        .filter(c => c.lastHF !== null && c.lastHF < 1.1 && !windowAddresses.includes(c.address))
+        .filter(c => c.lastHF !== null && c.lastHF < LOW_HEALTH_FACTOR_THRESHOLD)
         .map(c => c.address);
       
-      addressesToCheck = [...windowAddresses, ...lowHfAddresses];
+      // 4. Deduplicate while preserving dirty-first priority
+      const seen = new Set<string>();
+      addressesToCheck = [];
+      
+      // Add dirty users first
+      for (const addr of dirtyFirst) {
+        const lowerAddr = addr.toLowerCase();
+        if (!seen.has(lowerAddr)) {
+          seen.add(lowerAddr);
+          addressesToCheck.push(addr);
+        }
+      }
+      
+      // Add window addresses
+      for (const addr of windowAddresses) {
+        const lowerAddr = addr.toLowerCase();
+        if (!seen.has(lowerAddr)) {
+          seen.add(lowerAddr);
+          addressesToCheck.push(addr);
+        }
+      }
+      
+      // Add low-HF addresses
+      for (const addr of lowHfAddresses) {
+        const lowerAddr = addr.toLowerCase();
+        if (!seen.has(lowerAddr)) {
+          seen.add(lowerAddr);
+          addressesToCheck.push(addr);
+        }
+      }
       
       // Update rotating index for next iteration
       this.headCheckRotatingIndex = (this.headCheckRotatingIndex + pageSize) % totalCandidates;
       
       // Log paging info
       // eslint-disable-next-line no-console
-      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} lowHf=${lowHfAddresses.length}`);
+      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} dirty=${dirtyFirst.length} lowHf=${lowHfAddresses.length}`);
     }
 
     await this.batchCheckCandidates(addressesToCheck, triggerType);
@@ -720,7 +847,7 @@ export class RealTimeHFService extends EventEmitter {
   private async checkLowHFCandidates(triggerType: 'event' | 'price'): Promise<void> {
     const candidates = this.candidateManager.getAll();
     const lowHF = candidates
-      .filter(c => c.lastHF !== null && c.lastHF < 1.1)
+      .filter(c => c.lastHF !== null && c.lastHF < LOW_HEALTH_FACTOR_THRESHOLD)
       .map(c => c.address);
 
     if (lowHF.length === 0) return;
@@ -822,13 +949,13 @@ export class RealTimeHFService extends EventEmitter {
               const jitter = Math.random() * baseDelay * 0.3; // ±30% jitter
               const delayMs = Math.floor(baseDelay + jitter);
               // eslint-disable-next-line no-console
-              console.log(`[realtime-hf] Rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
+              console.log(`[realtime-hf] run=${this.currentRunId} block=${this.currentBlockNumber} Rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
               await new Promise(resolve => setTimeout(resolve, delayMs));
               continue;
             } else {
               // Max retries reached - defer to next tick
               // eslint-disable-next-line no-console
-              console.warn('[realtime-hf] Rate limit persists after retries - deferring chunk to next tick');
+              console.warn(`[realtime-hf] run=${this.currentRunId} block=${this.currentBlockNumber} Rate limit persists after retries - deferring chunk to next tick`);
               return calls.map(() => ({ success: false, returnData: '0x' }));
             }
           } else {
@@ -843,7 +970,7 @@ export class RealTimeHFService extends EventEmitter {
 
     // Split into chunks for large batches
     // eslint-disable-next-line no-console
-    console.log(`[realtime-hf] Chunking ${calls.length} calls into batches of ${effectiveChunkSize}`);
+    console.log(`[realtime-hf] run=${this.currentRunId} block=${this.currentBlockNumber} Chunking ${calls.length} calls into batches of ${effectiveChunkSize}`);
     
     const allResults: Array<{ success: boolean; returnData: string }> = [];
     for (let i = 0; i < calls.length; i += effectiveChunkSize) {
@@ -859,7 +986,7 @@ export class RealTimeHFService extends EventEmitter {
           allResults.push(...results);
           this.clearRateLimitTracking();
           // eslint-disable-next-line no-console
-          console.log(`[realtime-hf] Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls)`);
+          console.log(`[realtime-hf] run=${this.currentRunId} block=${this.currentBlockNumber} Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls)`);
           chunkSuccess = true;
           break;
         } catch (err) {
@@ -872,14 +999,14 @@ export class RealTimeHFService extends EventEmitter {
               const jitter = Math.random() * baseDelay * 0.3;
               const delayMs = Math.floor(baseDelay + jitter);
               // eslint-disable-next-line no-console
-              console.log(`[realtime-hf] Chunk ${chunkNum} rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
+              console.log(`[realtime-hf] run=${this.currentRunId} block=${this.currentBlockNumber} Chunk ${chunkNum} rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
               await new Promise(resolve => setTimeout(resolve, delayMs));
               continue;
             }
           } else {
             // Non rate-limit error
             // eslint-disable-next-line no-console
-            console.error(`[realtime-hf] Multicall3 chunk ${chunkNum} failed:`, err);
+            console.error(`[realtime-hf] run=${this.currentRunId} block=${this.currentBlockNumber} Multicall3 chunk ${chunkNum} failed:`, err);
           }
           break;
         }
@@ -888,7 +1015,7 @@ export class RealTimeHFService extends EventEmitter {
       // If chunk failed after retries, return failure results to avoid crashing
       if (!chunkSuccess) {
         // eslint-disable-next-line no-console
-        console.warn(`[realtime-hf] Chunk ${chunkNum} failed - deferring to next tick`);
+        console.warn(`[realtime-hf] run=${this.currentRunId} block=${this.currentBlockNumber} Chunk ${chunkNum} failed - deferring to next tick`);
         const failedResults = chunk.map(() => ({ success: false, returnData: '0x' }));
         allResults.push(...failedResults);
       }
