@@ -71,6 +71,9 @@ interface UserState {
   lastBlock: number;
 }
 
+// Health factor threshold for priority checking (always check users below this)
+const LOW_HEALTH_FACTOR_THRESHOLD = 1.1;
+
 export class RealTimeHFService extends EventEmitter {
   private provider: WebSocketProvider | JsonRpcProvider | null = null;
   private multicall3: Contract | null = null;
@@ -480,7 +483,7 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Handle new block notification - perform canonical recheck
-   * (Kept for reference or future use, but not invoked by block listener anymore)
+   * @deprecated Use requestHeadCheck() instead. Kept for reference or future use.
    */
   private async handleNewBlock(blockNumber: number): Promise<void> {
     // eslint-disable-next-line no-console
@@ -790,10 +793,10 @@ export class RealTimeHFService extends EventEmitter {
         windowAddresses.push(...wrapAddresses);
       }
       
-      // 3. Always include low-HF candidates (<1.1) even if outside current page
+      // 3. Always include low-HF candidates even if outside current page
       const candidates = this.candidateManager.getAll();
       const lowHfAddresses = candidates
-        .filter(c => c.lastHF !== null && c.lastHF < 1.1)
+        .filter(c => c.lastHF !== null && c.lastHF < LOW_HEALTH_FACTOR_THRESHOLD)
         .map(c => c.address);
       
       // 4. Deduplicate while preserving dirty-first priority
@@ -844,7 +847,7 @@ export class RealTimeHFService extends EventEmitter {
   private async checkLowHFCandidates(triggerType: 'event' | 'price'): Promise<void> {
     const candidates = this.candidateManager.getAll();
     const lowHF = candidates
-      .filter(c => c.lastHF !== null && c.lastHF < 1.1)
+      .filter(c => c.lastHF !== null && c.lastHF < LOW_HEALTH_FACTOR_THRESHOLD)
       .map(c => c.address);
 
     if (lowHF.length === 0) return;
