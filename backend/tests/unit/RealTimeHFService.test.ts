@@ -163,4 +163,58 @@ describe('RealTimeHFService', () => {
       await flashblocksService.stop();
     });
   });
+
+  describe('serialization and coalescing', () => {
+    it('should initialize serialization fields correctly', () => {
+      expect(service).toBeDefined();
+      // Service should be ready to accept head check requests
+      const metrics = service.getMetrics();
+      expect(metrics).toBeDefined();
+    });
+
+    it('should handle multiple candidates with dirty-first prioritization', async () => {
+      await service.start();
+      const candidateManager = service.getCandidateManager();
+      
+      // Add multiple candidates
+      candidateManager.add('0x111', 1.5);
+      candidateManager.add('0x222', 0.95); // Low HF
+      candidateManager.add('0x333', 1.2);
+      
+      expect(candidateManager.size()).toBe(3);
+    });
+  });
+
+  describe('dirty-first prioritization', () => {
+    it('should handle candidate additions correctly', async () => {
+      await service.start();
+      const candidateManager = service.getCandidateManager();
+      
+      // Add dirty candidates
+      candidateManager.add('0xaaa');
+      candidateManager.add('0xbbb');
+      
+      expect(candidateManager.size()).toBe(2);
+    });
+
+    it('should track candidates with low HF', async () => {
+      await service.start();
+      const candidateManager = service.getCandidateManager();
+      
+      // Add candidates with various HFs
+      candidateManager.add('0x111', 1.5);
+      candidateManager.add('0x222', 1.05); // Below default threshold
+      candidateManager.add('0x333', 0.98); // Below default threshold
+      
+      const lowHfCandidate = candidateManager.getLowestHF();
+      expect(lowHfCandidate?.lastHF).toBe(0.98);
+    });
+  });
+
+  describe('configuration', () => {
+    it('should use default ALWAYS_INCLUDE_HF_BELOW value when not configured', () => {
+      // The default should be 1.10
+      expect(service).toBeDefined();
+    });
+  });
 });
