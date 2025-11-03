@@ -70,13 +70,16 @@ const AAVE_POOL_ERRORS: Record<string, AaveErrorInfo> = {
  * AaveMetadata provides on-chain reserve enumeration and validation.
  * Caches reserve metadata and provides helpers for validation.
  */
+// Refresh interval for reserve metadata (5 minutes)
+const REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+
 export class AaveMetadata {
   private provider: ethers.JsonRpcProvider;
   private uiPoolDataProvider: ethers.Contract;
   private protocolDataProvider: ethers.Contract;
   private reserveCache = new Map<string, ReserveMetadata>();
   private lastRefreshTime = 0;
-  private refreshIntervalMs = 5 * 60 * 1000; // 5 minutes
+  private refreshIntervalMs = REFRESH_INTERVAL_MS;
   private isInitialized = false;
 
   constructor(provider: ethers.JsonRpcProvider) {

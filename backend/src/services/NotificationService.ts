@@ -85,6 +85,13 @@ export class NotificationService {
   }
 
   /**
+   * Check if a symbol is invalid (missing or placeholder)
+   */
+  private isInvalidSymbol(symbol: string | null | undefined): boolean {
+    return !symbol || symbol === 'UNKNOWN' || symbol === 'N/A';
+  }
+
+  /**
    * Validate that an opportunity has all required data to be actionable
    * Returns validation result with reason if invalid
    */
@@ -115,7 +122,7 @@ export class NotificationService {
     const debtSymbol = opportunity.principalReserve.symbol;
     const collateralSymbol = opportunity.collateralReserve.symbol;
 
-    if (!debtSymbol || debtSymbol === 'UNKNOWN' || debtSymbol === 'N/A') {
+    if (this.isInvalidSymbol(debtSymbol)) {
       return {
         valid: false,
         reason: 'missing_symbol',
@@ -123,7 +130,7 @@ export class NotificationService {
       };
     }
 
-    if (!collateralSymbol || collateralSymbol === 'UNKNOWN' || collateralSymbol === 'N/A') {
+    if (this.isInvalidSymbol(collateralSymbol)) {
       return {
         valid: false,
         reason: 'missing_symbol',
