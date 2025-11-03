@@ -165,6 +165,11 @@ export const config = {
   // Head-check paging/rotation
   get headCheckPageStrategy() { return env.headCheckPageStrategy; },
   get headCheckPageSize() { return env.headCheckPageSize; },
+  get alwaysIncludeHfBelow() { return env.alwaysIncludeHfBelow; },
+
+  // Optional secondary RPC for head-check fallback
+  get secondaryHeadRpcUrl() { return env.secondaryHeadRpcUrl; },
+  get headCheckHedgeMs() { return env.headCheckHedgeMs; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },

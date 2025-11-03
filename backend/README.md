@@ -83,6 +83,20 @@ BACKFILL_RPC_URL=https://mainnet.base.org
 HEAD_CHECK_PAGE_STRATEGY=paged
 # Candidates per head cycle (default: 250)
 HEAD_CHECK_PAGE_SIZE=250
+# Always include candidates below this HF threshold (default: 1.10)
+ALWAYS_INCLUDE_HF_BELOW=1.10
+```
+
+### Optional Dual RPC Fallback
+```bash
+# Optional secondary HTTP RPC endpoint for head-check fallback
+# Useful for reducing chunk failures under rate limits
+SECONDARY_HEAD_RPC_URL=https://backup-rpc.example.com
+
+# Optional hedge window in milliseconds for dirty-first chunks
+# When set, fire requests on both primary and secondary, take first result
+# Keep narrow (250-300ms) to avoid doubling traffic. Default: disabled
+HEAD_CHECK_HEDGE_MS=300
 ```
 
 ### Subgraph Paging (when USE_SUBGRAPH=true)

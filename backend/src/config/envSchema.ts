@@ -142,7 +142,16 @@ export const rawEnvSchema = z.object({
 
   // Head-check paging/rotation
   HEAD_CHECK_PAGE_STRATEGY: z.string().optional(),
-  HEAD_CHECK_PAGE_SIZE: z.string().optional()
+  HEAD_CHECK_PAGE_SIZE: z.string().optional(),
+
+  // Always-include low-HF threshold for head checks
+  ALWAYS_INCLUDE_HF_BELOW: z.string().optional(),
+
+  // Optional secondary RPC for head-check fallback
+  SECONDARY_HEAD_RPC_URL: z.string().optional(),
+
+  // Optional hedge window for dirty-first chunks (milliseconds)
+  HEAD_CHECK_HEDGE_MS: z.string().optional()
 });
 
 export const env = (() => {
@@ -292,6 +301,15 @@ export const env = (() => {
 
     // Head-check paging/rotation
     headCheckPageStrategy: (parsed.HEAD_CHECK_PAGE_STRATEGY || 'paged') as 'all' | 'paged',
-    headCheckPageSize: Number(parsed.HEAD_CHECK_PAGE_SIZE || 250)
+    headCheckPageSize: Number(parsed.HEAD_CHECK_PAGE_SIZE || 250),
+
+    // Always-include low-HF threshold (default 1.10)
+    alwaysIncludeHfBelow: Number(parsed.ALWAYS_INCLUDE_HF_BELOW || 1.10),
+
+    // Optional secondary RPC for head-check fallback
+    secondaryHeadRpcUrl: parsed.SECONDARY_HEAD_RPC_URL,
+
+    // Optional hedge window for dirty-first chunks (default: undefined/disabled)
+    headCheckHedgeMs: parsed.HEAD_CHECK_HEDGE_MS ? Number(parsed.HEAD_CHECK_HEDGE_MS) : undefined
   };
 })();
