@@ -497,10 +497,11 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Perform a single head check for a specific block.
+   * Per-run blockTag consistent reads: pass blockTag to all static calls
    */
   private async performHeadCheck(blockNumber: number, runId: string): Promise<void> {
     // eslint-disable-next-line no-console
-    console.log(`[realtime-hf] Starting head check run=${runId} block=${blockNumber}`);
+    console.log(`[realtime-hf] Starting head check run=${runId} block=${blockNumber} (blockTag=${blockNumber})`);
 
     // Clear per-block tracking for this block
     if (this.currentBlockNumber !== blockNumber) {
@@ -510,8 +511,8 @@ export class RealTimeHFService extends EventEmitter {
       this.lastReserveCheckBlock = null;
     }
 
-    // Perform batch check on all candidates
-    await this.checkAllCandidates('head');
+    // Perform batch check on all candidates with blockTag
+    await this.checkAllCandidates('head', blockNumber);
 
     // On success, clear dirty sets (users have been checked)
     this.dirtyUsers.clear();
@@ -770,8 +771,10 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Check all candidates via Multicall3 batch with paging/rotation support and dirty-first prioritization
+   * @param triggerType Type of trigger
+   * @param blockTag Optional blockTag for consistent reads
    */
-  private async checkAllCandidates(triggerType: 'event' | 'head' | 'price'): Promise<void> {
+  private async checkAllCandidates(triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<void> {
     const allAddresses = this.candidateManager.getAddresses();
     if (allAddresses.length === 0) return;
 
@@ -842,13 +845,13 @@ export class RealTimeHFService extends EventEmitter {
       console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} dirty=${dirtyFirst.length} lowHf=${lowHfAddresses.length}`);
     }
 
-    await this.batchCheckCandidates(addressesToCheck, triggerType);
+    await this.batchCheckCandidates(addressesToCheck, triggerType, blockTag);
   }
 
   /**
    * Check candidates with low HF (priority for price or event trigger)
    */
-  private async checkLowHFCandidates(triggerType: 'event' | 'price'): Promise<void> {
+  private async checkLowHFCandidates(triggerType: 'event' | 'price', blockTag?: number): Promise<void> {
     const candidates = this.candidateManager.getAll();
     const lowHF = candidates
       .filter(c => c.lastHF !== null && c.lastHF < 1.1)
@@ -856,14 +859,14 @@ export class RealTimeHFService extends EventEmitter {
 
     if (lowHF.length === 0) return;
 
-    await this.batchCheckCandidates(lowHF, triggerType);
+    await this.batchCheckCandidates(lowHF, triggerType, blockTag);
   }
 
   /**
    * Check a single candidate
    */
-  private async checkCandidate(address: string, triggerType: 'event' | 'head' | 'price'): Promise<void> {
-    await this.batchCheckCandidates([address], triggerType);
+  private async checkCandidate(address: string, triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<void> {
+    await this.batchCheckCandidates([address], triggerType, blockTag);
   }
 
   /**
@@ -931,10 +934,14 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Perform read-only Multicall3 aggregate3 call with automatic chunking,
    * rate-limit detection, jittered backoff retry, and optional secondary fallback (Goals 4 & 5)
+   * @param calls Array of multicall calls
+   * @param chunkSize Optional chunk size override
+   * @param blockTag Optional blockTag for consistent reads
    */
   private async multicallAggregate3ReadOnly(
     calls: Array<{ target: string; allowFailure: boolean; callData: string }>,
-    chunkSize?: number
+    chunkSize?: number,
+    blockTag?: number
   ): Promise<Array<{ success: boolean; returnData: string }>> {
     if (!this.multicall3 || !this.provider) {
       throw new Error('[realtime-hf] Multicall3 or provider not initialized');
@@ -945,12 +952,15 @@ export class RealTimeHFService extends EventEmitter {
     
     // Log prefix for unambiguous run tracking (Goal 4)
     const logPrefix = this.getLogPrefix();
+    
+    // Prepare overrides with blockTag if specified
+    const overrides = blockTag ? { blockTag } : {};
 
     // If calls fit in single batch, execute with retry
     if (calls.length <= effectiveChunkSize) {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const results = await this.multicall3.aggregate3.staticCall(calls);
+          const results = await this.multicall3.aggregate3.staticCall(calls, overrides);
           this.clearRateLimitTracking();
           return results;
         } catch (err) {
@@ -963,7 +973,7 @@ export class RealTimeHFService extends EventEmitter {
                 try {
                   // eslint-disable-next-line no-console
                   console.log(`${logPrefix} Rate limit on primary - trying secondary provider`);
-                  const results = await this.secondaryMulticall3.aggregate3.staticCall(calls);
+                  const results = await this.secondaryMulticall3.aggregate3.staticCall(calls, overrides);
                   this.clearRateLimitTracking();
                   return results;
                 } catch (secondaryErr) {
@@ -1010,7 +1020,7 @@ export class RealTimeHFService extends EventEmitter {
       let chunkSuccess = false;
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const results = await this.multicall3.aggregate3.staticCall(chunk);
+          const results = await this.multicall3.aggregate3.staticCall(chunk, overrides);
           allResults.push(...results);
           this.clearRateLimitTracking();
           // eslint-disable-next-line no-console
@@ -1027,7 +1037,7 @@ export class RealTimeHFService extends EventEmitter {
                 try {
                   // eslint-disable-next-line no-console
                   console.log(`${logPrefix} Chunk ${chunkNum} rate limit on primary - trying secondary`);
-                  const results = await this.secondaryMulticall3.aggregate3.staticCall(chunk);
+                  const results = await this.secondaryMulticall3.aggregate3.staticCall(chunk, overrides);
                   allResults.push(...results);
                   this.clearRateLimitTracking();
                   // eslint-disable-next-line no-console
@@ -1148,7 +1158,7 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Batch check multiple candidates using Multicall3
    */
-  private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price'): Promise<void> {
+  private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<void> {
     if (!this.multicall3 || !this.provider || addresses.length === 0) return;
 
     try {
@@ -1159,8 +1169,8 @@ export class RealTimeHFService extends EventEmitter {
         callData: aavePoolInterface.encodeFunctionData('getUserAccountData', [addr])
       }));
 
-      const results = await this.multicallAggregate3ReadOnly(calls);
-      const blockNumber = await this.provider.getBlockNumber();
+      const results = await this.multicallAggregate3ReadOnly(calls, undefined, blockTag);
+      const blockNumber = blockTag || await this.provider.getBlockNumber();
       let minHF: number | null = null;
 
       for (let i = 0; i < results.length; i++) {

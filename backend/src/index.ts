@@ -68,6 +68,26 @@ const healthMonitor = new HealthMonitor(subgraphService || SubgraphService.creat
 const executionService = new ExecutionService();
 const riskManager = new RiskManager();
 
+// Initialize AaveMetadata if RPC is configured (async initialization deferred)
+// Use async IIFE to initialize AaveMetadata
+(async () => {
+  // Check if we have an RPC URL configured for execution
+  const rpcUrl = process.env.RPC_URL;
+  if (rpcUrl) {
+    try {
+      const { ethers } = await import('ethers');
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
+      const { AaveMetadata } = await import('./aave/AaveMetadata.js');
+      const metadata = new AaveMetadata(provider);
+      await metadata.initialize();
+      executionService.setAaveMetadata(metadata);
+      logger.info(`[aave-metadata] Initialized with ${metadata.getReserveCount()} reserves`);
+    } catch (error) {
+      logger.error('[aave-metadata] Failed to initialize:', error);
+    }
+  }
+})().catch(err => logger.error('[aave-metadata] Initialization error:', err));
+
 // Initialize on-demand health factor service (only when USE_SUBGRAPH=true and not mocking)
 let onDemandHealthFactor: OnDemandHealthFactor | undefined;
 if (config.useSubgraph && !config.useMockSubgraph) {
@@ -452,6 +472,16 @@ httpServer.listen(port, async () => {
   logger.info(`LiquidBot backend listening on port ${port}`);
   logger.info(`WebSocket server available at ws://localhost:${port}/ws`);
   logger.info(`Build info: commit=${buildInfo.commit} node=${buildInfo.node} started=${buildInfo.startedAt}`);
+  
+  // Log critical configuration at startup
+  logger.info(`[config] NOTIFY_ONLY_WHEN_ACTIONABLE=${config.notifyOnlyWhenActionable}`);
+  logger.info(`[config] ALWAYS_INCLUDE_HF_BELOW=${config.alwaysIncludeHfBelow}`);
+  logger.info(`[config] PROFIT_MIN_USD=${config.profitMinUsd}`);
+  logger.info(`[config] EXECUTION_HF_THRESHOLD_BPS=${config.executionHfThresholdBps}`);
+  if (config.secondaryHeadRpcUrl) {
+    logger.info(`[config] SECONDARY_HEAD_RPC_URL configured for fallback`);
+  }
+  // AaveMetadata info is logged during initialization above
   
   // Log subgraph status
   if (config.useSubgraph) {
