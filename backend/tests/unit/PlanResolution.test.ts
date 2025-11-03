@@ -331,14 +331,14 @@ describe('Liquidation Plan Resolution', () => {
       expect(result?.debtToCoverUsd).toBe(500); // $500
     });
 
-    it('should calculate debtToCover in full mode', async () => {
+    it('should calculate debtToCover using HF-based close factor (100% when HF < 0.95)', async () => {
       const mockAccountData = {
         totalCollateralBase: 2000000000n,
         totalDebtBase: 1000000000n,
         availableBorrowsBase: 0n,
         currentLiquidationThreshold: 8500n,
         ltv: 8000n,
-        healthFactor: ethers.parseUnits('0.98', 18)
+        healthFactor: ethers.parseUnits('0.94', 18) // HF < 0.95 -> 100% close factor
       };
 
       const mockReserves: ReserveData[] = [
@@ -372,7 +372,6 @@ describe('Liquidation Plan Resolution', () => {
         }
       ];
 
-      vi.spyOn(config, 'closeFactorExecutionMode', 'get').mockReturnValue('full');
       vi.spyOn(mockAaveDataService, 'getUserAccountData').mockResolvedValue(mockAccountData);
       vi.spyOn(mockAaveDataService, 'getAllUserReserves').mockResolvedValue(mockReserves);
       vi.spyOn(mockAaveDataService, 'getLiquidationBonusPct').mockResolvedValue(0.05);
@@ -381,7 +380,7 @@ describe('Liquidation Plan Resolution', () => {
       
       expect(result).not.toBeNull();
       expect(result?.totalDebt).toBe(1000000000n); // 1000 USDC
-      expect(result?.debtToCover).toBe(1000000000n); // 1000 USDC (100%)
+      expect(result?.debtToCover).toBe(1000000000n); // 1000 USDC (100% because HF < 0.95)
       expect(result?.debtToCoverUsd).toBe(1000); // $1000
     });
 

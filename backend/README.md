@@ -99,11 +99,72 @@ SECONDARY_HEAD_RPC_URL=https://backup-rpc.example.com
 HEAD_CHECK_HEDGE_MS=300
 ```
 
+### Notification and Execution Settings
+```bash
+# Only send Telegram notifications when all required data is present (default: true)
+# This prevents UNKNOWN/N/A alerts by gating notifications at the service level
+NOTIFY_ONLY_WHEN_ACTIONABLE=true
+
+# Minimum profit threshold for notifications (USD)
+# Recommended: 5-10 to reduce spam, increase to 15-20 for production
+PROFIT_MIN_USD=5
+
+# Execution health factor threshold in basis points (default: 9800 = 0.98)
+# Users with HF below this threshold are considered liquidatable
+EXECUTION_HF_THRESHOLD_BPS=9800
+```
+
 ### Subgraph Paging (when USE_SUBGRAPH=true)
 ```bash
 # Page size for subgraph queries (50-200, default: 100)
 SUBGRAPH_PAGE_SIZE=100
 ```
+
+## Reliability and Safety Features
+
+### Strict Reserve Validation
+The backend validates all liquidation pairs against on-chain Aave V3 reserves before execution:
+- Enumerates reserves from Protocol Data Provider at startup
+- Caches metadata (symbol, decimals, liquidation threshold, borrowing enabled)
+- Rejects non-reserve assets (e.g., weETH) **before** estimateGas
+- Logs structured skip reasons for debugging
+
+### Health Factor-Based Close Factor
+Close factor is automatically determined based on user health factor:
+- **HF < 0.95**: 100% of debt can be liquidated
+- **HF >= 0.95**: 50% of debt can be liquidated (default Aave close factor)
+
+This follows Aave V3 liquidation rules and maximizes liquidation efficiency for critical positions.
+
+### Actionable-Only Notifications
+When `NOTIFY_ONLY_WHEN_ACTIONABLE=true` (default), Telegram alerts are only sent if:
+- Both debt and collateral reserves are valid Aave reserves
+- Symbols and decimals are resolved (no UNKNOWN/N/A)
+- Prices are available from on-chain oracle
+- `debtToCover` is computed and > 0
+- Liquidation plan can be fully resolved
+
+Skip reasons are logged with structured context for debugging:
+- `missing_reserve`: Reserve ID not found
+- `missing_symbol`: Symbol is UNKNOWN or N/A
+- `missing_decimals`: Decimals not resolved
+- `price_unavailable`: Oracle price missing or zero
+- `zero_debt_to_cover`: Computed debtToCover is zero
+- `invalid_pair`: Asset not a valid Aave reserve
+
+### Per-Run Consistent Reads (blockTag)
+All on-chain reads during a head-check run use the same `blockTag` for consistency:
+- Health factor checks via multicall
+- Oracle price reads
+- Reserve data queries
+- Prevents race conditions from block progression mid-run
+
+### Aave Pool Error Decoding
+Execution failures decode Aave Pool custom errors for operator clarity:
+- `0x8622f8e4` → `COLLATERAL_CANNOT_BE_LIQUIDATED`
+- `0x3f9a3604` → `HEALTH_FACTOR_NOT_BELOW_THRESHOLD`
+- `0x0a4c7556` → `NO_ACTIVE_RESERVE`
+- Logs include user, assets, health factor, and debtToCover context
 
 ### Trade-offs
 
