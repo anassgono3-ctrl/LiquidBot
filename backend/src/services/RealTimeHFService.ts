@@ -71,6 +71,9 @@ interface UserState {
   lastBlock: number;
 }
 
+// Default threshold for always including low-HF candidates (Goal 3)
+const DEFAULT_ALWAYS_INCLUDE_HF_BELOW = 1.10;
+
 export class RealTimeHFService extends EventEmitter {
   private provider: WebSocketProvider | JsonRpcProvider | null = null;
   private multicall3: Contract | null = null;
@@ -919,6 +922,13 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Get log prefix with current run and block for unambiguous tracking (Goal 4)
+   */
+  private getLogPrefix(): string {
+    return `[realtime-hf] run=${this.currentRunId || 'unknown'} block=${this.currentBlockNumber || 'unknown'}`;
+  }
+
+  /**
    * Perform read-only Multicall3 aggregate3 call with automatic chunking,
    * rate-limit detection, jittered backoff retry, and optional secondary fallback (Goals 4 & 5)
    */
@@ -934,7 +944,7 @@ export class RealTimeHFService extends EventEmitter {
     const effectiveChunkSize = chunkSize || this.currentChunkSize;
     
     // Log prefix for unambiguous run tracking (Goal 4)
-    const logPrefix = `[realtime-hf] run=${this.currentRunId || 'unknown'} block=${this.currentBlockNumber || 'unknown'}`;
+    const logPrefix = this.getLogPrefix();
 
     // If calls fit in single batch, execute with retry
     if (calls.length <= effectiveChunkSize) {

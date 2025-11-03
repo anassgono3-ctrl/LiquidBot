@@ -303,7 +303,8 @@ export const env = (() => {
     headCheckPageStrategy: (parsed.HEAD_CHECK_PAGE_STRATEGY || 'paged') as 'all' | 'paged',
     headCheckPageSize: Number(parsed.HEAD_CHECK_PAGE_SIZE || 250),
 
-    // Always-include low-HF threshold (default 1.10)
+    // Always-include low-HF threshold
+    // Default: 1.10 (matches DEFAULT_ALWAYS_INCLUDE_HF_BELOW in RealTimeHFService)
     alwaysIncludeHfBelow: Number(parsed.ALWAYS_INCLUDE_HF_BELOW || 1.10),
 
     // Optional secondary RPC for head-check fallback
