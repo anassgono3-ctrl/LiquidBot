@@ -10,6 +10,7 @@ import {
   realtimeCloseFactorMode
 } from '../metrics/index.js';
 import { calculateUsdValue, formatTokenAmount } from '../utils/usdMath.js';
+import { AaveMetadata } from '../aave/AaveMetadata.js';
 
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 import { AaveDataService } from './AaveDataService.js';
@@ -38,10 +39,12 @@ export class ExecutionService {
   private wallet?: ethers.Wallet;
   private executorAddress?: string;
   private aaveDataService?: AaveDataService;
+  private aaveMetadata?: AaveMetadata;
 
-  constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService) {
+  constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService, aaveMetadata?: AaveMetadata) {
     this.gasEstimator = gasEstimator;
     this.oneInchService = oneInchService || new OneInchQuoteService();
+    this.aaveMetadata = aaveMetadata;
     
     // Initialize provider and wallet if configured
     const rpcUrl = process.env.RPC_URL;
@@ -57,6 +60,13 @@ export class ExecutionService {
     // Set close factor mode metric
     const mode = config.closeFactorExecutionMode;
     realtimeCloseFactorMode.set(mode === 'full' ? 1 : 0);
+  }
+
+  /**
+   * Set AaveMetadata instance (for dependency injection)
+   */
+  setAaveMetadata(aaveMetadata: AaveMetadata): void {
+    this.aaveMetadata = aaveMetadata;
   }
 
   /**
@@ -110,8 +120,9 @@ export class ExecutionService {
    * Implementation follows the spec:
    * - Enumerate all reserves and select target debt asset (prioritize LIQUIDATION_DEBT_ASSETS, else largest USD)
    * - Select collateral from reserves with aToken balance > 0 and collateral enabled (largest USD)
+   * - STRICT VALIDATION: Verify both debt and collateral are valid Aave reserves via AaveMetadata
    * - Fetch decimals, liquidation bonus from pool config
-   * - Compute debtToCoverRaw based on close factor mode (fixed50 or full)
+   * - Compute debtToCoverRaw based on HEALTH FACTOR: 100% if HF < 0.95, else 50%
    * - Compute USD with precise math using token decimals and oracle prices
    * - Gate by PROFIT_MIN_USD - return null if below threshold
    * 
@@ -144,8 +155,9 @@ export class ExecutionService {
     }
 
     try {
-      // Get user account data to check if liquidatable
+      // Get user account data to check if liquidatable and fetch HF
       const accountData = await this.aaveDataService.getUserAccountData(userAddress);
+      const healthFactor = Number(accountData.healthFactor) / 1e18;
       
       // Check if user has any debt
       if (accountData.totalDebtBase === 0n) {
@@ -191,18 +203,74 @@ export class ExecutionService {
       // Select collateral asset - largest by USD value
       const selectedCollateral = collateralReserves.reduce((max, r) => r.collateralValueUsd > max.collateralValueUsd ? r : max);
 
+      // STRICT VALIDATION: Check both debt and collateral against AaveMetadata
+      if (this.aaveMetadata && this.aaveMetadata.initialized()) {
+        // Maybe refresh metadata periodically
+        await this.aaveMetadata.maybeRefresh();
+
+        // Validate debt asset is a valid reserve
+        if (!this.aaveMetadata.isReserve(selectedDebt.asset)) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Rejected invalid debt asset (not an Aave reserve):', {
+            user: userAddress,
+            debtAsset: selectedDebt.asset,
+            symbol: selectedDebt.symbol
+          });
+          return null;
+        }
+
+        // Validate collateral asset is a valid reserve
+        if (!this.aaveMetadata.isReserve(selectedCollateral.asset)) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Rejected invalid collateral asset (not an Aave reserve):', {
+            user: userAddress,
+            collateralAsset: selectedCollateral.asset,
+            symbol: selectedCollateral.symbol
+          });
+          return null;
+        }
+
+        // Get reserve metadata for additional checks
+        const debtReserveInfo = this.aaveMetadata.getReserve(selectedDebt.asset);
+        const collateralReserveInfo = this.aaveMetadata.getReserve(selectedCollateral.asset);
+
+        if (debtReserveInfo && !debtReserveInfo.borrowingEnabled) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Rejected debt asset with borrowing disabled:', {
+            user: userAddress,
+            debtAsset: selectedDebt.asset
+          });
+          return null;
+        }
+
+        if (collateralReserveInfo && collateralReserveInfo.liquidationThreshold === 0) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Rejected collateral asset with zero liquidation threshold:', {
+            user: userAddress,
+            collateralAsset: selectedCollateral.asset
+          });
+          return null;
+        }
+      }
+
       // Fetch liquidation bonus for the selected collateral
       const liquidationBonusPct = await this.aaveDataService.getLiquidationBonusPct(selectedCollateral.asset);
 
-      // Calculate debtToCover based on close factor mode
-      const mode = config.closeFactorExecutionMode;
+      // Calculate debtToCover based on HEALTH FACTOR (not config mode)
+      // Close factor: 100% if HF < 0.95, else 50%
+      const closeFactorThreshold = 0.95;
       let debtToCover: bigint;
       
-      if (mode === 'full') {
+      if (healthFactor < closeFactorThreshold) {
+        // HF < 0.95: can liquidate 100% of debt
         debtToCover = selectedDebt.totalDebt;
+        // eslint-disable-next-line no-console
+        console.log(`[execution] Using 100% close factor (HF ${healthFactor.toFixed(4)} < ${closeFactorThreshold})`);
       } else {
-        // fixed50: liquidate 50% of debt
+        // HF >= 0.95: liquidate 50% of debt
         debtToCover = selectedDebt.totalDebt / 2n;
+        // eslint-disable-next-line no-console
+        console.log(`[execution] Using 50% close factor (HF ${healthFactor.toFixed(4)} >= ${closeFactorThreshold})`);
       }
 
       // Calculate USD value using 1e18 normalization (canonical implementation)
@@ -266,7 +334,7 @@ export class ExecutionService {
     };
   } | {
     success: false;
-    skipReason: 'service_unavailable' | 'no_debt' | 'no_collateral' | 'below_min_usd' | 'resolve_failed';
+    skipReason: 'service_unavailable' | 'no_debt' | 'no_collateral' | 'below_min_usd' | 'invalid_pair' | 'resolve_failed';
     details?: string;
   }> {
     // Validate that AaveDataService is available
@@ -275,8 +343,9 @@ export class ExecutionService {
     }
 
     try {
-      // Get user account data to check if liquidatable
+      // Get user account data to check if liquidatable and fetch HF
       const accountData = await this.aaveDataService.getUserAccountData(userAddress);
+      const healthFactor = Number(accountData.healthFactor) / 1e18;
       
       // Check if user has any debt
       if (accountData.totalDebtBase === 0n) {
@@ -319,14 +388,57 @@ export class ExecutionService {
       // Select collateral asset
       const selectedCollateral = collateralReserves.reduce((max, r) => r.collateralValueUsd > max.collateralValueUsd ? r : max);
 
+      // STRICT VALIDATION: Check both debt and collateral against AaveMetadata
+      if (this.aaveMetadata && this.aaveMetadata.initialized()) {
+        await this.aaveMetadata.maybeRefresh();
+
+        // Validate debt asset
+        if (!this.aaveMetadata.isReserve(selectedDebt.asset)) {
+          return { 
+            success: false, 
+            skipReason: 'invalid_pair', 
+            details: `Debt asset ${selectedDebt.asset} (${selectedDebt.symbol}) is not a valid Aave reserve` 
+          };
+        }
+
+        // Validate collateral asset
+        if (!this.aaveMetadata.isReserve(selectedCollateral.asset)) {
+          return { 
+            success: false, 
+            skipReason: 'invalid_pair', 
+            details: `Collateral asset ${selectedCollateral.asset} (${selectedCollateral.symbol}) is not a valid Aave reserve` 
+          };
+        }
+
+        // Additional config checks
+        const debtReserveInfo = this.aaveMetadata.getReserve(selectedDebt.asset);
+        const collateralReserveInfo = this.aaveMetadata.getReserve(selectedCollateral.asset);
+
+        if (debtReserveInfo && !debtReserveInfo.borrowingEnabled) {
+          return { 
+            success: false, 
+            skipReason: 'invalid_pair', 
+            details: `Debt asset ${selectedDebt.symbol} has borrowing disabled` 
+          };
+        }
+
+        if (collateralReserveInfo && collateralReserveInfo.liquidationThreshold === 0) {
+          return { 
+            success: false, 
+            skipReason: 'invalid_pair', 
+            details: `Collateral asset ${selectedCollateral.symbol} has zero liquidation threshold` 
+          };
+        }
+      }
+
       // Fetch liquidation bonus
       const liquidationBonusPct = await this.aaveDataService.getLiquidationBonusPct(selectedCollateral.asset);
 
-      // Calculate debtToCover
-      const mode = config.closeFactorExecutionMode;
+      // Calculate debtToCover based on HEALTH FACTOR
+      const closeFactorThreshold = 0.95;
       let debtToCover: bigint;
       
-      if (mode === 'full') {
+      if (healthFactor < closeFactorThreshold) {
         debtToCover = selectedDebt.totalDebt;
       } else {
         debtToCover = selectedDebt.totalDebt / 2n;
@@ -695,13 +807,33 @@ export class ExecutionService {
       };
 
     } catch (error) {
+      // Try to decode Aave Pool errors
+      let errorMsg = error instanceof Error ? error.message : 'unknown_error';
+      
+      // Check if error contains revert data
+      if (error && typeof error === 'object' && 'data' in error && typeof error.data === 'string') {
+        const decodedError = AaveMetadata.decodeAaveError(error.data);
+        if (decodedError) {
+          const contextMsg = AaveMetadata.formatAaveError(error.data, {
+            user: opportunity.user,
+            debtAsset: opportunity.principalReserve.id,
+            collateralAsset: opportunity.collateralReserve.id,
+            healthFactor: opportunity.healthFactor || undefined
+          });
+          
+          // eslint-disable-next-line no-console
+          console.error('[execution] Decoded Aave error:', contextMsg);
+          errorMsg = contextMsg;
+        }
+      }
+      
       // eslint-disable-next-line no-console
-      console.error('[execution] Execution failed:', error);
+      console.error('[execution] Execution failed:', errorMsg);
       
       return {
         success: false,
         simulated: false,
-        reason: error instanceof Error ? error.message : 'unknown_error'
+        reason: errorMsg
       };
     }
   }
