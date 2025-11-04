@@ -105,13 +105,15 @@ export class RiskEngine {
     }
     
     try {
-      this.baseCurrencyUnit = await this.oracle.BASE_CURRENCY_UNIT();
-      return this.baseCurrencyUnit;
+      const unit = await this.oracle.BASE_CURRENCY_UNIT();
+      this.baseCurrencyUnit = unit;
+      return unit;
     } catch (error) {
       // Fallback to 1e8 if not available
       console.warn('[risk-engine] Could not fetch BASE_CURRENCY_UNIT, using default 1e8');
-      this.baseCurrencyUnit = 10n ** 8n;
-      return this.baseCurrencyUnit;
+      const defaultUnit = 10n ** 8n;
+      this.baseCurrencyUnit = defaultUnit;
+      return defaultUnit;
     }
   }
   
