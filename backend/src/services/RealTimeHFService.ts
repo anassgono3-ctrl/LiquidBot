@@ -475,8 +475,8 @@ export class RealTimeHFService extends EventEmitter {
         console.warn(`[realtime-hf] WS heartbeat timeout: no activity for ${timeSinceLastActivity}ms, triggering reconnect`);
         wsReconnectsTotal.inc();
         this.handleWsStall();
-      } else {
-        // Schedule next check
+      } else if (!this.isShuttingDown) {
+        // Schedule next check only if not shutting down
         this.wsHeartbeatTimer = setTimeout(heartbeatCheck, config.wsHeartbeatMs);
       }
     };
@@ -627,8 +627,8 @@ export class RealTimeHFService extends EventEmitter {
         
         // Abort the run by pushing block back to queue and releasing lock
         this.abortCurrentRun(blockNumber);
-      } else {
-        // Re-schedule check
+      } else if (!this.isShuttingDown) {
+        // Re-schedule check only if not shutting down
         this.runWatchdogTimer = setTimeout(checkStall, config.runStallAbortMs);
       }
     };
@@ -1113,18 +1113,29 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Execute a promise with a hard timeout
+   * Properly cleans up the timeout to prevent leaks
    */
   private async withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,
     timeoutError: string
   ): Promise<T> {
+    let timeoutId: NodeJS.Timeout;
+    
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(timeoutError)), timeoutMs);
+    });
+
     return Promise.race([
-      promise,
-      new Promise<T>((_, reject) => {
-        setTimeout(() => reject(new Error(timeoutError)), timeoutMs);
-      })
-    ]);
+      promise.then(result => {
+        clearTimeout(timeoutId);
+        return result;
+      }),
+      timeoutPromise
+    ]).catch(err => {
+      clearTimeout(timeoutId);
+      throw err;
+    });
   }
 
   /**
