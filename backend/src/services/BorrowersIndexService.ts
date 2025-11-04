@@ -1,7 +1,7 @@
 // BorrowersIndexService: Per-reserve borrower tracking via variableDebt Transfer events
 // Maintains persistent sets of borrowers for each reserve with on-chain discovery and live updates
 
-import { EventLog, JsonRpcProvider, Contract, Interface } from 'ethers';
+import { EventLog, JsonRpcProvider, Interface } from 'ethers';
 import { createClient, RedisClientType } from 'redis';
 
 import { config } from '../config/index.js';
@@ -108,7 +108,7 @@ export class BorrowersIndexService {
     try {
       let totalLoaded = 0;
       
-      for (const [asset, reserve] of this.reserves) {
+      for (const [asset] of this.reserves) {
         const key = `borrowers:${asset}`;
         const members = await this.redis.sMembers(key);
         
@@ -177,7 +177,7 @@ export class BorrowersIndexService {
     // eslint-disable-next-line no-console
     console.log(`[borrowers-index] Backfill range: ${fromBlock} to ${currentBlock}`);
 
-    for (const [asset, reserve] of this.reserves) {
+    for (const [, reserve] of this.reserves) {
       try {
         await this.backfillReserve(reserve, fromBlock, currentBlock);
       } catch (err) {
@@ -275,7 +275,6 @@ export class BorrowersIndexService {
 
       const from = parsed.args.from.toLowerCase();
       const to = parsed.args.to.toLowerCase();
-      const value = parsed.args.value;
 
       const borrowers = this.borrowersByReserve.get(asset);
       if (!borrowers) return;
