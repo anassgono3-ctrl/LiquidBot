@@ -51,10 +51,28 @@ export class NotificationService {
 
   /**
    * Send a liquidation opportunity notification
+   * HARD GATING: Only send if all required data is present and actionable
    */
   async notifyOpportunity(opportunity: Opportunity): Promise<void> {
     if (!this.enabled || !this.bot || !this.chatId) {
       return;
+    }
+
+    // Hard gating: check if NOTIFY_ONLY_WHEN_ACTIONABLE is enabled
+    const notifyOnlyWhenActionable = config.notifyOnlyWhenActionable;
+
+    if (notifyOnlyWhenActionable) {
+      // Validate opportunity is actionable before sending
+      const validation = this.validateOpportunityActionable(opportunity);
+      if (!validation.valid) {
+        // eslint-disable-next-line no-console
+        console.log('[notification] Skipping non-actionable opportunity:', {
+          user: opportunity.user,
+          reason: validation.reason,
+          details: validation.details
+        });
+        return;
+      }
     }
 
     try {
@@ -64,6 +82,108 @@ export class NotificationService {
       // eslint-disable-next-line no-console
       console.error('[notification] Failed to send opportunity notification:', err);
     }
+  }
+
+  /**
+   * Check if a symbol is invalid (missing or placeholder)
+   */
+  private isInvalidSymbol(symbol: string | null | undefined): boolean {
+    return !symbol || symbol === 'UNKNOWN' || symbol === 'N/A';
+  }
+
+  /**
+   * Validate that an opportunity has all required data to be actionable
+   * Returns validation result with reason if invalid
+   */
+  private validateOpportunityActionable(opportunity: Opportunity): {
+    valid: boolean;
+    reason?: 'missing_reserve' | 'missing_decimals' | 'missing_symbol' | 'price_unavailable' | 'zero_debt_to_cover' | 'invalid_pair';
+    details?: string;
+  } {
+    // Check debt reserve
+    if (!opportunity.principalReserve || !opportunity.principalReserve.id) {
+      return {
+        valid: false,
+        reason: 'missing_reserve',
+        details: 'Missing debt reserve ID'
+      };
+    }
+
+    // Check collateral reserve
+    if (!opportunity.collateralReserve || !opportunity.collateralReserve.id) {
+      return {
+        valid: false,
+        reason: 'missing_reserve',
+        details: 'Missing collateral reserve ID'
+      };
+    }
+
+    // Check for UNKNOWN or N/A symbols
+    const debtSymbol = opportunity.principalReserve.symbol;
+    const collateralSymbol = opportunity.collateralReserve.symbol;
+
+    if (this.isInvalidSymbol(debtSymbol)) {
+      return {
+        valid: false,
+        reason: 'missing_symbol',
+        details: `Debt symbol is ${debtSymbol || 'missing'}`
+      };
+    }
+
+    if (this.isInvalidSymbol(collateralSymbol)) {
+      return {
+        valid: false,
+        reason: 'missing_symbol',
+        details: `Collateral symbol is ${collateralSymbol || 'missing'}`
+      };
+    }
+
+    // Check decimals are present
+    if (opportunity.principalReserve.decimals === undefined || opportunity.principalReserve.decimals === null) {
+      return {
+        valid: false,
+        reason: 'missing_decimals',
+        details: 'Debt reserve missing decimals'
+      };
+    }
+
+    if (opportunity.collateralReserve.decimals === undefined || opportunity.collateralReserve.decimals === null) {
+      return {
+        valid: false,
+        reason: 'missing_decimals',
+        details: 'Collateral reserve missing decimals'
+      };
+    }
+
+    // Check prices are available (for real-time opportunities)
+    if (opportunity.triggerSource === 'realtime') {
+      if (!opportunity.principalValueUsd || opportunity.principalValueUsd <= 0) {
+        return {
+          valid: false,
+          reason: 'price_unavailable',
+          details: 'Debt asset price unavailable or zero'
+        };
+      }
+
+      if (!opportunity.collateralValueUsd || opportunity.collateralValueUsd <= 0) {
+        return {
+          valid: false,
+          reason: 'price_unavailable',
+          details: 'Collateral asset price unavailable or zero'
+        };
+      }
+
+      // Check debtToCover is computed and non-zero
+      if (!opportunity.debtToCoverUsd || opportunity.debtToCoverUsd <= 0) {
+        return {
+          valid: false,
+          reason: 'zero_debt_to_cover',
+          details: `debtToCoverUsd is ${opportunity.debtToCoverUsd || 0}`
+        };
+      }
+    }
+
+    return { valid: true };
   }
 
   /**
