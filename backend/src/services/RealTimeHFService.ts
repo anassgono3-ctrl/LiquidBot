@@ -75,9 +75,6 @@ interface UserState {
   lastBlock: number;
 }
 
-// Default threshold for always including low-HF candidates (Goal 3)
-const DEFAULT_ALWAYS_INCLUDE_HF_BELOW = 1.10;
-
 export class RealTimeHFService extends EventEmitter {
   private provider: WebSocketProvider | JsonRpcProvider | null = null;
   private multicall3: Contract | null = null;
@@ -1164,7 +1161,6 @@ export class RealTimeHFService extends EventEmitter {
         console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls, ${duration.toFixed(2)}s)`);
         return results;
       } catch (err) {
-        const duration = (Date.now() - startTime) / 1000;
         const isTimeout = err instanceof Error && err.message.includes('timeout');
 
         if (isTimeout) {
