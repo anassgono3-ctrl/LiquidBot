@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 import { SubgraphSeeder } from '../../src/services/SubgraphSeeder.js';
@@ -7,7 +8,7 @@ describe('SubgraphSeeder', () => {
   let mockSubgraphService: SubgraphService;
 
   beforeEach(() => {
-    // Create a mock SubgraphService
+    // Create a mock SubgraphService with necessary methods
     mockSubgraphService = {
       mock: false,
       degraded: false,
@@ -16,7 +17,7 @@ describe('SubgraphSeeder', () => {
       },
       consumeTokenOrDrop: vi.fn().mockReturnValue(true),
       retry: vi.fn((fn) => fn())
-    } as unknown as SubgraphService;
+    } as any;
   });
 
   describe('seed', () => {
@@ -28,7 +29,7 @@ describe('SubgraphSeeder', () => {
         ]
       });
 
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -61,7 +62,7 @@ describe('SubgraphSeeder', () => {
         return Promise.resolve({ users: [] });
       });
 
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -84,7 +85,7 @@ describe('SubgraphSeeder', () => {
         users: Array.from({ length: 50 }, (_, i) => ({ id: `0xuser${i}` }))
       });
 
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -117,7 +118,7 @@ describe('SubgraphSeeder', () => {
         return Promise.resolve({ users: [] });
       });
 
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -133,7 +134,7 @@ describe('SubgraphSeeder', () => {
     });
 
     it('should return empty array when subgraph is in degraded mode', async () => {
-      mockSubgraphService.degraded = true;
+      (mockSubgraphService as any).degraded = true;
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -148,7 +149,7 @@ describe('SubgraphSeeder', () => {
     });
 
     it('should return empty array when subgraph is mocked', async () => {
-      mockSubgraphService.mock = true;
+      (mockSubgraphService as any).mock = true;
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -167,7 +168,7 @@ describe('SubgraphSeeder', () => {
         .mockRejectedValueOnce(new Error('Network error'))
         .mockResolvedValue({ users: [] });
 
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -191,7 +192,7 @@ describe('SubgraphSeeder', () => {
         .mockResolvedValueOnce({ users: [{ id: '0xuser3' }] }) // collateral
         .mockResolvedValueOnce({ users: [] }); // end of collateral
 
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -217,7 +218,7 @@ describe('SubgraphSeeder', () => {
         .mockResolvedValueOnce({ users: [{ id: '0xuser2' }] }) // collateral
         .mockResolvedValueOnce({ users: [] }); // end of collateral
 
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,
@@ -246,7 +247,7 @@ describe('SubgraphSeeder', () => {
 
     it('should return metrics after seed', async () => {
       const mockRequest = vi.fn().mockResolvedValue({ users: [] });
-      mockSubgraphService.client = { request: mockRequest } as unknown as typeof mockSubgraphService.client;
+      (mockSubgraphService as any).client = { request: mockRequest };
 
       const seeder = new SubgraphSeeder({
         subgraphService: mockSubgraphService,

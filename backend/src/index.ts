@@ -12,21 +12,17 @@ import { rateLimiter } from "./middleware/rateLimit.js";
 import buildRoutes from "./api/routes.js";
 import { initWebSocketServer } from "./websocket/server.js";
 import { 
-  registry, 
-  opportunitiesGeneratedTotal, 
-  opportunityProfitEstimate,
+  registry,
   actionableOpportunitiesTotal,
   skippedUnresolvedPlanTotal
 } from "./metrics/index.js";
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";
-import { OpportunityService } from "./services/OpportunityService.js";
 import { NotificationService } from "./services/NotificationService.js";
 import { HealthMonitor } from "./services/HealthMonitor.js";
 import { OnDemandHealthFactor } from "./services/OnDemandHealthFactor.js";
 import { ExecutionService } from "./services/ExecutionService.js";
-import { RiskManager } from "./services/RiskManager.js";
 import { HealthCalculator } from "./services/HealthCalculator.js";
 import { AtRiskScanner } from "./services/AtRiskScanner.js";
 import { RealTimeHFService } from "./services/RealTimeHFService.js";
@@ -59,14 +55,12 @@ if (config.useSubgraph) {
   logger.info('[subgraph] Service disabled (USE_SUBGRAPH=false) - relying on on-chain discovery');
 }
 
-// Initialize opportunity and notification services
-const opportunityService = new OpportunityService();
+// Initialize notification services
 const notificationService = new NotificationService();
 const healthMonitor = new HealthMonitor(subgraphService || SubgraphService.createMock());
 
 // Initialize execution scaffold
 const executionService = new ExecutionService();
-const riskManager = new RiskManager();
 
 // Initialize AaveMetadata if RPC is configured (async initialization deferred)
 // Use async IIFE to initialize AaveMetadata
@@ -226,12 +220,7 @@ if (config.useRealtimeHF) {
   logger.info('[realtime-hf] Disabled (USE_REALTIME_HF=false)');
 }
 
-// Track opportunity stats for health endpoint
-const opportunityStats = {
-  lastBatchSize: 0,
-  totalOpportunities: 0,
-  lastProfitSampleUsd: 0
-};
+
 
 // Warmup probe
 async function warmup() {
@@ -285,9 +274,6 @@ app.get("/health", (_req, res) => {
     }
   }
 
-  // Add opportunity stats
-  healthData.opportunity = opportunityStats;
-
   // Health monitoring status (now disabled)
   healthData.healthMonitoring = healthMonitor.getStats();
 
@@ -311,10 +297,14 @@ app.get("/health", (_req, res) => {
 app.use("/api/v1", authenticate, buildRoutes(subgraphService || SubgraphService.createMock()));
 
 // Initialize WebSocket server
-const { wss, broadcastLiquidationEvent, broadcastOpportunityEvent } = initWebSocketServer(httpServer);
+const { wss, broadcastLiquidationEvent } = initWebSocketServer(httpServer);
 
 let subgraphPoller: SubgraphPollerHandle | null = null;
 
+// NOTE: SubgraphPoller is DEPRECATED for triggering notifications/executions.
+// It now serves only for monitoring historical liquidations and at-risk scanning.
+// Subgraph is used for candidate discovery ONLY via SubgraphSeeder in RealTimeHFService.
+// The real-time engine (RealTimeHFService) is the ONLY trigger path for notifications/executions.
 if (config.useSubgraph && !config.useMockSubgraph && subgraphService) {
   const resolved = config.resolveSubgraphEndpoint();
   logger.info(`Subgraph resolved endpoint authMode=${resolved.mode} header=${resolved.needsHeader} url=${config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
@@ -332,7 +322,19 @@ if (config.useSubgraph && !config.useMockSubgraph && subgraphService) {
       // placeholder for raw snapshot callback
     },
     onNewLiquidations: async (newEvents) => {
-      // Broadcast new liquidation events via WebSocket
+      // DISABLED: Subgraph liquidationCalls must NOT trigger notifications or executions.
+      // The real-time engine (RealTimeHFService) is the ONLY trigger path.
+      // Subgraph is used ONLY for candidate discovery via SubgraphSeeder.
+      
+      // Log for monitoring purposes only
+      if (newEvents.length > 0) {
+        logger.info(
+          `[subgraph-poller] Detected ${newEvents.length} historical liquidation(s) ` +
+          `(not triggering notifications - real-time engine handles detection)`
+        );
+      }
+      
+      // Broadcast informational events via WebSocket only (no notifications/executions)
       if (newEvents.length > 0 && wss.clients.size > 0) {
         broadcastLiquidationEvent({
           type: 'liquidation.new',
@@ -344,96 +346,6 @@ if (config.useSubgraph && !config.useMockSubgraph && subgraphService) {
           })),
           timestamp: new Date().toISOString()
         });
-      }
-
-      // Build opportunities from new liquidations
-      try {
-        // Health factors are already attached to newEvents by poller (on-demand)
-        // Pass empty health snapshot map (no longer used)
-        const healthSnapshots = new Map();
-        
-        // Build opportunities
-        const opportunities = await opportunityService.buildOpportunities(newEvents, healthSnapshots);
-        
-        // Update stats
-        opportunityStats.lastBatchSize = opportunities.length;
-        opportunityStats.totalOpportunities += opportunities.length;
-        if (opportunities.length > 0 && opportunities[0].profitEstimateUsd !== null && opportunities[0].profitEstimateUsd !== undefined) {
-          opportunityStats.lastProfitSampleUsd = opportunities[0].profitEstimateUsd;
-        }
-
-        // Update metrics
-        opportunitiesGeneratedTotal.inc(opportunities.length);
-        for (const op of opportunities) {
-          if (op.profitEstimateUsd !== null && op.profitEstimateUsd !== undefined && op.profitEstimateUsd > 0) {
-            opportunityProfitEstimate.observe(op.profitEstimateUsd);
-          }
-        }
-
-        // Broadcast opportunity events via WebSocket
-        if (opportunities.length > 0 && wss.clients.size > 0) {
-          broadcastOpportunityEvent({
-            type: 'opportunity.new',
-            opportunities: opportunities.map(op => ({
-              id: op.id,
-              user: op.user,
-              profitEstimateUsd: op.profitEstimateUsd ?? null,
-              healthFactor: op.healthFactor ?? null,
-              timestamp: op.timestamp
-            })),
-            timestamp: new Date().toISOString()
-          });
-        }
-
-        // Send Telegram notifications for profitable opportunities
-        const profitableOps = opportunityService.filterProfitableOpportunities(opportunities);
-        for (const op of profitableOps) {
-          await notificationService.notifyOpportunity(op);
-        }
-        
-        if (profitableOps.length > 0) {
-          logger.info(`[opportunity] Found ${profitableOps.length} profitable opportunities (profit >= $${config.profitMinUsd})`);
-        }
-
-        // Execution pipeline (scaffold - disabled by default)
-        // Note: This does NOT auto-execute from scanner - requires explicit enablement
-        for (const op of profitableOps) {
-          try {
-            // Calculate after-gas profit
-            const gasCostUsd = config.gasCostUsd;
-            const afterGasProfit = (op.profitEstimateUsd || 0) - gasCostUsd;
-
-            // Apply risk checks
-            const riskCheck = riskManager.canExecute(op, afterGasProfit);
-            if (!riskCheck.allowed) {
-              logger.info(`[execution] Skipped opportunity ${op.id}: ${riskCheck.reason}`);
-              continue;
-            }
-
-            // Execute (will be simulated/skipped based on config)
-            const result = await executionService.execute(op);
-            
-            if (result.success) {
-              logger.info(`[execution] Executed opportunity ${op.id}:`, {
-                simulated: result.simulated,
-                reason: result.reason,
-                txHash: result.txHash,
-                realizedProfitUsd: result.realizedProfitUsd
-              });
-              
-              // Record realized P&L if real execution
-              if (!result.simulated && result.realizedProfitUsd !== undefined) {
-                riskManager.recordRealizedProfit(result.realizedProfitUsd);
-              }
-            } else {
-              logger.info(`[execution] Skipped opportunity ${op.id}: ${result.reason}`);
-            }
-          } catch (err) {
-            logger.error(`[execution] Failed to execute opportunity ${op.id}:`, err);
-          }
-        }
-      } catch (err) {
-        logger.error('[opportunity] Failed to process opportunities:', err);
       }
     }
   });
