@@ -210,3 +210,29 @@ export const liquidatableEdgeTriggersTotal = new Counter({
   labelNames: ['reason'],
   registers: [registry]
 });
+
+// Timeout and recovery metrics
+export const chunkTimeoutsTotal = new Counter({
+  name: 'liquidbot_chunk_timeouts_total',
+  help: 'Total number of chunk timeouts during multicall operations',
+  registers: [registry]
+});
+
+export const runAbortsTotal = new Counter({
+  name: 'liquidbot_run_aborts_total',
+  help: 'Total number of runs aborted due to stall detection',
+  registers: [registry]
+});
+
+export const wsReconnectsTotal = new Counter({
+  name: 'liquidbot_ws_reconnects_total',
+  help: 'Total number of WebSocket reconnections due to heartbeat failures',
+  registers: [registry]
+});
+
+export const chunkLatency = new Histogram({
+  name: 'liquidbot_chunk_latency_seconds',
+  help: 'Latency of multicall chunk execution in seconds',
+  buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
+  registers: [registry]
+});
