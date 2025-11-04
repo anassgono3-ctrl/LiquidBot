@@ -62,9 +62,10 @@ export class ExecutorRevertDecoder {
    */
   static decode(revertData: string): DecodedRevert {
     // Normalize to lowercase and ensure 0x prefix
-    const data = revertData.toLowerCase().startsWith('0x') 
-      ? revertData.toLowerCase() 
-      : `0x${revertData.toLowerCase()}`;
+    const dataLower = revertData.toLowerCase();
+    const data = dataLower.startsWith('0x') 
+      ? dataLower 
+      : `0x${dataLower}`;
 
     // Extract 4-byte selector
     const selector = data.slice(0, 10);

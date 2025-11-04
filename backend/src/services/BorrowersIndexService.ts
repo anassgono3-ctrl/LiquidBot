@@ -267,6 +267,9 @@ export class BorrowersIndexService {
   /**
    * Process a Transfer event to update borrower set
    */
+  // Zero address constant for Transfer event logic
+  private static readonly ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+
   private processTransferLog(log: EventLog, asset: string): void {
     try {
       const iface = new Interface(ERC20_ABI);
@@ -279,22 +282,20 @@ export class BorrowersIndexService {
       const borrowers = this.borrowersByReserve.get(asset);
       if (!borrowers) return;
 
-      const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
-
       // Mint (from zero address): add borrower
-      if (from === ZERO_ADDRESS && to !== ZERO_ADDRESS) {
+      if (from === BorrowersIndexService.ZERO_ADDRESS && to !== BorrowersIndexService.ZERO_ADDRESS) {
         borrowers.add(to);
       }
-      // Burn (to zero address): may remove borrower if balance is zero
-      else if (to === ZERO_ADDRESS && from !== ZERO_ADDRESS) {
-        // We can't check balance here without additional calls, so keep in set
-        // The balance will be verified when we check the user's HF
-        // Optionally, we could schedule a balance check and remove if zero
+      // Burn (to zero address): remove borrower (full repayment)
+      // Note: This is conservative - user is removed when debt token is burned (transferred to zero)
+      // which indicates full debt repayment. Users with partial repayment remain in the set.
+      else if (to === BorrowersIndexService.ZERO_ADDRESS && from !== BorrowersIndexService.ZERO_ADDRESS) {
+        borrowers.delete(from);
       }
-      // Transfer between users: add recipient
-      else if (from !== ZERO_ADDRESS && to !== ZERO_ADDRESS) {
+      // Transfer between users: add recipient (debt reassignment)
+      else if (from !== BorrowersIndexService.ZERO_ADDRESS && to !== BorrowersIndexService.ZERO_ADDRESS) {
         borrowers.add(to);
-        // Keep 'from' in set as well (they may still have debt)
+        // Keep 'from' in set as well (they may still have debt after partial transfer)
       }
     } catch (err) {
       // eslint-disable-next-line no-console

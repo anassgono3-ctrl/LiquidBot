@@ -753,8 +753,9 @@ export class ExecutionService {
               path: uniQuote.path
             });
             
-            // For now, we'll still use 1inch calldata but log that we validated via Uniswap
-            // TODO: Build Uniswap V3 swap calldata directly
+            // Uniswap V3 validation successful - still using 1inch for execution calldata
+            // This validates liquidity exists but uses 1inch for actual swap routing
+            // Future: Build Uniswap V3 swap calldata directly for full end-to-end routing
             routeUsed = 'uniswap-v3-validated';
           } else {
             // eslint-disable-next-line no-console
