@@ -151,6 +151,7 @@ export const config = {
 
   // Subgraph usage gating
   get useSubgraph() { return env.useSubgraph; },
+  get subgraphRefreshMinutes() { return env.subgraphRefreshMinutes; },
 
   // On-chain backfill for candidate discovery
   get realtimeInitialBackfillEnabled() { return env.realtimeInitialBackfillEnabled; },

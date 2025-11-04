@@ -130,6 +130,9 @@ export const rawEnvSchema = z.object({
   // Subgraph usage gating
   USE_SUBGRAPH: z.string().optional(),
 
+  // Subgraph refresh interval for candidate discovery (minutes)
+  SUBGRAPH_REFRESH_MINUTES: z.string().optional(),
+
   // On-chain backfill for candidate discovery
   REALTIME_INITIAL_BACKFILL_ENABLED: z.string().optional(),
   REALTIME_INITIAL_BACKFILL_BLOCKS: z.string().optional(),
@@ -298,6 +301,9 @@ export const env = (() => {
 
     // Subgraph usage gating
     useSubgraph: (parsed.USE_SUBGRAPH || 'false').toLowerCase() === 'true',
+
+    // Subgraph refresh interval (default: 30 minutes)
+    subgraphRefreshMinutes: Number(parsed.SUBGRAPH_REFRESH_MINUTES || 30),
 
     // On-chain backfill for candidate discovery
     realtimeInitialBackfillEnabled: (parsed.REALTIME_INITIAL_BACKFILL_ENABLED || 'true').toLowerCase() === 'true',
