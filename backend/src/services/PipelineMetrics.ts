@@ -72,6 +72,7 @@ export class PipelineMetrics {
   
   // Health factor gauge
   private minHealthFactor: Gauge;
+  private minHealthFactorValue: number; // Track the actual value internally
   
   // Success/failure tracking
   private executionSuccess: Counter;
@@ -174,6 +175,9 @@ export class PipelineMetrics {
       help: 'Total number of duplicate candidates dropped',
       registers: [register]
     });
+    
+    // Initialize minimum health factor value
+    this.minHealthFactorValue = 0;
   }
   
   /**
@@ -234,8 +238,8 @@ export class PipelineMetrics {
    * Update minimum health factor
    */
   updateMinHealthFactor(hf: number): void {
-    const current = this.minHealthFactor.get();
-    if (current === 0 || hf < current) {
+    if (this.minHealthFactorValue === 0 || hf < this.minHealthFactorValue) {
+      this.minHealthFactorValue = hf;
       this.minHealthFactor.set(hf);
     }
   }
