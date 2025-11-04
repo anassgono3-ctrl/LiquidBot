@@ -14,6 +14,8 @@ import { AaveMetadata } from '../aave/AaveMetadata.js';
 
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 import { AaveDataService } from './AaveDataService.js';
+import { UniswapV3QuoteService } from './UniswapV3QuoteService.js';
+import { ExecutorRevertDecoder } from './ExecutorRevertDecoder.js';
 
 export interface ExecutionResult {
   success: boolean;
@@ -35,6 +37,7 @@ export interface GasEstimator {
 export class ExecutionService {
   private gasEstimator?: GasEstimator;
   private oneInchService: OneInchQuoteService;
+  private uniswapV3Service?: UniswapV3QuoteService;
   private provider?: ethers.JsonRpcProvider;
   private wallet?: ethers.Wallet;
   private executorAddress?: string;
@@ -55,6 +58,7 @@ export class ExecutionService {
       this.provider = new ethers.JsonRpcProvider(rpcUrl);
       this.wallet = new ethers.Wallet(privateKey, this.provider);
       this.aaveDataService = new AaveDataService(this.provider);
+      this.uniswapV3Service = new UniswapV3QuoteService(this.provider);
     }
     
     // Set close factor mode metric
@@ -334,7 +338,7 @@ export class ExecutionService {
     };
   } | {
     success: false;
-    skipReason: 'service_unavailable' | 'no_debt' | 'no_collateral' | 'below_min_usd' | 'invalid_pair' | 'resolve_failed';
+    skipReason: 'service_unavailable' | 'no_debt' | 'no_collateral' | 'below_min_repay_usd' | 'below_min_usd' | 'invalid_pair' | 'resolve_failed';
     details?: string;
   }> {
     // Validate that AaveDataService is available
@@ -447,7 +451,13 @@ export class ExecutionService {
       // Calculate USD value
       const debtToCoverUsd = calculateUsdValue(debtToCover, selectedDebt.decimals, selectedDebt.priceRaw);
 
-      // Gate by PROFIT_MIN_USD
+      // Gate by MIN_REPAY_USD (default 50, hardcoded with optional env override)
+      const minRepayUsd = config.minRepayUsd;
+      if (debtToCoverUsd < minRepayUsd) {
+        return { success: false, skipReason: 'below_min_repay_usd', details: `${debtToCoverUsd.toFixed(2)} < ${minRepayUsd}` };
+      }
+
+      // Additional gate by PROFIT_MIN_USD
       const profitMinUsd = config.profitMinUsd;
       if (debtToCoverUsd < profitMinUsd) {
         return { success: false, skipReason: 'below_min_usd', details: `${debtToCoverUsd.toFixed(2)} < ${profitMinUsd}` };
@@ -716,16 +726,71 @@ export class ExecutionService {
         closeFactorMode: config.closeFactorExecutionMode
       });
       
-      // Step 3b: Get 1inch swap quote with raw collateral amount
+      // Step 3b: Router fallback: Uniswap V3 → 1inch
+      // Try Uniswap V3 direct path first (WETH/USDC pools, 0.05%/0.3%)
       const slippageBps = Number(process.env.MAX_SLIPPAGE_BPS || 100); // 1% default
+      let swapQuote: { data: string; minOut: string };
+      let routeUsed = 'none';
       
-      const swapQuote = await this.oneInchService.getSwapCalldata({
-        fromToken: collateralAsset,
-        toToken: debtAsset,
-        amount: expectedCollateralRaw.toString(), // Pass raw BigInt as string
-        slippageBps: slippageBps,
-        fromAddress: this.executorAddress
-      });
+      // Try Uniswap V3 first if available
+      if (this.uniswapV3Service) {
+        try {
+          const uniQuote = await this.uniswapV3Service.getQuote({
+            tokenIn: collateralAsset,
+            tokenOut: debtAsset,
+            amountIn: expectedCollateralRaw,
+            fee: 500 // Start with 0.05% tier
+          });
+          
+          if (uniQuote.success && uniQuote.amountOut && uniQuote.amountOut > 0n) {
+            // Calculate minOut with slippage
+            const minOut = (uniQuote.amountOut * BigInt(10000 - slippageBps)) / BigInt(10000);
+            
+            // eslint-disable-next-line no-console
+            console.log('[execution] Uniswap V3 quote successful:', {
+              amountOut: uniQuote.amountOut.toString(),
+              minOut: minOut.toString(),
+              path: uniQuote.path
+            });
+            
+            // For now, we'll still use 1inch calldata but log that we validated via Uniswap
+            // TODO: Build Uniswap V3 swap calldata directly
+            routeUsed = 'uniswap-v3-validated';
+          } else {
+            // eslint-disable-next-line no-console
+            console.log('[execution] Uniswap V3 quote failed, falling back to 1inch:', uniQuote.reason);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Uniswap V3 quote error, falling back to 1inch:', err instanceof Error ? err.message : err);
+        }
+      }
+      
+      // Get 1inch quote (fallback or primary if Uniswap not available)
+      try {
+        swapQuote = await this.oneInchService.getSwapCalldata({
+          fromToken: collateralAsset,
+          toToken: debtAsset,
+          amount: expectedCollateralRaw.toString(),
+          slippageBps: slippageBps,
+          fromAddress: this.executorAddress
+        });
+        
+        if (routeUsed === 'none') {
+          routeUsed = '1inch';
+        }
+        
+        // eslint-disable-next-line no-console
+        console.log('[execution] Using route:', routeUsed);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[execution] All routers failed:', err instanceof Error ? err.message : err);
+        return {
+          success: false,
+          simulated: false,
+          reason: 'router_no_liquidity'
+        };
+      }
 
       // Step 4: Build liquidation parameters
       const liquidationParams = {
@@ -807,33 +872,54 @@ export class ExecutionService {
       };
 
     } catch (error) {
-      // Try to decode Aave Pool errors
+      // Try to decode executor/contract revert errors
       let errorMsg = error instanceof Error ? error.message : 'unknown_error';
+      let shortReason = 'execution_failed';
       
       // Check if error contains revert data
       if (error && typeof error === 'object' && 'data' in error && typeof error.data === 'string') {
-        const decodedError = AaveMetadata.decodeAaveError(error.data);
-        if (decodedError) {
-          const contextMsg = AaveMetadata.formatAaveError(error.data, {
-            user: opportunity.user,
-            debtAsset: opportunity.principalReserve.id,
-            collateralAsset: opportunity.collateralReserve.id,
-            healthFactor: opportunity.healthFactor || undefined
-          });
+        try {
+          const decoded = ExecutorRevertDecoder.decode(error.data);
           
           // eslint-disable-next-line no-console
-          console.error('[execution] Decoded Aave error:', contextMsg);
-          errorMsg = contextMsg;
+          console.error('[execution] Decoded revert:', {
+            selector: decoded.selector,
+            name: decoded.name,
+            reason: decoded.reason,
+            category: decoded.category
+          });
+          
+          errorMsg = decoded.reason;
+          shortReason = ExecutorRevertDecoder.getShortReason(error.data);
+        } catch (decodeErr) {
+          // Fallback to Aave error decoder
+          const decodedError = AaveMetadata.decodeAaveError(error.data);
+          if (decodedError) {
+            const contextMsg = AaveMetadata.formatAaveError(error.data, {
+              user: opportunity.user,
+              debtAsset: opportunity.principalReserve.id,
+              collateralAsset: opportunity.collateralReserve.id,
+              healthFactor: opportunity.healthFactor || undefined
+            });
+            
+            // eslint-disable-next-line no-console
+            console.error('[execution] Decoded Aave error:', contextMsg);
+            errorMsg = contextMsg;
+          }
         }
       }
       
       // eslint-disable-next-line no-console
-      console.error('[execution] Execution failed:', errorMsg);
+      console.error('[execution] Execution failed:', {
+        error: errorMsg,
+        shortReason,
+        user: opportunity.user
+      });
       
       return {
         success: false,
         simulated: false,
-        reason: errorMsg
+        reason: `${shortReason}: ${errorMsg}`
       };
     }
   }

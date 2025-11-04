@@ -111,6 +111,8 @@ export const rawEnvSchema = z.object({
   CLOSE_FACTOR_MODE: z.string().optional(),
   CLOSE_FACTOR_EXECUTION_MODE: z.string().optional(),
   LIQUIDATION_DEBT_ASSETS: z.string().optional(),
+  MIN_REPAY_USD: z.string().optional(),
+  MAX_TARGET_USERS_PER_TICK: z.string().optional(),
 
   // Real-time HF detection
   USE_REALTIME_HF: z.string().optional(),
@@ -283,6 +285,8 @@ export const env = (() => {
       .split(',')
       .map(a => a.trim().toLowerCase())
       .filter(a => a.length > 0),
+    minRepayUsd: Number(parsed.MIN_REPAY_USD || 50),
+    maxTargetUsersPerTick: Number(parsed.MAX_TARGET_USERS_PER_TICK || 100),
 
     // Real-time HF detection
     useRealtimeHF: (parsed.USE_REALTIME_HF || 'false').toLowerCase() === 'true',

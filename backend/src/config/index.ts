@@ -183,6 +183,8 @@ export const config = {
   get dryRunExecution() { return env.dryRunExecution; },
   get closeFactorExecutionMode() { return env.closeFactorExecutionMode; },
   get liquidationDebtAssets() { return env.liquidationDebtAssets; },
+  get minRepayUsd() { return env.minRepayUsd; },
+  get maxTargetUsersPerTick() { return env.maxTargetUsersPerTick; },
 
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
