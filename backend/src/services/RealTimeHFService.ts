@@ -31,6 +31,7 @@ import {
 import { CandidateManager } from './CandidateManager.js';
 import type { SubgraphService } from './SubgraphService.js';
 import { OnChainBackfillService } from './OnChainBackfillService.js';
+import { SubgraphSeeder } from './SubgraphSeeder.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -81,6 +82,7 @@ export class RealTimeHFService extends EventEmitter {
   private aavePool: Contract | null = null;
   private candidateManager: CandidateManager;
   private subgraphService?: SubgraphService;
+  private subgraphSeeder?: SubgraphSeeder;
   private backfillService?: OnChainBackfillService;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
@@ -886,15 +888,27 @@ export class RealTimeHFService extends EventEmitter {
     const seedBefore = this.candidateManager.size();
     let newCount = 0;
 
-    // Priority 1: Subgraph seeding (if enabled)
+    // Priority 1: Subgraph seeding with SubgraphSeeder (if enabled)
     if (config.useSubgraph && this.subgraphService) {
       try {
         // eslint-disable-next-line no-console
-        console.log('[realtime-hf] Initial seeding from subgraph...');
-        await this.seedFromSubgraph();
+        console.log('[realtime-hf] Initial seeding from subgraph with SubgraphSeeder...');
+        
+        // Initialize SubgraphSeeder
+        this.subgraphSeeder = new SubgraphSeeder({
+          subgraphService: this.subgraphService,
+          maxCandidates: config.candidateMax,
+          pageSize: config.subgraphPageSize,
+          politenessDelayMs: 100
+        });
+        
+        // Perform comprehensive seeding
+        const userAddresses = await this.subgraphSeeder.seed();
+        this.candidateManager.addBulk(userAddresses);
+        
         newCount = this.candidateManager.size() - seedBefore;
         // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] seed_source=subgraph candidates_total=${this.candidateManager.size()} new=${newCount}`);
+        console.log(`[realtime-hf] seed_source=subgraph_seeder candidates_total=${this.candidateManager.size()} new=${newCount}`);
         return; // Subgraph seeding is sufficient, skip on-chain backfill
       } catch (err) {
         // eslint-disable-next-line no-console
@@ -1493,20 +1507,23 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Start periodic seeding from subgraph (only when USE_SUBGRAPH=true)
+   * Start periodic seeding from subgraph with SubgraphSeeder (only when USE_SUBGRAPH=true)
    */
   private startPeriodicSeeding(): void {
-    if (!config.useSubgraph) {
+    if (!config.useSubgraph || !this.subgraphSeeder) {
       return;
     }
 
-    const intervalMs = config.realtimeSeedIntervalSec * 1000;
+    // Convert minutes to milliseconds for setInterval
+    const SECONDS_PER_MINUTE = 60;
+    const MILLISECONDS_PER_SECOND = 1000;
+    const intervalMs = config.subgraphRefreshMinutes * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
     
-    // Initial seed
-    this.seedFromSubgraph().catch(err => {
-      // eslint-disable-next-line no-console
-      console.error('[realtime-hf] Initial seed failed:', err);
-    });
+    // eslint-disable-next-line no-console
+    console.log(`[realtime-hf] Starting periodic subgraph seeding (interval=${config.subgraphRefreshMinutes} minutes)`);
+    
+    // Initial seed (already done in performInitialSeeding, but log it)
+    // No need to seed again here since performInitialSeeding just ran
 
     // Periodic seed with jitter
     this.seedTimer = setInterval(() => {
@@ -1518,7 +1535,7 @@ export class RealTimeHFService extends EventEmitter {
       
       setTimeout(() => {
         if (!this.isShuttingDown) {
-          this.seedFromSubgraph().catch(err => {
+          this.seedFromSubgraphSeeder().catch(err => {
             // eslint-disable-next-line no-console
             console.error('[realtime-hf] Periodic seed failed:', err);
           });
@@ -1528,26 +1545,38 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Seed candidates from subgraph
+   * Seed candidates from subgraph using SubgraphSeeder
    */
-  private async seedFromSubgraph(): Promise<void> {
-    if (!this.subgraphService || this.isShuttingDown) return;
+  private async seedFromSubgraphSeeder(): Promise<void> {
+    if (!this.subgraphSeeder || this.isShuttingDown) return;
 
     try {
       const seedBefore = this.candidateManager.size();
 
-      // Query users with borrowing activity (with paging support)
-      const users = await this.subgraphService.getUsersWithBorrowing(config.candidateMax, true);
+      // Perform comprehensive seeding with SubgraphSeeder
+      const userAddresses = await this.subgraphSeeder.seed();
       
-      if (users.length > 0) {
-        this.candidateManager.addBulk(users.map(u => u.id));
+      if (userAddresses.length > 0) {
+        this.candidateManager.addBulk(userAddresses);
         const newCount = this.candidateManager.size() - seedBefore;
-        // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] seed_source=subgraph candidates_total=${this.candidateManager.size()} new=${newCount}`);
+        
+        // Get metrics from seeder
+        const metrics = this.subgraphSeeder.getMetrics();
+        if (metrics) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[realtime-hf] seed_source=subgraph_seeder ` +
+            `candidates_total=${this.candidateManager.size()} ` +
+            `new=${newCount} ` +
+            `variable_debt=${metrics.variableDebtors} ` +
+            `stable_debt=${metrics.stableDebtors} ` +
+            `collateral=${metrics.collateralHolders}`
+          );
+        }
       }
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('[realtime-hf] Subgraph seed failed:', err);
+      console.warn('[realtime-hf] SubgraphSeeder seed failed:', err);
     }
   }
 
