@@ -6,6 +6,8 @@ import { WebSocketProvider, JsonRpcProvider } from 'ethers';
 
 import { CandidateManager } from './CandidateManager.js';
 import { SameBlockVerifier } from './SameBlockVerifier.js';
+import { pipelineLogger } from './PipelineLogger.js';
+import { SkipReason } from './PipelineMetrics.js';
 import { config } from '../config/index.js';
 
 export interface ScannerOptions {
@@ -62,25 +64,36 @@ export class Scanner extends EventEmitter {
     blockNumber: number,
     triggerType: 'event' | 'head' | 'price'
   ): Promise<CandidateResult> {
+    const startTime = Date.now();
+    
+    // Log discovery
+    pipelineLogger.discovered({ userAddress, blockNumber, triggerType });
+    
     // Check per-block dedupe
     if (this.isDuplicate(userAddress, blockNumber)) {
+      pipelineLogger.duplicate({ userAddress, blockNumber });
       return {
         userAddress,
         blockNumber,
         triggerType,
         verified: false,
-        skipReason: 'duplicate_block'
+        skipReason: SkipReason.DUPLICATE_BLOCK
       };
     }
     
     // Check cooldown
     if (this.isInCooldown(userAddress)) {
+      pipelineLogger.skipped({ 
+        userAddress, 
+        blockNumber, 
+        reason: SkipReason.COOLDOWN 
+      });
       return {
         userAddress,
         blockNumber,
         triggerType,
         verified: false,
-        skipReason: 'cooldown'
+        skipReason: SkipReason.COOLDOWN
       };
     }
     
@@ -89,20 +102,35 @@ export class Scanner extends EventEmitter {
     
     // Run same-block verification
     const verifyResult = await this.verifier.verify(userAddress, blockNumber);
+    const verifyLatency = Date.now() - startTime;
     
     if (!verifyResult.success) {
+      const reason = this.mapVerifyReason(verifyResult.reason);
+      pipelineLogger.skipped({ 
+        userAddress, 
+        blockNumber, 
+        reason,
+        details: verifyResult.reason
+      });
       return {
         userAddress,
         blockNumber,
         triggerType,
         verified: false,
-        skipReason: verifyResult.reason
+        skipReason: reason
       };
     }
     
     // Check min debt threshold
     const debtUsd = this.calculateDebtUsd(verifyResult.totalDebtBase!);
     if (debtUsd < this.minDebtUsd) {
+      pipelineLogger.skipped({ 
+        userAddress, 
+        blockNumber, 
+        reason: SkipReason.BELOW_MIN_DEBT_USD,
+        debtUsd,
+        minDebtUsd: this.minDebtUsd
+      });
       return {
         userAddress,
         blockNumber,
@@ -110,13 +138,19 @@ export class Scanner extends EventEmitter {
         verified: false,
         healthFactor: verifyResult.healthFactor,
         totalDebtBase: verifyResult.totalDebtBase,
-        skipReason: 'below_min_debt_usd'
+        skipReason: SkipReason.BELOW_MIN_DEBT_USD
       };
     }
     
     // Check health factor
     const hfNumber = Number(verifyResult.healthFactor!) / 1e18;
     if (hfNumber >= 1.0) {
+      pipelineLogger.skipped({ 
+        userAddress, 
+        blockNumber, 
+        reason: SkipReason.HF_OK,
+        healthFactor: hfNumber
+      });
       return {
         userAddress,
         blockNumber,
@@ -124,11 +158,19 @@ export class Scanner extends EventEmitter {
         verified: false,
         healthFactor: verifyResult.healthFactor,
         totalDebtBase: verifyResult.totalDebtBase,
-        skipReason: 'hf_ok'
+        skipReason: SkipReason.HF_OK
       };
     }
     
     // Verified liquidatable candidate
+    pipelineLogger.verified({
+      userAddress,
+      blockNumber,
+      healthFactor: hfNumber,
+      debtUsd,
+      latencyMs: verifyLatency
+    });
+    
     return {
       userAddress,
       blockNumber,
@@ -137,6 +179,19 @@ export class Scanner extends EventEmitter {
       healthFactor: verifyResult.healthFactor,
       totalDebtBase: verifyResult.totalDebtBase
     };
+  }
+  
+  /**
+   * Map verification failure reason to SkipReason
+   */
+  private mapVerifyReason(reason?: string): SkipReason {
+    if (!reason) return SkipReason.VERIFICATION_FAILED;
+    
+    if (reason === 'zero_debt') return SkipReason.ZERO_DEBT;
+    if (reason.includes('multicall')) return SkipReason.VERIFICATION_FAILED;
+    if (reason.includes('error')) return SkipReason.ERROR;
+    
+    return SkipReason.VERIFICATION_FAILED;
   }
   
   /**
