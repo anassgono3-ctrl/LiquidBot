@@ -26,9 +26,9 @@ const ERC20_ABI = [
 ];
 
 // Constants for scaling
-const RAY = 10n ** 27n;  // 1e27 for indices
-const WAD = 10n ** 18n;  // 1e18 for balances
-const BPS = 10000n;      // Basis points
+const RAY = 10n ** 27n;  // 1e27 for indices (liquidityIndex, variableBorrowIndex)
+const WAD = 10n ** 18n;  // 1e18 for balances and health factors
+const BPS = 10000n;      // Basis points: 10000 BPS = 100% (used for thresholds and bonuses)
 
 export interface UserRiskSnapshot {
   userAddress: string;

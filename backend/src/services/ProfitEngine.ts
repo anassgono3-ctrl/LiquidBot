@@ -57,9 +57,14 @@ export class ProfitEngine {
     this.riskEngine = options.riskEngine;
     
     // Convert USD amounts to bigint (assuming 1e8 precision for USD)
+    // Using integer arithmetic to avoid precision loss
     const usdScale = 10n ** 8n;
-    this.minProfitUsd = BigInt(Math.floor((options.minProfitUsd ?? config.profitMinUsd ?? 15) * Number(usdScale)));
-    this.gasCostUsd = BigInt(Math.floor((options.gasCostUsd ?? config.gasCostUsd ?? 0) * Number(usdScale)));
+    const minProfitFloat = options.minProfitUsd ?? config.profitMinUsd ?? 15;
+    const gasCostFloat = options.gasCostUsd ?? config.gasCostUsd ?? 0;
+    
+    // Multiply by 100 first to preserve 2 decimal places, then scale
+    this.minProfitUsd = (BigInt(Math.floor(minProfitFloat * 100)) * usdScale) / 100n;
+    this.gasCostUsd = (BigInt(Math.floor(gasCostFloat * 100)) * usdScale) / 100n;
     
     this.maxSlippageBps = BigInt(options.maxSlippageBps ?? 80); // 0.8%
     this.closeFactorBps = BigInt(options.closeFactorBps ?? 5000); // 50%

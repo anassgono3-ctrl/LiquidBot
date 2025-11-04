@@ -142,9 +142,11 @@ export class Scanner extends EventEmitter {
       };
     }
     
-    // Check health factor
-    const hfNumber = Number(verifyResult.healthFactor!) / 1e18;
-    if (hfNumber >= 1.0) {
+    // Check health factor (compare as BigInt to maintain precision)
+    const WAD = 10n ** 18n;
+    if (verifyResult.healthFactor! >= WAD) {
+      // Convert to number only for logging
+      const hfNumber = Number(verifyResult.healthFactor!) / 1e18;
       pipelineLogger.skipped({ 
         userAddress, 
         blockNumber, 
@@ -163,6 +165,8 @@ export class Scanner extends EventEmitter {
     }
     
     // Verified liquidatable candidate
+    // Convert to number only for logging (precision loss acceptable here)
+    const hfNumber = Number(verifyResult.healthFactor!) / 1e18;
     pipelineLogger.verified({
       userAddress,
       blockNumber,
@@ -250,8 +254,11 @@ export class Scanner extends EventEmitter {
   /**
    * Calculate debt in USD from base currency amount
    * Assumes base currency is USD with 8 decimals (Aave oracle standard)
+   * Note: Converts to number for comparison with minDebtUsd config.
+   * Precision loss is acceptable since minDebtUsd is typically large (e.g., 200 USD)
    */
   private calculateDebtUsd(totalDebtBase: bigint): number {
+    // Convert to dollars: totalDebtBase is in 1e8 format
     return Number(totalDebtBase) / 1e8;
   }
   
