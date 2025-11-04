@@ -206,26 +206,8 @@ export class SubgraphSeeder {
     
     while (hasMore && users.length < this.maxCandidates) {
       try {
-        // Build query based on type
-        let whereClause = '';
-        if (type === 'variableDebt') {
-          // Users with any reserve having variable debt > 0
-          whereClause = 'where: { reserves_: { currentVariableDebt_gt: "0" } }';
-        } else if (type === 'stableDebt') {
-          // Users with any reserve having stable debt > 0
-          whereClause = 'where: { reserves_: { currentStableDebt_gt: "0" } }';
-        } else if (type === 'collateral') {
-          // Users with any reserve having aToken balance > 0
-          whereClause = 'where: { reserves_: { currentATokenBalance_gt: "0" } }';
-        }
-        
-        const query = gql`
-          query GetUsers($first: Int!, $skip: Int!) {
-            users(first: $first, skip: $skip, ${whereClause}) {
-              id
-            }
-          }
-        `;
+        // Build query based on type - using predefined query templates
+        const query = this.buildQueryForType(type);
         
         // Use the private perform method through reflection or make a public query
         // Since SubgraphService doesn't expose a generic query method, we'll use a workaround
@@ -267,12 +249,21 @@ export class SubgraphSeeder {
 
   /**
    * Query the subgraph through the SubgraphService
-   * This is a workaround since SubgraphService doesn't expose a generic query method
+   * Note: This accesses internal SubgraphService properties for rate limiting and retry logic.
+   * Type assertion is used because SubgraphService doesn't expose these as public API.
    */
   private async querySubgraph(query: string, variables: Record<string, unknown>): Promise<unknown> {
     // Check if service is mocked or degraded
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const service = this.subgraphService as any;
+    // Type assertion needed to access internal properties
+    interface SubgraphServiceInternal {
+      mock?: boolean;
+      degraded?: boolean;
+      client?: { request: (query: string, variables?: Record<string, unknown>) => Promise<unknown> };
+      consumeTokenOrDrop?: () => boolean;
+      retry?: <T>(fn: () => Promise<T>) => Promise<T>;
+    }
+    
+    const service = this.subgraphService as unknown as SubgraphServiceInternal;
     
     if (service.mock || service.degraded) {
       // Return empty results in mock/degraded mode
@@ -285,7 +276,7 @@ export class SubgraphSeeder {
     }
     
     // Check rate limiting
-    if (typeof service.consumeTokenOrDrop === 'function') {
+    if (service.consumeTokenOrDrop) {
       const allowed = service.consumeTokenOrDrop();
       if (!allowed) {
         throw new Error('SUBGRAPH_RATE_LIMITED');
@@ -293,9 +284,46 @@ export class SubgraphSeeder {
     }
     
     // Perform the query with retry logic
-    return service.retry(async () => {
-      return service.client.request(query, variables);
-    });
+    if (service.retry) {
+      return service.retry(async () => {
+        return service.client!.request(query, variables);
+      });
+    }
+    
+    // Fallback: direct request if retry not available
+    return service.client.request(query, variables);
+  }
+
+  /**
+   * Build GraphQL query for specific position type
+   */
+  private buildQueryForType(type: 'variableDebt' | 'stableDebt' | 'collateral'): string {
+    // Predefined query templates for each type to ensure consistent GraphQL syntax
+    const queries = {
+      variableDebt: gql`
+        query GetUsers($first: Int!, $skip: Int!) {
+          users(first: $first, skip: $skip, where: { reserves_: { currentVariableDebt_gt: "0" } }) {
+            id
+          }
+        }
+      `,
+      stableDebt: gql`
+        query GetUsers($first: Int!, $skip: Int!) {
+          users(first: $first, skip: $skip, where: { reserves_: { currentStableDebt_gt: "0" } }) {
+            id
+          }
+        }
+      `,
+      collateral: gql`
+        query GetUsers($first: Int!, $skip: Int!) {
+          users(first: $first, skip: $skip, where: { reserves_: { currentATokenBalance_gt: "0" } }) {
+            id
+          }
+        }
+      `
+    };
+    
+    return queries[type];
   }
 
   /**

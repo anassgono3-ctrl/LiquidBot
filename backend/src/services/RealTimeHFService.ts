@@ -1514,7 +1514,10 @@ export class RealTimeHFService extends EventEmitter {
       return;
     }
 
-    const intervalMs = config.subgraphRefreshMinutes * 60 * 1000;
+    // Convert minutes to milliseconds for setInterval
+    const SECONDS_PER_MINUTE = 60;
+    const MILLISECONDS_PER_SECOND = 1000;
+    const intervalMs = config.subgraphRefreshMinutes * SECONDS_PER_MINUTE * MILLISECONDS_PER_SECOND;
     
     // eslint-disable-next-line no-console
     console.log(`[realtime-hf] Starting periodic subgraph seeding (interval=${config.subgraphRefreshMinutes} minutes)`);
