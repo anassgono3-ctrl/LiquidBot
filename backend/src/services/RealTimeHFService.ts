@@ -21,7 +21,11 @@ import {
   realtimeReconnects,
   realtimeCandidateCount,
   realtimeMinHealthFactor,
-  liquidatableEdgeTriggersTotal
+  liquidatableEdgeTriggersTotal,
+  chunkTimeoutsTotal,
+  runAbortsTotal,
+  wsReconnectsTotal,
+  chunkLatency
 } from '../metrics/index.js';
 
 import { CandidateManager } from './CandidateManager.js';
@@ -71,9 +75,6 @@ interface UserState {
   lastBlock: number;
 }
 
-// Default threshold for always including low-HF candidates (Goal 3)
-const DEFAULT_ALWAYS_INCLUDE_HF_BELOW = 1.10;
-
 export class RealTimeHFService extends EventEmitter {
   private provider: WebSocketProvider | JsonRpcProvider | null = null;
   private multicall3: Contract | null = null;
@@ -115,6 +116,15 @@ export class RealTimeHFService extends EventEmitter {
   private scanningHead = false;
   private latestRequestedHeadBlock: number | null = null;
   private currentRunId: string | null = null;
+  
+  // Run-level watchdog tracking
+  private lastProgressAt: number | null = null;
+  private runWatchdogTimer?: NodeJS.Timeout;
+  
+  // WebSocket heartbeat tracking
+  private lastWsActivity: number = Date.now();
+  private wsHeartbeatTimer?: NodeJS.Timeout;
+  private isReconnecting = false;
 
   // Dirty-first prioritization (Goal 2)
   private dirtyUsers = new Set<string>();
@@ -204,6 +214,8 @@ export class RealTimeHFService extends EventEmitter {
     if (this.seedTimer) clearInterval(this.seedTimer);
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.pendingBlockTimer) clearInterval(this.pendingBlockTimer);
+    if (this.runWatchdogTimer) clearTimeout(this.runWatchdogTimer);
+    if (this.wsHeartbeatTimer) clearTimeout(this.wsHeartbeatTimer);
 
     // Remove all event listeners
     if (this.provider) {
@@ -427,10 +439,93 @@ export class RealTimeHFService extends EventEmitter {
       if (config.useFlashblocks) {
         this.startPendingBlockPolling();
       }
+
+      // 5. Start WebSocket heartbeat monitoring
+      this.startWsHeartbeat();
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[realtime-hf] Failed to setup real-time listeners:', err);
       throw err;
+    }
+  }
+
+  /**
+   * Start WebSocket heartbeat monitoring to detect stalled connections
+   */
+  private startWsHeartbeat(): void {
+    if (!this.provider || !(this.provider instanceof WebSocketProvider)) {
+      return;
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(`[realtime-hf] Starting WS heartbeat monitoring (interval=${config.wsHeartbeatMs}ms)`);
+    
+    this.lastWsActivity = Date.now();
+
+    const heartbeatCheck = () => {
+      if (this.isShuttingDown || !this.provider || this.isReconnecting) {
+        return;
+      }
+
+      const now = Date.now();
+      const timeSinceLastActivity = now - this.lastWsActivity;
+
+      if (timeSinceLastActivity > config.wsHeartbeatMs) {
+        // eslint-disable-next-line no-console
+        console.warn(`[realtime-hf] WS heartbeat timeout: no activity for ${timeSinceLastActivity}ms, triggering reconnect`);
+        wsReconnectsTotal.inc();
+        this.handleWsStall();
+      } else if (!this.isShuttingDown) {
+        // Schedule next check only if not shutting down
+        this.wsHeartbeatTimer = setTimeout(heartbeatCheck, config.wsHeartbeatMs);
+      }
+    };
+
+    // Start initial check
+    this.wsHeartbeatTimer = setTimeout(heartbeatCheck, config.wsHeartbeatMs);
+  }
+
+  /**
+   * Handle WebSocket stall by reconnecting
+   */
+  private async handleWsStall(): Promise<void> {
+    if (this.isReconnecting || this.isShuttingDown) {
+      return;
+    }
+
+    this.isReconnecting = true;
+
+    try {
+      // eslint-disable-next-line no-console
+      console.log('[realtime-hf] Attempting WS reconnect due to heartbeat failure...');
+
+      // Clean up existing provider
+      if (this.provider) {
+        try {
+          this.provider.removeAllListeners();
+          if (this.provider instanceof WebSocketProvider) {
+            await this.provider.destroy();
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn('[realtime-hf] Error during provider cleanup:', err);
+        }
+      }
+
+      // Re-setup provider and listeners
+      await this.setupProvider();
+      await this.setupContracts();
+      await this.setupRealtime();
+
+      // eslint-disable-next-line no-console
+      console.log('[realtime-hf] ws_reconnected successfully after heartbeat failure');
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[realtime-hf] WS reconnect failed:', err);
+      // Fall back to standard reconnect logic
+      this.handleDisconnect();
+    } finally {
+      this.isReconnecting = false;
     }
   }
 
@@ -440,6 +535,9 @@ export class RealTimeHFService extends EventEmitter {
   private async handleNewBlock(blockNumber: number): Promise<void> {
     // eslint-disable-next-line no-console
     console.log(`[realtime-hf] New block ${blockNumber}`);
+
+    // Update WS activity timestamp
+    this.lastWsActivity = Date.now();
 
     this.metrics.blocksReceived++;
     realtimeBlocksReceived.inc();
@@ -486,12 +584,94 @@ export class RealTimeHFService extends EventEmitter {
         // Generate unique run ID
         this.currentRunId = `${Date.now()}-${runBlock}`;
 
-        // Perform the head check for this block
-        await this.performHeadCheck(runBlock, this.currentRunId);
+        // Initialize progress tracking for this run
+        this.lastProgressAt = Date.now();
+
+        // Start run-level watchdog
+        this.startRunWatchdog(runBlock);
+
+        try {
+          // Perform the head check for this block
+          await this.performHeadCheck(runBlock, this.currentRunId);
+        } finally {
+          // Stop watchdog for this run
+          this.stopRunWatchdog();
+        }
       }
     } finally {
       this.scanningHead = false;
       this.currentRunId = null;
+      this.lastProgressAt = null;
+    }
+  }
+
+  /**
+   * Start run-level watchdog to detect stalled runs
+   */
+  private startRunWatchdog(blockNumber: number): void {
+    // Clear any existing watchdog
+    this.stopRunWatchdog();
+
+    const checkStall = () => {
+      if (!this.lastProgressAt || this.isShuttingDown) {
+        return;
+      }
+
+      const now = Date.now();
+      const timeSinceProgress = now - this.lastProgressAt;
+
+      if (timeSinceProgress > config.runStallAbortMs) {
+        // eslint-disable-next-line no-console
+        console.error(`[realtime-hf] run=${this.currentRunId} block=${blockNumber} stalled after ${timeSinceProgress}ms; aborting`);
+        runAbortsTotal.inc();
+        
+        // Abort the run by pushing block back to queue and releasing lock
+        this.abortCurrentRun(blockNumber);
+      } else if (!this.isShuttingDown) {
+        // Re-schedule check only if not shutting down
+        this.runWatchdogTimer = setTimeout(checkStall, config.runStallAbortMs);
+      }
+    };
+
+    this.runWatchdogTimer = setTimeout(checkStall, config.runStallAbortMs);
+  }
+
+  /**
+   * Stop run-level watchdog
+   */
+  private stopRunWatchdog(): void {
+    if (this.runWatchdogTimer) {
+      clearTimeout(this.runWatchdogTimer);
+      this.runWatchdogTimer = undefined;
+    }
+  }
+
+  /**
+   * Abort current run and recover cleanly
+   */
+  private abortCurrentRun(blockNumber: number): void {
+    // Stop watchdog
+    this.stopRunWatchdog();
+
+    // If there's a pending block request that we're aborting, push it back
+    if (blockNumber && this.latestRequestedHeadBlock !== blockNumber) {
+      this.latestRequestedHeadBlock = blockNumber;
+    }
+
+    // Release the scanning lock to allow new runs
+    this.scanningHead = false;
+    this.currentRunId = null;
+    this.lastProgressAt = null;
+
+    // eslint-disable-next-line no-console
+    console.log(`[realtime-hf] Run aborted, will retry on next tick`);
+
+    // Restart the run loop if there's a pending block
+    if (this.latestRequestedHeadBlock !== null) {
+      this.runHeadCheckLoop().catch(err => {
+        // eslint-disable-next-line no-console
+        console.error('[realtime-hf] Error restarting run loop after abort:', err);
+      });
     }
   }
 
@@ -932,8 +1112,140 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Execute a promise with a hard timeout
+   * Properly cleans up the timeout to prevent leaks
+   */
+  private async withTimeout<T>(
+    promise: Promise<T>,
+    timeoutMs: number,
+    timeoutError: string
+  ): Promise<T> {
+    let timeoutId: NodeJS.Timeout;
+    
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error(timeoutError)), timeoutMs);
+    });
+
+    return Promise.race([
+      promise.then(result => {
+        clearTimeout(timeoutId);
+        return result;
+      }),
+      timeoutPromise
+    ]).catch(err => {
+      clearTimeout(timeoutId);
+      throw err;
+    });
+  }
+
+  /**
+   * Execute a single chunk with timeout and retry logic
+   */
+  private async executeChunkWithTimeout(
+    chunk: Array<{ target: string; allowFailure: boolean; callData: string }>,
+    overrides: Record<string, unknown>,
+    chunkNum: number,
+    totalChunks: number,
+    logPrefix: string
+  ): Promise<Array<{ success: boolean; returnData: string }> | null> {
+    const maxAttempts = config.chunkRetryAttempts + 1; // +1 for initial attempt
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const startTime = Date.now();
+
+      try {
+        // Wrap the call with timeout
+        const results = await this.withTimeout(
+          this.multicall3!.aggregate3.staticCall(chunk, overrides),
+          config.chunkTimeoutMs,
+          `Chunk ${chunkNum} timeout after ${config.chunkTimeoutMs}ms`
+        );
+
+        const duration = (Date.now() - startTime) / 1000;
+        chunkLatency.observe(duration);
+
+        // Update progress timestamp on successful chunk
+        this.lastProgressAt = Date.now();
+
+        this.clearRateLimitTracking();
+        // eslint-disable-next-line no-console
+        console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls, ${duration.toFixed(2)}s)`);
+        return results;
+      } catch (err) {
+        const isTimeout = err instanceof Error && err.message.includes('timeout');
+
+        if (isTimeout) {
+          chunkTimeoutsTotal.inc();
+          // eslint-disable-next-line no-console
+          console.warn(`${logPrefix} timeout run=${this.currentRunId} block=${this.currentBlockNumber || 'unknown'} chunk ${chunkNum}/${totalChunks} after ${config.chunkTimeoutMs}ms (attempt ${attempt + 1}/${maxAttempts})`);
+        }
+
+        if (this.isRateLimitError(err)) {
+          this.handleRateLimit();
+        }
+
+        // Try secondary provider on first timeout or rate-limit if available
+        if ((isTimeout || this.isRateLimitError(err)) && attempt === 0 && this.secondaryMulticall3) {
+          try {
+            // eslint-disable-next-line no-console
+            console.log(`${logPrefix} Chunk ${chunkNum} trying secondary provider`);
+            const secondaryStartTime = Date.now();
+            
+            const results = await this.withTimeout(
+              this.secondaryMulticall3.aggregate3.staticCall(chunk, overrides),
+              config.chunkTimeoutMs,
+              `Chunk ${chunkNum} secondary timeout after ${config.chunkTimeoutMs}ms`
+            );
+
+            const secondaryDuration = (Date.now() - secondaryStartTime) / 1000;
+            chunkLatency.observe(secondaryDuration);
+
+            // Update progress timestamp on successful chunk
+            this.lastProgressAt = Date.now();
+
+            this.clearRateLimitTracking();
+            // eslint-disable-next-line no-console
+            console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete via secondary (${chunk.length} calls, ${secondaryDuration.toFixed(2)}s)`);
+            return results;
+          } catch (secondaryErr) {
+            // eslint-disable-next-line no-console
+            console.warn(`${logPrefix} Chunk ${chunkNum} secondary also failed`);
+          }
+        }
+
+        // If not last attempt, do jittered backoff
+        if (attempt < maxAttempts - 1) {
+          const baseDelay = 1000 * Math.pow(2, attempt);
+          const jitter = Math.random() * baseDelay * 0.3;
+          const delayMs = Math.floor(baseDelay + jitter);
+          // eslint-disable-next-line no-console
+          console.log(`${logPrefix} Chunk ${chunkNum} retrying in ${delayMs}ms (attempt ${attempt + 2}/${maxAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, delayMs));
+          continue;
+        }
+
+        // All attempts failed
+        if (isTimeout) {
+          // eslint-disable-next-line no-console
+          console.error(`${logPrefix} Chunk ${chunkNum} failed: all attempts timed out`);
+        } else if (this.isRateLimitError(err)) {
+          // eslint-disable-next-line no-console
+          console.warn(`${logPrefix} Chunk ${chunkNum} failed: rate limit persists after retries`);
+        } else {
+          // eslint-disable-next-line no-console
+          console.error(`${logPrefix} Chunk ${chunkNum} failed:`, err);
+        }
+
+        return null;
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Perform read-only Multicall3 aggregate3 call with automatic chunking,
-   * rate-limit detection, jittered backoff retry, and optional secondary fallback (Goals 4 & 5)
+   * hard timeouts, retry logic, and optional secondary fallback
    * @param calls Array of multicall calls
    * @param chunkSize Optional chunk size override
    * @param blockTag Optional blockTag for consistent reads
@@ -950,59 +1262,27 @@ export class RealTimeHFService extends EventEmitter {
     // Use adaptive chunk size if not specified
     const effectiveChunkSize = chunkSize || this.currentChunkSize;
     
-    // Log prefix for unambiguous run tracking (Goal 4)
+    // Log prefix for unambiguous run tracking
     const logPrefix = this.getLogPrefix();
     
     // Prepare overrides with blockTag if specified
     const overrides = blockTag ? { blockTag } : {};
 
-    // If calls fit in single batch, execute with retry
+    // If calls fit in single batch, execute with timeout and retry
     if (calls.length <= effectiveChunkSize) {
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const results = await this.multicall3.aggregate3.staticCall(calls, overrides);
-          this.clearRateLimitTracking();
-          return results;
-        } catch (err) {
-          if (this.isRateLimitError(err)) {
-            this.handleRateLimit();
-            
-            if (attempt < 2) {
-              // Try secondary provider if available (Goal 5)
-              if (this.secondaryMulticall3 && attempt === 0) {
-                try {
-                  // eslint-disable-next-line no-console
-                  console.log(`${logPrefix} Rate limit on primary - trying secondary provider`);
-                  const results = await this.secondaryMulticall3.aggregate3.staticCall(calls, overrides);
-                  this.clearRateLimitTracking();
-                  return results;
-                } catch (secondaryErr) {
-                  // eslint-disable-next-line no-console
-                  console.warn(`${logPrefix} Secondary provider also failed`);
-                }
-              }
-              
-              // Jittered exponential backoff
-              const baseDelay = 1000 * Math.pow(2, attempt);
-              const jitter = Math.random() * baseDelay * 0.3; // ±30% jitter
-              const delayMs = Math.floor(baseDelay + jitter);
-              // eslint-disable-next-line no-console
-              console.log(`${logPrefix} Rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
-              await new Promise(resolve => setTimeout(resolve, delayMs));
-              continue;
-            } else {
-              // Max retries reached - defer to next tick
-              // eslint-disable-next-line no-console
-              console.warn(`${logPrefix} Rate limit persists after retries - deferring chunk to next tick`);
-              return calls.map(() => ({ success: false, returnData: '0x' }));
-            }
-          } else {
-            // Non rate-limit error
-            // eslint-disable-next-line no-console
-            console.error(`${logPrefix} Multicall3 staticCall failed:`, err);
-            throw err;
-          }
-        }
+      const results = await this.executeChunkWithTimeout(
+        calls,
+        overrides,
+        1,
+        1,
+        logPrefix
+      );
+
+      if (results) {
+        return results;
+      } else {
+        // Chunk failed - return synthetic failures
+        return calls.map(() => ({ success: false, returnData: '0x' }));
       }
     }
 
@@ -1011,67 +1291,24 @@ export class RealTimeHFService extends EventEmitter {
     console.log(`${logPrefix} Chunking ${calls.length} calls into batches of ${effectiveChunkSize}`);
     
     const allResults: Array<{ success: boolean; returnData: string }> = [];
+    const totalChunks = Math.ceil(calls.length / effectiveChunkSize);
+
     for (let i = 0; i < calls.length; i += effectiveChunkSize) {
       const chunk = calls.slice(i, i + effectiveChunkSize);
       const chunkNum = Math.floor(i / effectiveChunkSize) + 1;
-      const totalChunks = Math.ceil(calls.length / effectiveChunkSize);
-      
-      // Retry logic for each chunk
-      let chunkSuccess = false;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          const results = await this.multicall3.aggregate3.staticCall(chunk, overrides);
-          allResults.push(...results);
-          this.clearRateLimitTracking();
-          // eslint-disable-next-line no-console
-          console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls)`);
-          chunkSuccess = true;
-          break;
-        } catch (err) {
-          if (this.isRateLimitError(err)) {
-            this.handleRateLimit();
-            
-            if (attempt < 2) {
-              // Try secondary provider if available (Goal 5)
-              if (this.secondaryMulticall3 && attempt === 0) {
-                try {
-                  // eslint-disable-next-line no-console
-                  console.log(`${logPrefix} Chunk ${chunkNum} rate limit on primary - trying secondary`);
-                  const results = await this.secondaryMulticall3.aggregate3.staticCall(chunk, overrides);
-                  allResults.push(...results);
-                  this.clearRateLimitTracking();
-                  // eslint-disable-next-line no-console
-                  console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete via secondary (${chunk.length} calls)`);
-                  chunkSuccess = true;
-                  break;
-                } catch (secondaryErr) {
-                  // eslint-disable-next-line no-console
-                  console.warn(`${logPrefix} Chunk ${chunkNum} secondary also failed`);
-                }
-              }
-              
-              // Jittered exponential backoff
-              const baseDelay = 1000 * Math.pow(2, attempt);
-              const jitter = Math.random() * baseDelay * 0.3;
-              const delayMs = Math.floor(baseDelay + jitter);
-              // eslint-disable-next-line no-console
-              console.log(`${logPrefix} Chunk ${chunkNum} rate limit (attempt ${attempt + 1}/3) - retrying in ${delayMs}ms`);
-              await new Promise(resolve => setTimeout(resolve, delayMs));
-              continue;
-            }
-          } else {
-            // Non rate-limit error
-            // eslint-disable-next-line no-console
-            console.error(`${logPrefix} Multicall3 chunk ${chunkNum} failed:`, err);
-          }
-          break;
-        }
-      }
-      
-      // If chunk failed after retries, return failure results to avoid crashing
-      if (!chunkSuccess) {
-        // eslint-disable-next-line no-console
-        console.warn(`${logPrefix} Chunk ${chunkNum} failed - deferring to next tick`);
+
+      const results = await this.executeChunkWithTimeout(
+        chunk,
+        overrides,
+        chunkNum,
+        totalChunks,
+        logPrefix
+      );
+
+      if (results) {
+        allResults.push(...results);
+      } else {
+        // Chunk failed - add synthetic failures and continue
         const failedResults = chunk.map(() => ({ success: false, returnData: '0x' }));
         allResults.push(...failedResults);
       }

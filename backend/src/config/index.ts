@@ -170,6 +170,12 @@ export const config = {
   // Optional secondary RPC for head-check fallback
   get secondaryHeadRpcUrl() { return env.secondaryHeadRpcUrl; },
   get headCheckHedgeMs() { return env.headCheckHedgeMs; },
+
+  // Timeout and retry configuration
+  get chunkTimeoutMs() { return env.chunkTimeoutMs; },
+  get chunkRetryAttempts() { return env.chunkRetryAttempts; },
+  get runStallAbortMs() { return env.runStallAbortMs; },
+  get wsHeartbeatMs() { return env.wsHeartbeatMs; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },

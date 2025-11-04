@@ -151,7 +151,17 @@ export const rawEnvSchema = z.object({
   SECONDARY_HEAD_RPC_URL: z.string().optional(),
 
   // Optional hedge window for dirty-first chunks (milliseconds)
-  HEAD_CHECK_HEDGE_MS: z.string().optional()
+  HEAD_CHECK_HEDGE_MS: z.string().optional(),
+
+  // Timeout and retry configuration for multicall chunks
+  CHUNK_TIMEOUT_MS: z.string().optional(),
+  CHUNK_RETRY_ATTEMPTS: z.string().optional(),
+
+  // Run-level watchdog configuration
+  RUN_STALL_ABORT_MS: z.string().optional(),
+
+  // WebSocket heartbeat configuration
+  WS_HEARTBEAT_MS: z.string().optional()
 });
 
 export const env = (() => {
@@ -311,6 +321,16 @@ export const env = (() => {
     secondaryHeadRpcUrl: parsed.SECONDARY_HEAD_RPC_URL,
 
     // Optional hedge window for dirty-first chunks (default: undefined/disabled)
-    headCheckHedgeMs: parsed.HEAD_CHECK_HEDGE_MS ? Number(parsed.HEAD_CHECK_HEDGE_MS) : undefined
+    headCheckHedgeMs: parsed.HEAD_CHECK_HEDGE_MS ? Number(parsed.HEAD_CHECK_HEDGE_MS) : undefined,
+
+    // Timeout and retry configuration for multicall chunks
+    chunkTimeoutMs: Number(parsed.CHUNK_TIMEOUT_MS || 2000),
+    chunkRetryAttempts: Number(parsed.CHUNK_RETRY_ATTEMPTS || 2),
+
+    // Run-level watchdog configuration
+    runStallAbortMs: Number(parsed.RUN_STALL_ABORT_MS || 5000),
+
+    // WebSocket heartbeat configuration
+    wsHeartbeatMs: Number(parsed.WS_HEARTBEAT_MS || 15000)
   };
 })();
