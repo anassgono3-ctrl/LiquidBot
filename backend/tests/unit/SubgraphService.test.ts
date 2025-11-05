@@ -490,6 +490,83 @@ describe('SubgraphService', () => {
     });
   });
 
+  describe('getUsersWithBorrowing', () => {
+    it('should use getUsersPage when paging is disabled', async () => {
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      requestMock.mockResolvedValue({ users: [] });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      
+      await service.getUsersWithBorrowing(100, false);
+      
+      // Should not log paging message
+      expect(consoleLogSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('Fetching users with paging')
+      );
+      consoleWarnSpy.mockRestore();
+      consoleLogSpy.mockRestore();
+    });
+
+    it('should fetch multiple pages when paging is enabled', async () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      
+      // Mock first page with 100 users, second page with 50 users
+      requestMock.mockResolvedValueOnce({
+        users: Array(100).fill(null).map((_, i) => ({
+          id: `0xuser${i}`,
+          borrowedReservesCount: 1,
+          reserves: [{
+            currentATokenBalance: '1000000000',
+            currentVariableDebt: '500000000',
+            currentStableDebt: '0',
+            reserve: {
+              id: '0xusdc',
+              symbol: 'USDC',
+              name: 'USD Coin',
+              decimals: 6,
+              reserveLiquidationThreshold: 8500,
+              usageAsCollateralEnabled: true,
+              price: { priceInEth: '500000000000000' }
+            }
+          }]
+        }))
+      }).mockResolvedValueOnce({
+        users: Array(50).fill(null).map((_, i) => ({
+          id: `0xuser${i + 100}`,
+          borrowedReservesCount: 1,
+          reserves: [{
+            currentATokenBalance: '1000000000',
+            currentVariableDebt: '500000000',
+            currentStableDebt: '0',
+            reserve: {
+              id: '0xusdc',
+              symbol: 'USDC',
+              name: 'USD Coin',
+              decimals: 6,
+              reserveLiquidationThreshold: 8500,
+              usageAsCollateralEnabled: true,
+              price: { priceInEth: '500000000000000' }
+            }
+          }]
+        }))
+      });
+      
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      const result = await service.getUsersWithBorrowing(150, true);
+      
+      // Should fetch 2 pages and return 150 users
+      expect(result).toHaveLength(150);
+      expect(requestMock).toHaveBeenCalledTimes(2);
+      
+      // Should log paging message
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Fetching users with paging')
+      );
+      
+      consoleLogSpy.mockRestore();
+    });
+  });
+
   describe('mock mode', () => {
     it('returns canned data in mock mode for single user', async () => {
       const service = SubgraphService.createMock();
