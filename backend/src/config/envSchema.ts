@@ -166,7 +166,21 @@ export const rawEnvSchema = z.object({
   RUN_STALL_ABORT_MS: z.string().optional(),
 
   // WebSocket heartbeat configuration
-  WS_HEARTBEAT_MS: z.string().optional()
+  WS_HEARTBEAT_MS: z.string().optional(),
+
+  // Multicall batch size configuration
+  MULTICALL_BATCH_SIZE: z.string().optional(),
+
+  // Adaptive head page sizing
+  HEAD_PAGE_ADAPTIVE: z.string().optional(),
+  HEAD_PAGE_TARGET_MS: z.string().optional(),
+  HEAD_PAGE_MIN: z.string().optional(),
+  HEAD_PAGE_MAX: z.string().optional(),
+
+  // Event batch coalescing and limits
+  EVENT_BATCH_COALESCE_MS: z.string().optional(),
+  EVENT_BATCH_MAX_PER_BLOCK: z.string().optional(),
+  MAX_PARALLEL_EVENT_BATCHES: z.string().optional()
 });
 
 export const env = (() => {
@@ -331,8 +345,8 @@ export const env = (() => {
     // Optional secondary RPC for head-check fallback
     secondaryHeadRpcUrl: parsed.SECONDARY_HEAD_RPC_URL,
 
-    // Optional hedge window for dirty-first chunks (default: undefined/disabled)
-    headCheckHedgeMs: parsed.HEAD_CHECK_HEDGE_MS ? Number(parsed.HEAD_CHECK_HEDGE_MS) : undefined,
+    // Optional hedge window for dirty-first chunks (default: 300ms, 0 disables)
+    headCheckHedgeMs: Number(parsed.HEAD_CHECK_HEDGE_MS || 300),
 
     // Timeout and retry configuration for multicall chunks
     chunkTimeoutMs: Number(parsed.CHUNK_TIMEOUT_MS || 2000),
@@ -342,6 +356,20 @@ export const env = (() => {
     runStallAbortMs: Number(parsed.RUN_STALL_ABORT_MS || 5000),
 
     // WebSocket heartbeat configuration
-    wsHeartbeatMs: Number(parsed.WS_HEARTBEAT_MS || 15000)
+    wsHeartbeatMs: Number(parsed.WS_HEARTBEAT_MS || 15000),
+
+    // Multicall batch size configuration (default: 120)
+    multicallBatchSize: Number(parsed.MULTICALL_BATCH_SIZE || 120),
+
+    // Adaptive head page sizing
+    headPageAdaptive: (parsed.HEAD_PAGE_ADAPTIVE || 'true').toLowerCase() === 'true',
+    headPageTargetMs: Number(parsed.HEAD_PAGE_TARGET_MS || 900),
+    headPageMin: Number(parsed.HEAD_PAGE_MIN || 600),
+    headPageMax: Number(parsed.HEAD_PAGE_MAX || parsed.HEAD_CHECK_PAGE_SIZE || 2400),
+
+    // Event batch coalescing and limits
+    eventBatchCoalesceMs: Number(parsed.EVENT_BATCH_COALESCE_MS || 120),
+    eventBatchMaxPerBlock: Number(parsed.EVENT_BATCH_MAX_PER_BLOCK || 2),
+    maxParallelEventBatches: Number(parsed.MAX_PARALLEL_EVENT_BATCHES || 1)
   };
 })();
