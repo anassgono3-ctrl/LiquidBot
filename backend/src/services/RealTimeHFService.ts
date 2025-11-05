@@ -32,6 +32,7 @@ import { CandidateManager } from './CandidateManager.js';
 import type { SubgraphService } from './SubgraphService.js';
 import { OnChainBackfillService } from './OnChainBackfillService.js';
 import { SubgraphSeeder } from './SubgraphSeeder.js';
+import { BorrowersIndexService } from './BorrowersIndexService.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -84,6 +85,7 @@ export class RealTimeHFService extends EventEmitter {
   private subgraphService?: SubgraphService;
   private subgraphSeeder?: SubgraphSeeder;
   private backfillService?: OnChainBackfillService;
+  private borrowersIndex?: BorrowersIndexService;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
