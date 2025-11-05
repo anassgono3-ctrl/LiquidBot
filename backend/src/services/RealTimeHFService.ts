@@ -155,6 +155,16 @@ export class RealTimeHFService extends EventEmitter {
     secondaryUsed: 0
   };
 
+  // Event batch coalescing
+  private eventBatchQueue: Map<string, {
+    users: Set<string>;
+    reserves: Set<string>;
+    timer: NodeJS.Timeout;
+    blockNumber: number;
+  }> = new Map();
+  private eventBatchesPerBlock: Map<number, number> = new Map();
+  private runningEventBatches = 0;
+
   // Metrics
   private metrics = {
     blocksReceived: 0,
@@ -243,6 +253,13 @@ export class RealTimeHFService extends EventEmitter {
     if (this.pendingBlockTimer) clearInterval(this.pendingBlockTimer);
     if (this.runWatchdogTimer) clearTimeout(this.runWatchdogTimer);
     if (this.wsHeartbeatTimer) clearTimeout(this.wsHeartbeatTimer);
+
+    // Clear event batch timers
+    for (const [, batch] of this.eventBatchQueue) {
+      clearTimeout(batch.timer);
+    }
+    this.eventBatchQueue.clear();
+    this.eventBatchesPerBlock.clear();
 
     // Remove all event listeners
     if (this.provider) {
@@ -823,29 +840,15 @@ export class RealTimeHFService extends EventEmitter {
           console.log(`[realtime-hf] LiquidationCall detected for user ${users[0]}, rechecking HF`);
         }
         
-        // For all user-affecting events, enqueue targeted HF recheck
+        // For all user-affecting events, enqueue with coalescing
         if (users.length > 0) {
-          for (const user of users) {
-            // Add/touch candidate
-            this.candidateManager.add(user);
-            
-            // Perform targeted check for this specific user
-            await this.checkCandidate(user, 'event');
-          }
+          // Enqueue event batch with coalescing
+          this.enqueueEventBatch(users, reserve, blockNumber);
         } else {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
-            // Per-block gating: at most one low-HF recheck per block from reserve updates (Goal 5)
-            if (this.lastReserveCheckBlock === blockNumber) {
-              // eslint-disable-next-line no-console
-              console.log(`[realtime-hf] ReserveDataUpdated for ${reserve} - skipping (already checked this block)`);
-              return;
-            }
-            this.lastReserveCheckBlock = blockNumber;
-            
-            // eslint-disable-next-line no-console
-            console.log(`[realtime-hf] ReserveDataUpdated for ${reserve}, checking low HF candidates`);
-            await this.checkLowHFCandidates('event');
+            // Enqueue a batch check for low-HF candidates, coalesced per block+reserve
+            this.enqueueEventBatch([], reserve, blockNumber);
           }
         }
       } else {
@@ -855,11 +858,12 @@ export class RealTimeHFService extends EventEmitter {
           // eslint-disable-next-line no-console
           console.log(`[realtime-hf] Aave event detected for user ${userAddress} (legacy)`);
           
-          // Add/touch candidate
-          this.candidateManager.add(userAddress);
+          const blockNumber = typeof log.blockNumber === 'string' 
+            ? parseInt(log.blockNumber, 16) 
+            : log.blockNumber;
           
-          // Perform targeted check
-          await this.checkCandidate(userAddress, 'event');
+          // Enqueue with coalescing
+          this.enqueueEventBatch([userAddress], null, blockNumber);
         }
       }
     } else {
@@ -1171,6 +1175,108 @@ export class RealTimeHFService extends EventEmitter {
    */
   private getLogPrefix(): string {
     return `[realtime-hf] run=${this.currentRunId || 'unknown'} block=${this.currentBlockNumber || 'unknown'}`;
+  }
+
+  /**
+   * Enqueue event-driven batch check with coalescing
+   */
+  private enqueueEventBatch(users: string[], reserve: string | null, blockNumber: number): void {
+    // Create a key based on block number and reserve (if any)
+    const batchKey = reserve ? `block-${blockNumber}-reserve-${reserve}` : `block-${blockNumber}-users`;
+
+    // Get or create batch entry
+    let batch = this.eventBatchQueue.get(batchKey);
+    if (!batch) {
+      // Create new batch with debounce timer
+      batch = {
+        users: new Set<string>(),
+        reserves: new Set<string>(),
+        timer: setTimeout(() => {
+          this.executeEventBatch(batchKey).catch(err => {
+            // eslint-disable-next-line no-console
+            console.error(`[event-coalesce] Failed to execute batch ${batchKey}:`, err);
+          });
+        }, config.eventBatchCoalesceMs),
+        blockNumber
+      };
+      this.eventBatchQueue.set(batchKey, batch);
+    } else {
+      // Reset timer to extend debounce window
+      clearTimeout(batch.timer);
+      batch.timer = setTimeout(() => {
+        this.executeEventBatch(batchKey).catch(err => {
+          // eslint-disable-next-line no-console
+          console.error(`[event-coalesce] Failed to execute batch ${batchKey}:`, err);
+        });
+      }, config.eventBatchCoalesceMs);
+    }
+
+    // Add users and reserve to batch
+    for (const user of users) {
+      batch.users.add(user.toLowerCase());
+      this.candidateManager.add(user);
+    }
+    if (reserve) {
+      batch.reserves.add(reserve.toLowerCase());
+    }
+  }
+
+  /**
+   * Execute a coalesced event batch
+   */
+  private async executeEventBatch(batchKey: string): Promise<void> {
+    const batch = this.eventBatchQueue.get(batchKey);
+    if (!batch) return;
+
+    // Remove from queue
+    this.eventBatchQueue.delete(batchKey);
+
+    const blockNumber = batch.blockNumber;
+    const userCount = batch.users.size;
+    const reserveCount = batch.reserves.size;
+
+    // Check if we've hit the per-block limit
+    const batchesThisBlock = this.eventBatchesPerBlock.get(blockNumber) || 0;
+    if (batchesThisBlock >= config.eventBatchMaxPerBlock) {
+      // eslint-disable-next-line no-console
+      console.log(`[event-coalesce] skipped batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount}) - per-block limit reached (${config.eventBatchMaxPerBlock})`);
+      return;
+    }
+
+    // Check concurrency limit
+    if (this.runningEventBatches >= config.maxParallelEventBatches) {
+      // eslint-disable-next-line no-console
+      console.log(`[event-coalesce] skipped batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount}) - concurrency limit reached (${config.maxParallelEventBatches})`);
+      return;
+    }
+
+    // Increment counters
+    this.eventBatchesPerBlock.set(blockNumber, batchesThisBlock + 1);
+    this.runningEventBatches++;
+
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[event-coalesce] executing batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount})`);
+
+      // Execute checks for all users in the batch
+      const usersArray = Array.from(batch.users);
+      if (usersArray.length > 0) {
+        await this.batchCheckCandidates(usersArray, 'event', blockNumber);
+      } else if (reserveCount > 0) {
+        // No specific users but reserve updated - check low-HF candidates
+        await this.checkLowHFCandidates('event', blockNumber);
+      }
+    } finally {
+      this.runningEventBatches--;
+      
+      // Clean up old block counters (keep last 10 blocks)
+      const oldestBlockToKeep = blockNumber - 10;
+      for (const [block] of this.eventBatchesPerBlock) {
+        if (block < oldestBlockToKeep) {
+          this.eventBatchesPerBlock.delete(block);
+        }
+      }
+    }
   }
 
   /**

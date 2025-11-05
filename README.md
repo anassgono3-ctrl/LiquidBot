@@ -81,6 +81,64 @@ All contracts include NatSpec documentation and event emission for off-chain ind
 - Gas budget per intervention: <$3 (Base L2 assumptions)
 - Uptime target: 99.9% (≤8.76h annual downtime)
 
+## RPC-only Tuning and Stability
+
+When operating in RPC-only mode (USE_SUBGRAPH=false), the real-time HF service relies on WebSocket events and periodic on-chain health checks. The following configuration options help optimize performance, reduce provider pressure, and improve stability under high load.
+
+### Configuration Options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MULTICALL_BATCH_SIZE` | 120 | Number of calls per multicall sub-batch. Increase to 150-200 for paid Alchemy plans. |
+| `HEAD_PAGE_ADAPTIVE` | true | Enable adaptive adjustment of page size based on latency/timeout rates. |
+| `HEAD_PAGE_TARGET_MS` | 900 | Target maximum elapsed time per head page run (ms). Adaptive logic adjusts page size to stay within target. |
+| `HEAD_PAGE_MIN` | 600 | Lower bound on dynamic page size (candidates per block). |
+| `HEAD_PAGE_MAX` | HEAD_CHECK_PAGE_SIZE or 2400 | Upper bound for adaptive page size. |
+| `HEAD_CHECK_HEDGE_MS` | 300 | Hedge window (ms) for early secondary provider race. Set to 0 to disable hedging. Requires SECONDARY_HEAD_RPC_URL. |
+| `EVENT_BATCH_COALESCE_MS` | 120 | Debounce window (ms) to coalesce event triggers per block/reserve into a single batch. |
+| `EVENT_BATCH_MAX_PER_BLOCK` | 2 | Cap on event-driven batch executions per block to avoid starvation. |
+| `MAX_PARALLEL_EVENT_BATCHES` | 1 | Maximum concurrent event batches to avoid provider contention with head sweeps. |
+
+### Quick-Start Tuning for Alchemy
+
+| Alchemy Plan | MULTICALL_BATCH_SIZE | HEAD_PAGE_TARGET_MS | HEAD_CHECK_HEDGE_MS | Notes |
+|--------------|----------------------|---------------------|---------------------|-------|
+| Free Tier | 80 | 1200 | 0 (disabled) | Conservative settings to avoid rate limits |
+| Growth | 120 | 900 | 300 | Default balanced settings |
+| Scale | 150-180 | 700 | 250 | Aggressive settings for paid tier |
+
+### How It Works
+
+**Adaptive Page Sizing**: The service tracks the last 20 head runs (elapsed time, timeout count, avg latency). If runs consistently exceed `HEAD_PAGE_TARGET_MS` or timeout rate > 5%, it decreases the page size by 15%. If runs complete well under target (< 60%) with no timeouts, it increases page size by 12%. This keeps head sweeps fast and responsive.
+
+**Early Hedging**: When `HEAD_CHECK_HEDGE_MS > 0` and a secondary RPC is configured, the service fires a hedge request to the secondary provider after the specified delay if the primary hasn't returned yet. Whichever resolves first is used, reducing timeout occurrences at full `CHUNK_TIMEOUT_MS` cost.
+
+**Event Coalescing**: Multiple ReserveDataUpdated or user events in the same block are debounced and merged into a single batch check. This reduces contention with head sweeps and avoids redundant work. The `EVENT_BATCH_MAX_PER_BLOCK` cap ensures event-driven checks don't starve periodic head sweeps.
+
+**Head-Run Catch-Up**: When a new block arrives while a head sweep is still running, the service doesn't queue another full run for each intermediate block. Instead, it coalesces requests and schedules a single run for the latest block once the current run completes, with explicit skip logging.
+
+### Observability
+
+Head sweep logs now include detailed metrics:
+```
+Batch check complete: 250 candidates, minHF=0.9823, trigger=head, subBatch=120, hedges=3, timeouts=0, primaryShare=85%
+```
+
+Adaptive adjustments are logged:
+```
+[head-adapt] adjusted page size 250 -> 213 (avg=985ms, timeouts=5.2%)
+```
+
+Catch-up skips are logged:
+```
+[head-catchup] skipped 2 stale blocks (latest=12345678)
+```
+
+Event coalescing logs:
+```
+[event-coalesce] executing batch (block=12345678, users=15, reserves=2)
+```
+
 ## Security & Risk Controls
 
 - 95%+ contract test coverage (Hardhat + Foundry)
