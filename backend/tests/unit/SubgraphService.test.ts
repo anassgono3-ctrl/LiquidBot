@@ -449,15 +449,18 @@ describe('SubgraphService', () => {
       expect(result).toHaveLength(0);
     });
 
-    it('should clamp limit to 200', async () => {
+    it('should clamp limit to SUBGRAPH_PAGE_SIZE (max 1000)', async () => {
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       requestMock.mockResolvedValue({ users: [] });
       const service = new SubgraphService({ mock: false, client: { request: requestMock } });
       
-      await service.getUsersPage(300);
+      await service.getUsersPage(1500);
       
+      // Should clamp to min(SUBGRAPH_PAGE_SIZE, 1000)
+      // Default SUBGRAPH_PAGE_SIZE in .env.example is 100, but max is 1000
+      // The warning should mention the clamped value
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('getUsersPage: limit 300 clamped to 200')
+        expect.stringMatching(/getUsersPage: limit 1500 clamped to \d+ \(pageSize=\d+\)/)
       );
       consoleWarnSpy.mockRestore();
     });

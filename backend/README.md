@@ -405,7 +405,8 @@ else hf = weightedCollateralETH / totalDebtETH
 - **Configurable notifications**: Choose whether to alert on warnings
 
 **Safeguards**:
-- Hard cap at 200 users (warns and clamps if exceeded)
+- Per-page clamp to SUBGRAPH_PAGE_SIZE (max 1000) respecting The Graph's limits
+- Pagination across multiple pages to honor AT_RISK_SCAN_LIMIT
 - Errors logged but don't degrade main liquidation path
 - Can be disabled entirely by setting limit to 0
 
