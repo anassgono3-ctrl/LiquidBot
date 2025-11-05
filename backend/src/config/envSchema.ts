@@ -345,7 +345,8 @@ export const env = (() => {
     // Optional secondary RPC for head-check fallback
     secondaryHeadRpcUrl: parsed.SECONDARY_HEAD_RPC_URL,
 
-    // Optional hedge window for dirty-first chunks (default: 300ms, 0 disables)
+    // Hedge window for early secondary provider race (default: 300ms, set to 0 to disable)
+    // When > 0 and SECONDARY_HEAD_RPC_URL is configured, races primary vs secondary after this delay
     headCheckHedgeMs: Number(parsed.HEAD_CHECK_HEDGE_MS || 300),
 
     // Timeout and retry configuration for multicall chunks

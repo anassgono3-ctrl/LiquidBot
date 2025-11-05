@@ -123,6 +123,12 @@ export class RealTimeHFService extends EventEmitter {
     avgLatency: number;
   }> = [];
   private currentDynamicPageSize: number;
+  
+  // Adaptive sizing constants
+  private readonly ADAPTIVE_WINDOW_SIZE = 20; // rolling window size for metrics
+  private readonly ADAPTIVE_DECREASE_FACTOR = 0.85; // 15% decrease when overloaded
+  private readonly ADAPTIVE_INCREASE_FACTOR = 1.12; // 12% increase when underutilized
+  private readonly ADAPTIVE_TIMEOUT_THRESHOLD = 0.05; // 5% timeout rate threshold
 
   // Serialization + coalescing for head-check runs (Goal 1)
   private scanningHead = false;
@@ -1285,14 +1291,15 @@ export class RealTimeHFService extends EventEmitter {
   private recordHeadRunMetrics(elapsed: number, timeouts: number, avgLatency: number): void {
     if (!config.headPageAdaptive) return;
 
-    // Keep rolling window of last 20 runs
+    // Keep rolling window of last N runs
     this.headRunHistory.push({ elapsed, timeouts, avgLatency });
-    if (this.headRunHistory.length > 20) {
+    if (this.headRunHistory.length > this.ADAPTIVE_WINDOW_SIZE) {
       this.headRunHistory.shift();
     }
 
-    // Perform adjustment if we have enough data
-    if (this.headRunHistory.length >= 5) {
+    // Perform adjustment if we have enough data (at least 25% of window)
+    const minDataPoints = Math.ceil(this.ADAPTIVE_WINDOW_SIZE * 0.25);
+    if (this.headRunHistory.length >= minDataPoints) {
       this.adjustDynamicPageSize();
     }
   }
@@ -1317,10 +1324,9 @@ export class RealTimeHFService extends EventEmitter {
     const min = config.headPageMin;
     const max = config.headPageMax;
 
-    // Decrease page size if avg elapsed > target OR timeout rate > 5%
-    if (avgElapsed > target || timeoutRate > 0.05) {
-      const decreaseFactor = 0.85; // 15% decrease
-      const newPageSize = Math.max(min, Math.floor(this.currentDynamicPageSize * decreaseFactor));
+    // Decrease page size if avg elapsed > target OR timeout rate > threshold
+    if (avgElapsed > target || timeoutRate > this.ADAPTIVE_TIMEOUT_THRESHOLD) {
+      const newPageSize = Math.max(min, Math.floor(this.currentDynamicPageSize * this.ADAPTIVE_DECREASE_FACTOR));
       
       if (newPageSize !== prevPageSize) {
         this.currentDynamicPageSize = newPageSize;
@@ -1330,8 +1336,7 @@ export class RealTimeHFService extends EventEmitter {
     }
     // Increase page size if avg elapsed < 0.6 * target AND timeout rate == 0
     else if (avgElapsed < 0.6 * target && timeoutRate === 0) {
-      const increaseFactor = 1.12; // 12% increase
-      const newPageSize = Math.min(max, Math.floor(this.currentDynamicPageSize * increaseFactor));
+      const newPageSize = Math.min(max, Math.floor(this.currentDynamicPageSize * this.ADAPTIVE_INCREASE_FACTOR));
       
       if (newPageSize !== prevPageSize) {
         this.currentDynamicPageSize = newPageSize;
@@ -1461,6 +1466,8 @@ export class RealTimeHFService extends EventEmitter {
         }
 
         // Try secondary provider on first timeout or rate-limit if available (fallback, not hedging)
+        // Note: Only use fallback mode when hedging is disabled (headCheckHedgeMs === 0)
+        // to avoid double-requesting to secondary (once via hedge, once via fallback)
         if ((isTimeout || this.isRateLimitError(err)) && attempt === 0 && this.secondaryMulticall3 && config.headCheckHedgeMs === 0) {
           try {
             // eslint-disable-next-line no-console
