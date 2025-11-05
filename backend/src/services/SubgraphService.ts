@@ -533,8 +533,8 @@ export class SubgraphService {
    * @returns Array of user data with reserve information
    */
   async getUsersPage(limit: number): Promise<User[]> {
-    // Respect The Graph's max 1000 limit and configured page size
-    const pageSize = Math.min(config.subgraphPageSize || 1000, 1000);
+    // Config schema already clamps subgraphPageSize to max 1000 (The Graph's limit)
+    const pageSize = config.subgraphPageSize;
     const clampedLimit = Math.min(limit, pageSize);
     if (clampedLimit !== limit && limit > pageSize) {
       // eslint-disable-next-line no-console
