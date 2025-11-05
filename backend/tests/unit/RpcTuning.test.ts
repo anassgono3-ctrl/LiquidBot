@@ -1,4 +1,5 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
+
 import { config } from '../../src/config/index.js';
 
 describe('RPC Tuning Configuration', () => {
