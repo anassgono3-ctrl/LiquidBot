@@ -317,7 +317,8 @@ export const env = (() => {
     backfillRpcUrl: parsed.BACKFILL_RPC_URL,
 
     // Subgraph paging (when USE_SUBGRAPH=true)
-    subgraphPageSize: Math.max(50, Math.min(200, Number(parsed.SUBGRAPH_PAGE_SIZE || 100))),
+    // Respect The Graph's max 1000 limit
+    subgraphPageSize: Math.max(50, Math.min(1000, Number(parsed.SUBGRAPH_PAGE_SIZE || 100))),
 
     // Head-check paging/rotation
     headCheckPageStrategy: (parsed.HEAD_CHECK_PAGE_STRATEGY || 'paged') as 'all' | 'paged',
