@@ -62,10 +62,10 @@ export class AtRiskScanner {
       };
     }
 
-    // Fetch users with debt from subgraph
+    // Fetch users with debt from subgraph (with pagination support)
     let users: User[];
     try {
-      users = await this.subgraphService.getUsersPage(limit);
+      users = await this.subgraphService.getUsersWithBorrowing(limit, true);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[at-risk-scanner] Failed to fetch users:', err);

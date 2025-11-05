@@ -8,13 +8,13 @@ import type { NotificationService } from '../../src/services/NotificationService
 import type { User } from '../../src/types/index.js';
 
 describe('AtRiskScanner', () => {
-  let mockSubgraphService: Pick<SubgraphService, 'getUsersPage'>;
+  let mockSubgraphService: Pick<SubgraphService, 'getUsersWithBorrowing'>;
   let healthCalculator: HealthCalculator;
   let mockNotificationService: Pick<NotificationService, 'isEnabled' | 'notifyHealthBreach'>;
   
   beforeEach(() => {
     mockSubgraphService = {
-      getUsersPage: vi.fn()
+      getUsersWithBorrowing: vi.fn()
     };
     healthCalculator = new HealthCalculator();
     mockNotificationService = {
@@ -38,7 +38,7 @@ describe('AtRiskScanner', () => {
       expect(result.criticalCount).toBe(0);
       expect(result.warnCount).toBe(0);
       expect(result.users).toHaveLength(0);
-      expect(mockSubgraphService.getUsersPage).not.toHaveBeenCalled();
+      expect(mockSubgraphService.getUsersWithBorrowing).not.toHaveBeenCalled();
     });
 
     it('should classify user with no debt as NO_DEBT', async () => {
@@ -63,7 +63,7 @@ describe('AtRiskScanner', () => {
         ]
       };
 
-      mockSubgraphService.getUsersPage = vi.fn().mockResolvedValue([userNoDebt]);
+      mockSubgraphService.getUsersWithBorrowing = vi.fn().mockResolvedValue([userNoDebt]);
 
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,
@@ -103,7 +103,7 @@ describe('AtRiskScanner', () => {
         ]
       };
 
-      mockSubgraphService.getUsersPage = vi.fn().mockResolvedValue([userDust]);
+      mockSubgraphService.getUsersWithBorrowing = vi.fn().mockResolvedValue([userDust]);
 
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,
@@ -147,7 +147,7 @@ describe('AtRiskScanner', () => {
       // Debt: 1000 * 0.0005 = 0.5 ETH
       // HF: 0.4675 / 0.5 = 0.935 (< 1.0, so CRITICAL)
 
-      mockSubgraphService.getUsersPage = vi.fn().mockResolvedValue([userCritical]);
+      mockSubgraphService.getUsersWithBorrowing = vi.fn().mockResolvedValue([userCritical]);
 
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,
@@ -193,7 +193,7 @@ describe('AtRiskScanner', () => {
       // Debt: 1000 * 0.0005 = 0.5 ETH
       // HF: 0.51 / 0.5 = 1.02 (< 1.05 but > 1.0, so WARN)
 
-      mockSubgraphService.getUsersPage = vi.fn().mockResolvedValue([userWarn]);
+      mockSubgraphService.getUsersWithBorrowing = vi.fn().mockResolvedValue([userWarn]);
 
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,
@@ -237,7 +237,7 @@ describe('AtRiskScanner', () => {
 
       // HF = 1.7 (healthy, > 1.05)
 
-      mockSubgraphService.getUsersPage = vi.fn().mockResolvedValue([userOk]);
+      mockSubgraphService.getUsersWithBorrowing = vi.fn().mockResolvedValue([userOk]);
 
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,
@@ -342,7 +342,7 @@ describe('AtRiskScanner', () => {
         }
       ];
 
-      mockSubgraphService.getUsersPage = vi.fn().mockResolvedValue(users);
+      mockSubgraphService.getUsersWithBorrowing = vi.fn().mockResolvedValue(users);
 
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,
@@ -361,7 +361,7 @@ describe('AtRiskScanner', () => {
     });
 
     it('should handle subgraph fetch errors gracefully', async () => {
-      mockSubgraphService.getUsersPage = vi.fn().mockRejectedValue(new Error('Network error'));
+      mockSubgraphService.getUsersWithBorrowing = vi.fn().mockRejectedValue(new Error('Network error'));
 
       const scanner = new AtRiskScanner(
         mockSubgraphService as SubgraphService,

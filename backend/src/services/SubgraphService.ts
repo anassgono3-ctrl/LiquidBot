@@ -443,12 +443,13 @@ export class SubgraphService {
    */
   async getUsersWithBorrowing(limit: number, enablePaging = true): Promise<User[]> {
     if (!enablePaging) {
-      // Legacy behavior: single page, clamped to 200
+      // Legacy behavior: single page, clamped to page size (max 1000)
       return this.getUsersPage(limit);
     }
 
     // Paging support: fetch multiple pages up to limit
-    const pageSize = config.subgraphPageSize;
+    // Respect The Graph's max 1000 limit per page
+    const pageSize = Math.min(config.subgraphPageSize, 1000);
     const totalToFetch = Math.min(limit, config.candidateMax);
     
     if (this.mock || this.degraded) {
@@ -528,15 +529,16 @@ export class SubgraphService {
   /**
    * Get a page of users with debt for at-risk scanning.
    * This performs a lightweight bulk query for proactive health monitoring.
-   * @param limit Maximum number of users to fetch (clamped to 200)
+   * @param limit Maximum number of users to fetch (clamped to configured page size, max 1000)
    * @returns Array of user data with reserve information
    */
   async getUsersPage(limit: number): Promise<User[]> {
-    // Hard cap at 200 to prevent runaway large scans
-    const clampedLimit = Math.min(limit, 200);
-    if (clampedLimit !== limit && limit > 200) {
+    // Config schema already clamps subgraphPageSize to max 1000 (The Graph's limit)
+    const pageSize = config.subgraphPageSize;
+    const clampedLimit = Math.min(limit, pageSize);
+    if (clampedLimit !== limit && limit > pageSize) {
       // eslint-disable-next-line no-console
-      console.warn(`[subgraph] getUsersPage: limit ${limit} clamped to 200`);
+      console.warn(`[subgraph] getUsersPage: limit ${limit} clamped to ${clampedLimit} (pageSize=${pageSize})`);
     }
 
     if (this.mock) {

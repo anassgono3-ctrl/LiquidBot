@@ -449,15 +449,18 @@ describe('SubgraphService', () => {
       expect(result).toHaveLength(0);
     });
 
-    it('should clamp limit to 200', async () => {
+    it('should clamp limit to SUBGRAPH_PAGE_SIZE (max 1000)', async () => {
       const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       requestMock.mockResolvedValue({ users: [] });
       const service = new SubgraphService({ mock: false, client: { request: requestMock } });
       
-      await service.getUsersPage(300);
+      await service.getUsersPage(1500);
       
+      // Should clamp to min(SUBGRAPH_PAGE_SIZE, 1000)
+      // Default SUBGRAPH_PAGE_SIZE in .env.example is 100, but max is 1000
+      // The warning should mention the clamped value
       expect(consoleWarnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('getUsersPage: limit 300 clamped to 200')
+        expect.stringMatching(/getUsersPage: limit 1500 clamped to \d+ \(pageSize=\d+\)/)
       );
       consoleWarnSpy.mockRestore();
     });
@@ -484,6 +487,83 @@ describe('SubgraphService', () => {
       });
       const service = new SubgraphService({ mock: false, client: { request: requestMock } });
       await expect(service.getSingleUserWithDebt('0x123')).rejects.toThrow();
+    });
+  });
+
+  describe('getUsersWithBorrowing', () => {
+    it('should use getUsersPage when paging is disabled', async () => {
+      const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      requestMock.mockResolvedValue({ users: [] });
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      
+      await service.getUsersWithBorrowing(100, false);
+      
+      // Should not log paging message
+      expect(consoleLogSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('Fetching users with paging')
+      );
+      consoleWarnSpy.mockRestore();
+      consoleLogSpy.mockRestore();
+    });
+
+    it('should fetch multiple pages when paging is enabled', async () => {
+      const consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      
+      // Mock first page with 100 users, second page with 50 users
+      requestMock.mockResolvedValueOnce({
+        users: Array(100).fill(null).map((_, i) => ({
+          id: `0xuser${i}`,
+          borrowedReservesCount: 1,
+          reserves: [{
+            currentATokenBalance: '1000000000',
+            currentVariableDebt: '500000000',
+            currentStableDebt: '0',
+            reserve: {
+              id: '0xusdc',
+              symbol: 'USDC',
+              name: 'USD Coin',
+              decimals: 6,
+              reserveLiquidationThreshold: 8500,
+              usageAsCollateralEnabled: true,
+              price: { priceInEth: '500000000000000' }
+            }
+          }]
+        }))
+      }).mockResolvedValueOnce({
+        users: Array(50).fill(null).map((_, i) => ({
+          id: `0xuser${i + 100}`,
+          borrowedReservesCount: 1,
+          reserves: [{
+            currentATokenBalance: '1000000000',
+            currentVariableDebt: '500000000',
+            currentStableDebt: '0',
+            reserve: {
+              id: '0xusdc',
+              symbol: 'USDC',
+              name: 'USD Coin',
+              decimals: 6,
+              reserveLiquidationThreshold: 8500,
+              usageAsCollateralEnabled: true,
+              price: { priceInEth: '500000000000000' }
+            }
+          }]
+        }))
+      });
+      
+      const service = new SubgraphService({ mock: false, client: { request: requestMock } });
+      const result = await service.getUsersWithBorrowing(150, true);
+      
+      // Should fetch 2 pages and return 150 users
+      expect(result).toHaveLength(150);
+      expect(requestMock).toHaveBeenCalledTimes(2);
+      
+      // Should log paging message
+      expect(consoleLogSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Fetching users with paging')
+      );
+      
+      consoleLogSpy.mockRestore();
     });
   });
 
