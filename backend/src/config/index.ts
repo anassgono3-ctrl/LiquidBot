@@ -177,6 +177,16 @@ export const config = {
   get chunkRetryAttempts() { return env.chunkRetryAttempts; },
   get runStallAbortMs() { return env.runStallAbortMs; },
   get wsHeartbeatMs() { return env.wsHeartbeatMs; },
+
+  // RPC-only tuning and stability configuration
+  get multicallBatchSize() { return env.multicallBatchSize; },
+  get headPageAdaptive() { return env.headPageAdaptive; },
+  get headPageTargetMs() { return env.headPageTargetMs; },
+  get headPageMin() { return env.headPageMin; },
+  get headPageMax() { return env.headPageMax; },
+  get eventBatchCoalesceMs() { return env.eventBatchCoalesceMs; },
+  get eventBatchMaxPerBlock() { return env.eventBatchMaxPerBlock; },
+  get maxParallelEventBatches() { return env.maxParallelEventBatches; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },

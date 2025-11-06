@@ -107,7 +107,7 @@ export class RealTimeHFService extends EventEmitter {
   private lastReserveCheckBlock: number | null = null;
 
   // Adaptive rate-limit handling (Goal 4)
-  private currentChunkSize = 120;
+  private currentChunkSize: number;
   private rateLimitBackoffMs = 0;
   private consecutiveRateLimits = 0;
   private basePendingTickMs = 250;
@@ -115,6 +115,20 @@ export class RealTimeHFService extends EventEmitter {
 
   // Head-check paging/rotation
   private headCheckRotatingIndex = 0;
+  
+  // Adaptive head page sizing tracking
+  private headRunHistory: Array<{
+    elapsed: number;
+    timeouts: number;
+    avgLatency: number;
+  }> = [];
+  private currentDynamicPageSize: number;
+  
+  // Adaptive sizing constants
+  private readonly ADAPTIVE_WINDOW_SIZE = 20; // rolling window size for metrics
+  private readonly ADAPTIVE_DECREASE_FACTOR = 0.85; // 15% decrease when overloaded
+  private readonly ADAPTIVE_INCREASE_FACTOR = 1.12; // 12% increase when underutilized
+  private readonly ADAPTIVE_TIMEOUT_THRESHOLD = 0.05; // 5% timeout rate threshold
 
   // Serialization + coalescing for head-check runs (Goal 1)
   private scanningHead = false;
@@ -138,6 +152,25 @@ export class RealTimeHFService extends EventEmitter {
   private secondaryProvider: JsonRpcProvider | null = null;
   private secondaryMulticall3: Contract | null = null;
 
+  // Per-run batch metrics tracking
+  private currentBatchMetrics = {
+    timeouts: 0,
+    latencies: [] as number[],
+    hedges: 0,
+    primaryUsed: 0,
+    secondaryUsed: 0
+  };
+
+  // Event batch coalescing
+  private eventBatchQueue: Map<string, {
+    users: Set<string>;
+    reserves: Set<string>;
+    timer: NodeJS.Timeout;
+    blockNumber: number;
+  }> = new Map();
+  private eventBatchesPerBlock: Map<number, number> = new Map();
+  private runningEventBatches = 0;
+
   // Metrics
   private metrics = {
     blocksReceived: 0,
@@ -158,6 +191,12 @@ export class RealTimeHFService extends EventEmitter {
     // Initialize adaptive settings
     this.basePendingTickMs = config.flashblocksTickMs;
     this.currentPendingTickMs = config.flashblocksTickMs;
+    
+    // Initialize multicall batch size from config
+    this.currentChunkSize = config.multicallBatchSize;
+    
+    // Initialize dynamic page size to current config value
+    this.currentDynamicPageSize = config.headCheckPageSize;
   }
 
   /**
@@ -220,6 +259,13 @@ export class RealTimeHFService extends EventEmitter {
     if (this.pendingBlockTimer) clearInterval(this.pendingBlockTimer);
     if (this.runWatchdogTimer) clearTimeout(this.runWatchdogTimer);
     if (this.wsHeartbeatTimer) clearTimeout(this.wsHeartbeatTimer);
+
+    // Clear event batch timers
+    for (const [, batch] of this.eventBatchQueue) {
+      clearTimeout(batch.timer);
+    }
+    this.eventBatchQueue.clear();
+    this.eventBatchesPerBlock.clear();
 
     // Remove all event listeners
     if (this.provider) {
@@ -552,16 +598,28 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Request a head check for a specific block number.
-   * Coalesces multiple requests to the newest block.
+   * Coalesces multiple requests to the newest block with explicit skip logging.
    */
   private requestHeadCheck(blockNumber: number): void {
+    const previousLatest = this.latestRequestedHeadBlock;
+    
     // Update to newest requested block
     this.latestRequestedHeadBlock = Math.max(
       this.latestRequestedHeadBlock ?? blockNumber,
       blockNumber
     );
 
-    // If already scanning, the loop will pick up the new block
+    // If already scanning and we're skipping blocks, log it explicitly (Goal 4)
+    if (this.scanningHead && previousLatest !== null && blockNumber > previousLatest) {
+      const skippedCount = blockNumber - previousLatest - 1;
+      if (skippedCount > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[head-catchup] skipped ${skippedCount} stale blocks (latest=${blockNumber})`);
+      }
+      return;
+    }
+
+    // If already scanning but not skipping, just return
     if (this.scanningHead) {
       return;
     }
@@ -684,6 +742,8 @@ export class RealTimeHFService extends EventEmitter {
    * Per-run blockTag consistent reads: pass blockTag to all static calls
    */
   private async performHeadCheck(blockNumber: number, runId: string): Promise<void> {
+    const startTime = Date.now();
+    
     // eslint-disable-next-line no-console
     console.log(`[realtime-hf] Starting head check run=${runId} block=${blockNumber} (blockTag=${blockNumber})`);
 
@@ -696,11 +756,15 @@ export class RealTimeHFService extends EventEmitter {
     }
 
     // Perform batch check on all candidates with blockTag
-    await this.checkAllCandidates('head', blockNumber);
+    const metrics = await this.checkAllCandidates('head', blockNumber);
 
     // On success, clear dirty sets (users have been checked)
     this.dirtyUsers.clear();
     this.dirtyReserves.clear();
+
+    // Record metrics for adaptive page sizing
+    const elapsed = Date.now() - startTime;
+    this.recordHeadRunMetrics(elapsed, metrics.timeouts, metrics.avgLatency);
   }
 
   /**
@@ -782,29 +846,15 @@ export class RealTimeHFService extends EventEmitter {
           console.log(`[realtime-hf] LiquidationCall detected for user ${users[0]}, rechecking HF`);
         }
         
-        // For all user-affecting events, enqueue targeted HF recheck
+        // For all user-affecting events, enqueue with coalescing
         if (users.length > 0) {
-          for (const user of users) {
-            // Add/touch candidate
-            this.candidateManager.add(user);
-            
-            // Perform targeted check for this specific user
-            await this.checkCandidate(user, 'event');
-          }
+          // Enqueue event batch with coalescing
+          this.enqueueEventBatch(users, reserve, blockNumber);
         } else {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
-            // Per-block gating: at most one low-HF recheck per block from reserve updates (Goal 5)
-            if (this.lastReserveCheckBlock === blockNumber) {
-              // eslint-disable-next-line no-console
-              console.log(`[realtime-hf] ReserveDataUpdated for ${reserve} - skipping (already checked this block)`);
-              return;
-            }
-            this.lastReserveCheckBlock = blockNumber;
-            
-            // eslint-disable-next-line no-console
-            console.log(`[realtime-hf] ReserveDataUpdated for ${reserve}, checking low HF candidates`);
-            await this.checkLowHFCandidates('event');
+            // Enqueue a batch check for low-HF candidates, coalesced per block+reserve
+            this.enqueueEventBatch([], reserve, blockNumber);
           }
         }
       } else {
@@ -814,11 +864,12 @@ export class RealTimeHFService extends EventEmitter {
           // eslint-disable-next-line no-console
           console.log(`[realtime-hf] Aave event detected for user ${userAddress} (legacy)`);
           
-          // Add/touch candidate
-          this.candidateManager.add(userAddress);
+          const blockNumber = typeof log.blockNumber === 'string' 
+            ? parseInt(log.blockNumber, 16) 
+            : log.blockNumber;
           
-          // Perform targeted check
-          await this.checkCandidate(userAddress, 'event');
+          // Enqueue with coalescing
+          this.enqueueEventBatch([userAddress], null, blockNumber);
         }
       }
     } else {
@@ -969,10 +1020,13 @@ export class RealTimeHFService extends EventEmitter {
    * Check all candidates via Multicall3 batch with paging/rotation support and dirty-first prioritization
    * @param triggerType Type of trigger
    * @param blockTag Optional blockTag for consistent reads
+   * @returns Metrics about the run
    */
-  private async checkAllCandidates(triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<void> {
+  private async checkAllCandidates(triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<{ timeouts: number; avgLatency: number; candidates: number }> {
     const allAddresses = this.candidateManager.getAddresses();
-    if (allAddresses.length === 0) return;
+    if (allAddresses.length === 0) {
+      return { timeouts: 0, avgLatency: 0, candidates: 0 };
+    }
 
     // Determine which addresses to check based on strategy
     let addressesToCheck: string[];
@@ -982,7 +1036,8 @@ export class RealTimeHFService extends EventEmitter {
       addressesToCheck = allAddresses;
     } else {
       // Paged strategy with dirty-first prioritization (Goal 3)
-      const pageSize = config.headCheckPageSize;
+      // Use dynamic page size if adaptive is enabled
+      const pageSize = config.headPageAdaptive ? this.currentDynamicPageSize : config.headCheckPageSize;
       const totalCandidates = allAddresses.length;
       const candidates = this.candidateManager.getAll();
       const addressSet = new Set(allAddresses);
@@ -1036,12 +1091,12 @@ export class RealTimeHFService extends EventEmitter {
       // Update rotating index for next iteration
       this.headCheckRotatingIndex = (this.headCheckRotatingIndex + pageSize) % totalCandidates;
       
-      // Log paging info with dirty-first stats
+      // Log paging info with dirty-first stats and dynamic page size if adaptive
       // eslint-disable-next-line no-console
-      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} dirty=${dirtyFirst.length} lowHf=${lowHfAddresses.length}`);
+      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} dirty=${dirtyFirst.length} lowHf=${lowHfAddresses.length} pageSize=${pageSize}`);
     }
 
-    await this.batchCheckCandidates(addressesToCheck, triggerType, blockTag);
+    return await this.batchCheckCandidates(addressesToCheck, triggerType, blockTag);
   }
 
   /**
@@ -1108,9 +1163,10 @@ export class RealTimeHFService extends EventEmitter {
     if (this.consecutiveRateLimits > 0) {
       this.consecutiveRateLimits = 0;
       
-      // Restore chunk size gradually
-      if (this.currentChunkSize < 120) {
-        this.currentChunkSize = Math.min(120, this.currentChunkSize + 10);
+      // Restore chunk size gradually to configured value
+      const targetChunkSize = config.multicallBatchSize;
+      if (this.currentChunkSize < targetChunkSize) {
+        this.currentChunkSize = Math.min(targetChunkSize, this.currentChunkSize + 10);
       }
       
       // Restore pending tick gradually
@@ -1125,6 +1181,169 @@ export class RealTimeHFService extends EventEmitter {
    */
   private getLogPrefix(): string {
     return `[realtime-hf] run=${this.currentRunId || 'unknown'} block=${this.currentBlockNumber || 'unknown'}`;
+  }
+
+  /**
+   * Enqueue event-driven batch check with coalescing
+   */
+  private enqueueEventBatch(users: string[], reserve: string | null, blockNumber: number): void {
+    // Create a key based on block number and reserve (if any)
+    const batchKey = reserve ? `block-${blockNumber}-reserve-${reserve}` : `block-${blockNumber}-users`;
+
+    // Get or create batch entry
+    let batch = this.eventBatchQueue.get(batchKey);
+    if (!batch) {
+      // Create new batch with debounce timer
+      batch = {
+        users: new Set<string>(),
+        reserves: new Set<string>(),
+        timer: setTimeout(() => {
+          this.executeEventBatch(batchKey).catch(err => {
+            // eslint-disable-next-line no-console
+            console.error(`[event-coalesce] Failed to execute batch ${batchKey}:`, err);
+          });
+        }, config.eventBatchCoalesceMs),
+        blockNumber
+      };
+      this.eventBatchQueue.set(batchKey, batch);
+    } else {
+      // Reset timer to extend debounce window
+      clearTimeout(batch.timer);
+      batch.timer = setTimeout(() => {
+        this.executeEventBatch(batchKey).catch(err => {
+          // eslint-disable-next-line no-console
+          console.error(`[event-coalesce] Failed to execute batch ${batchKey}:`, err);
+        });
+      }, config.eventBatchCoalesceMs);
+    }
+
+    // Add users and reserve to batch
+    for (const user of users) {
+      batch.users.add(user.toLowerCase());
+      this.candidateManager.add(user);
+    }
+    if (reserve) {
+      batch.reserves.add(reserve.toLowerCase());
+    }
+  }
+
+  /**
+   * Execute a coalesced event batch
+   */
+  private async executeEventBatch(batchKey: string): Promise<void> {
+    const batch = this.eventBatchQueue.get(batchKey);
+    if (!batch) return;
+
+    // Remove from queue
+    this.eventBatchQueue.delete(batchKey);
+
+    const blockNumber = batch.blockNumber;
+    const userCount = batch.users.size;
+    const reserveCount = batch.reserves.size;
+
+    // Check if we've hit the per-block limit
+    const batchesThisBlock = this.eventBatchesPerBlock.get(blockNumber) || 0;
+    if (batchesThisBlock >= config.eventBatchMaxPerBlock) {
+      // eslint-disable-next-line no-console
+      console.log(`[event-coalesce] skipped batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount}) - per-block limit reached (${config.eventBatchMaxPerBlock})`);
+      return;
+    }
+
+    // Check concurrency limit
+    if (this.runningEventBatches >= config.maxParallelEventBatches) {
+      // eslint-disable-next-line no-console
+      console.log(`[event-coalesce] skipped batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount}) - concurrency limit reached (${config.maxParallelEventBatches})`);
+      return;
+    }
+
+    // Increment counters
+    this.eventBatchesPerBlock.set(blockNumber, batchesThisBlock + 1);
+    this.runningEventBatches++;
+
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[event-coalesce] executing batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount})`);
+
+      // Execute checks for all users in the batch
+      const usersArray = Array.from(batch.users);
+      if (usersArray.length > 0) {
+        await this.batchCheckCandidates(usersArray, 'event', blockNumber);
+      } else if (reserveCount > 0) {
+        // No specific users but reserve updated - check low-HF candidates
+        await this.checkLowHFCandidates('event', blockNumber);
+      }
+    } finally {
+      this.runningEventBatches--;
+      
+      // Clean up old block counters (keep last 10 blocks)
+      const oldestBlockToKeep = blockNumber - 10;
+      for (const [block] of this.eventBatchesPerBlock) {
+        if (block < oldestBlockToKeep) {
+          this.eventBatchesPerBlock.delete(block);
+        }
+      }
+    }
+  }
+
+  /**
+   * Record head run metrics for adaptive page sizing
+   */
+  private recordHeadRunMetrics(elapsed: number, timeouts: number, avgLatency: number): void {
+    if (!config.headPageAdaptive) return;
+
+    // Keep rolling window of last N runs
+    this.headRunHistory.push({ elapsed, timeouts, avgLatency });
+    if (this.headRunHistory.length > this.ADAPTIVE_WINDOW_SIZE) {
+      this.headRunHistory.shift();
+    }
+
+    // Perform adjustment if we have enough data (at least 25% of window)
+    const minDataPoints = Math.ceil(this.ADAPTIVE_WINDOW_SIZE * 0.25);
+    if (this.headRunHistory.length >= minDataPoints) {
+      this.adjustDynamicPageSize();
+    }
+  }
+
+  /**
+   * Adjust dynamic page size based on recent head run metrics
+   */
+  private adjustDynamicPageSize(): void {
+    if (!config.headPageAdaptive) return;
+
+    const windowSize = this.headRunHistory.length;
+    if (windowSize === 0) return;
+
+    // Calculate averages over the window
+    const avgElapsed = this.headRunHistory.reduce((sum, r) => sum + r.elapsed, 0) / windowSize;
+    const totalTimeouts = this.headRunHistory.reduce((sum, r) => sum + r.timeouts, 0);
+    const timeoutRate = totalTimeouts / windowSize;
+    const timeoutPct = (timeoutRate * 100).toFixed(1);
+
+    const prevPageSize = this.currentDynamicPageSize;
+    const target = config.headPageTargetMs;
+    const min = config.headPageMin;
+    const max = config.headPageMax;
+
+    // Decrease page size if avg elapsed > target OR timeout rate > threshold
+    if (avgElapsed > target || timeoutRate > this.ADAPTIVE_TIMEOUT_THRESHOLD) {
+      const newPageSize = Math.max(min, Math.floor(this.currentDynamicPageSize * this.ADAPTIVE_DECREASE_FACTOR));
+      
+      if (newPageSize !== prevPageSize) {
+        this.currentDynamicPageSize = newPageSize;
+        // eslint-disable-next-line no-console
+        console.log(`[head-adapt] adjusted page size ${prevPageSize} -> ${newPageSize} (avg=${avgElapsed.toFixed(0)}ms, timeouts=${timeoutPct}%)`);
+      }
+    }
+    // Increase page size if avg elapsed < 0.6 * target AND timeout rate == 0
+    else if (avgElapsed < 0.6 * target && timeoutRate === 0) {
+      const newPageSize = Math.min(max, Math.floor(this.currentDynamicPageSize * this.ADAPTIVE_INCREASE_FACTOR));
+      
+      if (newPageSize !== prevPageSize) {
+        this.currentDynamicPageSize = newPageSize;
+        // eslint-disable-next-line no-console
+        console.log(`[head-adapt] adjusted page size ${prevPageSize} -> ${newPageSize} (avg=${avgElapsed.toFixed(0)}ms, timeouts=${timeoutPct}%)`);
+      }
+    }
   }
 
   /**
@@ -1155,7 +1374,7 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Execute a single chunk with timeout and retry logic
+   * Execute a single chunk with timeout, hedging, and retry logic
    */
   private async executeChunkWithTimeout(
     chunk: Array<{ target: string; allowFailure: boolean; callData: string }>,
@@ -1170,28 +1389,74 @@ export class RealTimeHFService extends EventEmitter {
       const startTime = Date.now();
 
       try {
-        // Wrap the call with timeout
-        const results = await this.withTimeout(
-          this.multicall3!.aggregate3.staticCall(chunk, overrides),
-          config.chunkTimeoutMs,
-          `Chunk ${chunkNum} timeout after ${config.chunkTimeoutMs}ms`
-        );
+        let results: Array<{ success: boolean; returnData: string }>;
+        let usedProvider: 'primary' | 'secondary' = 'primary';
 
-        const duration = (Date.now() - startTime) / 1000;
-        chunkLatency.observe(duration);
+        // Implement hedging if configured and secondary provider available
+        if (config.headCheckHedgeMs > 0 && this.secondaryMulticall3 && config.secondaryHeadRpcUrl) {
+          // Race primary against hedged secondary
+          const hedgeDelayMs = config.headCheckHedgeMs;
+          
+          const primaryPromise = this.multicall3!.aggregate3.staticCall(chunk, overrides);
+          
+          // Create hedge promise that only fires after delay
+          const hedgePromise = new Promise<{ result: Array<{ success: boolean; returnData: string }>; provider: 'secondary' }>((resolve, reject) => {
+            setTimeout(() => {
+              if (!this.secondaryMulticall3) {
+                reject(new Error('Secondary multicall not available'));
+                return;
+              }
+              this.secondaryMulticall3.aggregate3.staticCall(chunk, overrides)
+                .then(result => resolve({ result, provider: 'secondary' }))
+                .catch(reject);
+            }, hedgeDelayMs);
+          });
+
+          // Race primary (immediate) vs hedge (delayed)
+          const winner = await Promise.race([
+            primaryPromise.then(result => ({ result, provider: 'primary' as const })),
+            hedgePromise
+          ]);
+
+          results = winner.result;
+          usedProvider = winner.provider;
+
+          if (usedProvider === 'secondary') {
+            this.currentBatchMetrics.hedges++;
+            this.currentBatchMetrics.secondaryUsed++;
+            // eslint-disable-next-line no-console
+            console.log(`${logPrefix} hedge fired after ${hedgeDelayMs}ms; winner=secondary`);
+          } else {
+            this.currentBatchMetrics.primaryUsed++;
+          }
+        } else {
+          // No hedging, use primary only with timeout
+          results = await this.withTimeout(
+            this.multicall3!.aggregate3.staticCall(chunk, overrides),
+            config.chunkTimeoutMs,
+            `Chunk ${chunkNum} timeout after ${config.chunkTimeoutMs}ms`
+          );
+          this.currentBatchMetrics.primaryUsed++;
+        }
+
+        const duration = Date.now() - startTime;
+        const durationSec = duration / 1000;
+        chunkLatency.observe(durationSec);
+        this.currentBatchMetrics.latencies.push(duration);
 
         // Update progress timestamp on successful chunk
         this.lastProgressAt = Date.now();
 
         this.clearRateLimitTracking();
         // eslint-disable-next-line no-console
-        console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls, ${duration.toFixed(2)}s)`);
+        console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls, ${durationSec.toFixed(2)}s, provider=${usedProvider})`);
         return results;
       } catch (err) {
         const isTimeout = err instanceof Error && err.message.includes('timeout');
 
         if (isTimeout) {
           chunkTimeoutsTotal.inc();
+          this.currentBatchMetrics.timeouts++;
           // eslint-disable-next-line no-console
           console.warn(`${logPrefix} timeout run=${this.currentRunId} block=${this.currentBlockNumber || 'unknown'} chunk ${chunkNum}/${totalChunks} after ${config.chunkTimeoutMs}ms (attempt ${attempt + 1}/${maxAttempts})`);
         }
@@ -1200,11 +1465,13 @@ export class RealTimeHFService extends EventEmitter {
           this.handleRateLimit();
         }
 
-        // Try secondary provider on first timeout or rate-limit if available
-        if ((isTimeout || this.isRateLimitError(err)) && attempt === 0 && this.secondaryMulticall3) {
+        // Try secondary provider on first timeout or rate-limit if available (fallback, not hedging)
+        // Note: Only use fallback mode when hedging is disabled (headCheckHedgeMs === 0)
+        // to avoid double-requesting to secondary (once via hedge, once via fallback)
+        if ((isTimeout || this.isRateLimitError(err)) && attempt === 0 && this.secondaryMulticall3 && config.headCheckHedgeMs === 0) {
           try {
             // eslint-disable-next-line no-console
-            console.log(`${logPrefix} Chunk ${chunkNum} trying secondary provider`);
+            console.log(`${logPrefix} Chunk ${chunkNum} trying secondary provider (fallback)`);
             const secondaryStartTime = Date.now();
             
             const results = await this.withTimeout(
@@ -1213,15 +1480,18 @@ export class RealTimeHFService extends EventEmitter {
               `Chunk ${chunkNum} secondary timeout after ${config.chunkTimeoutMs}ms`
             );
 
-            const secondaryDuration = (Date.now() - secondaryStartTime) / 1000;
-            chunkLatency.observe(secondaryDuration);
+            const secondaryDuration = Date.now() - secondaryStartTime;
+            const secondaryDurationSec = secondaryDuration / 1000;
+            chunkLatency.observe(secondaryDurationSec);
+            this.currentBatchMetrics.latencies.push(secondaryDuration);
+            this.currentBatchMetrics.secondaryUsed++;
 
             // Update progress timestamp on successful chunk
             this.lastProgressAt = Date.now();
 
             this.clearRateLimitTracking();
             // eslint-disable-next-line no-console
-            console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete via secondary (${chunk.length} calls, ${secondaryDuration.toFixed(2)}s)`);
+            console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete via secondary (${chunk.length} calls, ${secondaryDurationSec.toFixed(2)}s)`);
             return results;
           } catch (secondaryErr) {
             // eslint-disable-next-line no-console
@@ -1410,9 +1680,21 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Batch check multiple candidates using Multicall3
+   * @returns Metrics about the batch run
    */
-  private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<void> {
-    if (!this.multicall3 || !this.provider || addresses.length === 0) return;
+  private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<{ timeouts: number; avgLatency: number; candidates: number }> {
+    if (!this.multicall3 || !this.provider || addresses.length === 0) {
+      return { timeouts: 0, avgLatency: 0, candidates: 0 };
+    }
+
+    // Reset batch metrics for this run
+    this.currentBatchMetrics = {
+      timeouts: 0,
+      latencies: [],
+      hedges: 0,
+      primaryUsed: 0,
+      secondaryUsed: 0
+    };
 
     try {
       const aavePoolInterface = new Interface(AAVE_POOL_ABI);
@@ -1495,16 +1777,39 @@ export class RealTimeHFService extends EventEmitter {
       // Update candidate count gauge
       realtimeCandidateCount.set(this.candidateManager.size());
 
-      // Log minimum HF when < 1.0 (requirement 5)
-      if (minHF !== null && minHF < 1.0) {
-        // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] Batch check complete: ${addresses.length} candidates, minHF=${minHF.toFixed(4)}, trigger=${triggerType}`);
-      }
+      // Calculate batch metrics
+      const avgLatency = this.currentBatchMetrics.latencies.length > 0
+        ? this.currentBatchMetrics.latencies.reduce((a, b) => a + b, 0) / this.currentBatchMetrics.latencies.length
+        : 0;
+
+      const totalProviderCalls = this.currentBatchMetrics.primaryUsed + this.currentBatchMetrics.secondaryUsed;
+      const primaryShare = totalProviderCalls > 0 
+        ? Math.round((this.currentBatchMetrics.primaryUsed / totalProviderCalls) * 100)
+        : 100;
+
+      // Enhanced logging with observability metrics (Goal 6)
+      // eslint-disable-next-line no-console
+      console.log(
+        `[realtime-hf] Batch check complete: ${addresses.length} candidates, ` +
+        `minHF=${minHF !== null ? minHF.toFixed(4) : 'N/A'}, ` +
+        `trigger=${triggerType}, ` +
+        `subBatch=${config.multicallBatchSize}, ` +
+        `hedges=${this.currentBatchMetrics.hedges}, ` +
+        `timeouts=${this.currentBatchMetrics.timeouts}, ` +
+        `primaryShare=${primaryShare}%`
+      );
+
+      return {
+        timeouts: this.currentBatchMetrics.timeouts,
+        avgLatency,
+        candidates: addresses.length
+      };
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[realtime-hf] Batch check failed:', err);
       // Do not crash the service - continue runtime
       // The error is already logged above
+      return { timeouts: 0, avgLatency: 0, candidates: addresses.length };
     }
   }
 
