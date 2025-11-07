@@ -86,6 +86,7 @@ export class CandidateManager {
 
   /**
    * Associate a user with a reserve (asset) they've interacted with
+   * Uses LRU eviction when exceeding 5 reserves per user
    */
   touchReserve(address: string, reserve: string): void {
     const normalized = reserve.toLowerCase();
@@ -96,9 +97,15 @@ export class CandidateManager {
       this.lastTouchedReserves.set(address, reserves);
     }
     
+    // If reserve already exists, remove it first so we can re-add it at the end (LRU)
+    if (reserves.has(normalized)) {
+      reserves.delete(normalized);
+    }
+    
     reserves.add(normalized);
     
     // Keep only the most recent 5 reserves per user to avoid unbounded growth
+    // Evict oldest (first item in Set) when exceeding limit
     if (reserves.size > 5) {
       const oldest = reserves.values().next().value;
       if (oldest) {

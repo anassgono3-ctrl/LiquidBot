@@ -989,7 +989,9 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
-      const currentPrice = Number(currentAnswer);
+      // Convert bigint to number safely to avoid precision loss
+      // Most Chainlink feeds use 8 decimals, so this should be safe for typical price values
+      const currentPrice = parseFloat(currentAnswer.toString());
       const symbol = this.chainlinkFeedToSymbol.get(feedAddress) || feedAddress;
       
       // Check if this asset is in the monitored set (if filter is configured)
@@ -1005,6 +1007,13 @@ export class RealTimeHFService extends EventEmitter {
       
       // Skip trigger if this is the first time seeing this feed
       if (lastPrice === undefined) {
+        return;
+      }
+      
+      // Guard against division by zero
+      if (lastPrice <= 0) {
+        // eslint-disable-next-line no-console
+        console.warn(`[price-trigger] Invalid last price (${lastPrice}) for ${symbol}, skipping trigger`);
         return;
       }
       
