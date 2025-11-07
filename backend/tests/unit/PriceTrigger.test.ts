@@ -129,7 +129,7 @@ describe('PriceTrigger - Delta Mode', () => {
 
   it('should trigger on drops >= threshold (single round)', () => {
     trigger.onPriceUpdate('WETH', 100_000_000, currentTime);
-    const triggered = trigger.onPriceUpdate('WETH', 99_880_000, currentTime + 1000); // 12 bps drop
+    const triggered = trigger.onPriceUpdate('WETH', 99_880_000, currentTime + 1000); // 12 bps drop (0.12%)
     expect(triggered).toBe(true);
     expect(trigger.getTriggers().length).toBe(1);
     expect(trigger.getTriggers()[0].dropBps).toBeCloseTo(12, 1);
@@ -157,12 +157,12 @@ describe('PriceTrigger - Delta Mode', () => {
 
   it('should reset comparison to last price in delta mode', () => {
     trigger.onPriceUpdate('WETH', 100_000_000, currentTime); // baseline
-    trigger.onPriceUpdate('WETH', 99_000_000, currentTime + 1000); // 10 bps drop, triggers
+    trigger.onPriceUpdate('WETH', 99_000_000, currentTime + 1000); // 100 bps drop (1%), triggers
     expect(trigger.getTriggers().length).toBe(1);
     
     // Next comparison should be from 99_000_000, not 100_000_000
     currentTime += 7000; // after debounce
-    const triggered = trigger.onPriceUpdate('WETH', 98_010_000, currentTime); // 10 bps from 99_000_000
+    const triggered = trigger.onPriceUpdate('WETH', 98_010_000, currentTime); // 100 bps from 99_000_000 (1%)
     expect(triggered).toBe(true);
     expect(trigger.getTriggers().length).toBe(2);
   });
@@ -269,11 +269,11 @@ describe('PriceTrigger - Mode Comparison', () => {
     expect(cumulativeTrigger.getTriggers().length).toBe(0);
     
     // Add one more drop to push cumulative over 30 bps
-    // 99.8M -> 99.7M = 10 bps, cumulative from 100M = 30 bps
+    // 99.8M -> 99.7M = 100 bps (1%), cumulative from 100M = 30 bps
     deltaTrigger.onPriceUpdate('WETH', 99_700_000, deltaTime + 5 * 7000);
     cumulativeTrigger.onPriceUpdate('WETH', 99_700_000, cumulativeTime + 5 * 7000);
     
-    // Delta mode: triggers because this single drop is 10 bps
+    // Delta mode: triggers because this single drop is 100 bps (1%)
     expect(deltaTrigger.getTriggers().length).toBe(1);
     
     // Cumulative mode: triggers because cumulative drop is 30 bps from baseline
