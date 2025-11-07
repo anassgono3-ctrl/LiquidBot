@@ -40,6 +40,48 @@ LiquidBot supports two discovery modes controlled by the `USE_SUBGRAPH` environm
 
 Key environment variables:
 
+### Chainlink Price Feeds (Optional)
+
+LiquidBot supports Chainlink price feeds for accurate token prices. When not configured, the system uses stub prices.
+
+```bash
+# Optional Chainlink RPC URL for price feeds
+CHAINLINK_RPC_URL=https://mainnet.base.org
+
+# Comma-separated list of token:feedAddress pairs
+# Example: ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B
+CHAINLINK_FEEDS=ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B
+```
+
+**Features:**
+- **Dynamic decimals**: PriceService automatically fetches decimals per feed on initialization
+- **Safe BigInt normalization**: Avoids "Cannot mix BigInt and other types" errors
+- **Stale data detection**: Warns when `answeredInRound < roundId`
+- **Age warnings**: Alerts when price data is older than 1 hour
+- **Stub fallback with metrics**: Automatically falls back to default prices with logging and Prometheus metrics
+
+**Metrics:**
+- `liquidbot_price_oracle_chainlink_requests_total{status, symbol}`: Total Chainlink requests
+- `liquidbot_price_oracle_chainlink_stale_total{symbol}`: Stale data detections
+- `liquidbot_price_oracle_stub_fallback_total{symbol, reason}`: Stub fallback occurrences
+
+**Verification:**
+```bash
+# Test Chainlink feeds (requires CHAINLINK_RPC_URL and CHAINLINK_FEEDS in .env)
+npm run verify:chainlink
+```
+
+**Prior Behavior:**
+- Previous versions assumed all Chainlink feeds used 8 decimals (hard-coded `1e8`)
+- This could cause minor price mis-scaling for feeds with different decimals
+- The risk was low for Base mainnet as most feeds use 8 decimals
+
+**Current Behavior:**
+- Decimals are fetched per-feed on PriceService initialization
+- Each feed's decimals are cached in memory (`feedSymbol -> decimals`)
+- Price normalization uses correct scaling: `Number(answer) / (10 ** decimals)`
+- Startup logs show: `[price] Feed WETH decimals=8 address=0x...`
+
 ### Subgraph Feature Gating
 ```bash
 # Master switch for subgraph (default: false)

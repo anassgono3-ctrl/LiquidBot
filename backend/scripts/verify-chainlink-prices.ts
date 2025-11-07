@@ -1,6 +1,8 @@
 import 'dotenv/config';
 import { ethers } from 'ethers';
 
+import { normalizeChainlinkPrice } from '../src/utils/chainlinkMath.js';
+
 interface FeedInfo { symbol: string; address: string; }
 
 async function main() {
@@ -33,14 +35,33 @@ async function main() {
       const contract = new ethers.Contract(feed.address, aggregatorAbi, provider);
       const decimals: number = await contract.decimals();
       const roundData = await contract.latestRoundData();
+      
+      const roundId = roundData.roundId as bigint;
       const rawAnswer = roundData.answer as bigint;
+      const updatedAt = roundData.updatedAt as bigint;
+      const answeredInRound = roundData.answeredInRound as bigint;
+      
+      // Check for invalid non-positive answer
       if (rawAnswer <= 0n) {
         console.log(`❌ ${feed.symbol}: invalid non-positive answer`);
         failures++;
         continue;
       }
-      const normalized = Number(rawAnswer) / 10 ** decimals;
-      console.log(`✅ ${feed.symbol}: raw=${rawAnswer} decimals=${decimals} normalized=${normalized}`);
+      
+      // Check for stale data
+      if (answeredInRound < roundId) {
+        console.log(`⚠️  ${feed.symbol}: STALE DATA - answeredInRound=${answeredInRound} < roundId=${roundId}`);
+      }
+      
+      // Check freshness
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      const age = Number(now - updatedAt);
+      const ageWarning = age > 3600 ? ` (⚠️  ${age}s old, threshold: 3600s)` : ` (${age}s old)`;
+      
+      // Safe normalization using high-precision helper
+      const normalized = normalizeChainlinkPrice(rawAnswer, decimals);
+      
+      console.log(`✅ ${feed.symbol}: price=${normalized.toFixed(8)} decimals=${decimals} roundId=${roundId} updatedAt=${updatedAt}${ageWarning}`);
     } catch (err) {
       console.log(`❌ ${feed.symbol}: ${(err as Error).message}`);
       failures++;
