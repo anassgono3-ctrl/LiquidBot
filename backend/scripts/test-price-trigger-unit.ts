@@ -43,13 +43,13 @@ async function main() {
   const trigger = new SyntheticPriceTrigger(10, 5); // 10 bps threshold, 5s debounce
   const now = () => Date.now();
 
-  trigger.onUpdate(1_000_000_00n, now(), () => console.log('[unit] scan executed')); // baseline 100,000,000
-  trigger.onUpdate(999_500_00n, now(), () => console.log('[unit] scan executed')); // 99,950,000 - 5 bps drop (no trigger)
-  trigger.onUpdate(998_800_00n, now(), () => console.log('[unit] scan executed')); // 99,880,000 - 12 bps drop from baseline, 7 bps from prev
-  trigger.onUpdate(997_700_00n, now(), () => console.log('[unit] scan executed')); // 99,770,000 - 11 bps drop from prev (should trigger)
-  trigger.onUpdate(996_600_00n, now(), () => console.log('[unit] scan executed')); // 99,660,000 - 11 bps drop from prev (debounce suppress)
+  trigger.onUpdate(100_000_000n, now(), () => console.log('[unit] scan executed')); // baseline 100,000,000
+  trigger.onUpdate(99_950_000n, now(), () => console.log('[unit] scan executed')); // 99,950,000 - 5 bps drop (no trigger)
+  trigger.onUpdate(99_880_000n, now(), () => console.log('[unit] scan executed')); // 99,880,000 - 12 bps drop from baseline, 7 bps from prev
+  trigger.onUpdate(99_770_000n, now(), () => console.log('[unit] scan executed')); // 99,770,000 - 11 bps drop from prev (should trigger)
+  trigger.onUpdate(99_660_000n, now(), () => console.log('[unit] scan executed')); // 99,660,000 - 11 bps drop from prev (debounce suppress)
   await new Promise(r => setTimeout(r, 6000));
-  trigger.onUpdate(995_500_00n, now(), () => console.log('[unit] scan executed')); // 99,550,000 - 11 bps drop from prev (after debounce)
+  trigger.onUpdate(99_550_000n, now(), () => console.log('[unit] scan executed')); // 99,550,000 - 11 bps drop from prev (after debounce)
 }
 
 main().catch(console.error);

@@ -153,32 +153,32 @@ async function main() {
 
   // Baseline
   console.log('[simulate] Update 1: Setting baseline price for WETH');
-  pt.onPriceUpdate('WETH', 1_000_000_00n, now(), runEmergencyScan, console.log);
+  pt.onPriceUpdate('WETH', 100_000_000n, now(), runEmergencyScan, console.log);
   
   await new Promise(r => setTimeout(r, 100));
   
   // 5 bps drop (no trigger)
   console.log('\n[simulate] Update 2: 5 bps drop (below threshold, no trigger expected)');
-  pt.onPriceUpdate('WETH', 999_950_00n, now(), runEmergencyScan, console.log);
+  pt.onPriceUpdate('WETH', 99_950_000n, now(), runEmergencyScan, console.log);
   
   await new Promise(r => setTimeout(r, 100));
   
   // 12 bps drop (trigger)
   console.log('\n[simulate] Update 3: 12 bps drop (exceeds threshold, trigger expected)');
-  pt.onPriceUpdate('WETH', 998_800_00n, now(), runEmergencyScan, console.log);
+  pt.onPriceUpdate('WETH', 98_880_000n, now(), runEmergencyScan, console.log);
   
   await new Promise(r => setTimeout(r, 100));
   
   // Debounce suppression
   console.log('\n[simulate] Update 4: Additional drop (debounce suppression expected)');
-  pt.onPriceUpdate('WETH', 997_500_00n, now(), runEmergencyScan, console.log);
+  pt.onPriceUpdate('WETH', 97_500_000n, now(), runEmergencyScan, console.log);
   
   // After debounce window
   console.log(`\n[simulate] Waiting ${priceTriggerConfig.debounceSec + 1}s for debounce window to pass...`);
   await new Promise(r => setTimeout(r, (priceTriggerConfig.debounceSec + 1) * 1000));
   
   console.log('\n[simulate] Update 5: Drop after debounce window (trigger expected)');
-  pt.onPriceUpdate('WETH', 996_000_00n, now(), runEmergencyScan, console.log);
+  pt.onPriceUpdate('WETH', 96_000_000n, now(), runEmergencyScan, console.log);
   
   // Wait for async operations to complete
   await new Promise(r => setTimeout(r, 500));

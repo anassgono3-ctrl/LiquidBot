@@ -28,7 +28,8 @@ npm run verify:chainlink
 **Required Environment Variables:**
 - `CHAINLINK_RPC_URL` or `RPC_URL`: RPC endpoint (e.g., `https://mainnet.base.org`)
 - `CHAINLINK_FEEDS`: Comma-separated list of `SYMBOL:ADDRESS` pairs
-  - Example: `ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B`
+  - Example (Base mainnet): `ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B`
+  - ⚠️ Note: The addresses above are examples for Base mainnet. Use addresses appropriate for your network.
 
 **Output:**
 ```
