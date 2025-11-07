@@ -7,6 +7,7 @@ import {
   priceOracleChainlinkStaleTotal,
   priceOracleStubFallbackTotal
 } from '../metrics/index.js';
+import { normalizeChainlinkPrice } from '../utils/chainlinkMath.js';
 
 // Chainlink Aggregator V3 Interface ABI (minimal)
 const AGGREGATOR_V3_ABI = [
@@ -189,8 +190,8 @@ export class PriceService {
       // Get decimals for this feed (fallback to 8 if not initialized yet)
       const decimals = this.feedDecimals.get(symbol) ?? 8;
       
-      // Safe normalization: Convert BigInt to Number first, then divide by 10^decimals
-      const price = Number(answer) / (10 ** decimals);
+      // High-precision normalization using chainlinkMath helper
+      const price = normalizeChainlinkPrice(answer, decimals);
       
       // Validate price is positive and finite
       if (!isFinite(price) || price <= 0) {
