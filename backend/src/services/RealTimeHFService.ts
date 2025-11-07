@@ -175,6 +175,7 @@ export class RealTimeHFService extends EventEmitter {
   private lastSeenPrices: Map<string, number> = new Map(); // feedAddress -> last price
   private chainlinkFeedToSymbol: Map<string, string> = new Map(); // feedAddress -> symbol
   private priceMonitorAssets: Set<string> | null = null; // null = monitor all
+  private lastPriceTriggerTime: Map<string, number> = new Map(); // symbol -> timestamp in ms
 
   // Metrics
   private metrics = {
@@ -210,8 +211,20 @@ export class RealTimeHFService extends EventEmitter {
           .split(',')
           .map((s: string) => s.trim().toUpperCase())
           .filter((s: string) => s.length > 0)
+          .map((s: string) => this.normalizeAssetSymbol(s))
       );
     }
+  }
+
+  /**
+   * Normalize asset symbols for consistent mapping (e.g., ETH -> WETH)
+   */
+  private normalizeAssetSymbol(symbol: string): string {
+    const upper = symbol.toUpperCase();
+    // Map common variations to canonical symbols
+    if (upper === 'ETH') return 'WETH';
+    if (upper === 'BTC') return 'WBTC';
+    return upper;
   }
 
   /**
@@ -239,6 +252,22 @@ export class RealTimeHFService extends EventEmitter {
       headCheckPageStrategy: config.headCheckPageStrategy,
       headCheckPageSize: config.headCheckPageSize
     });
+    
+    // Log price-trigger configuration
+    if (config.priceTriggerEnabled) {
+      const assets = config.priceTriggerAssets 
+        ? config.priceTriggerAssets.split(',').map((s: string) => s.trim()).filter((s: string) => s.length > 0)
+        : [];
+      // eslint-disable-next-line no-console
+      console.log(
+        `[price-trigger] enabled=true dropBps=${config.priceTriggerDropBps} ` +
+        `maxScan=${config.priceTriggerMaxScan} debounceSec=${config.priceTriggerDebounceSec} ` +
+        `assets=${assets.length > 0 ? assets.join(',') : 'ALL'}`
+      );
+    } else {
+      // eslint-disable-next-line no-console
+      console.log('[price-trigger] enabled=false');
+    }
 
     if (!this.skipWsConnection) {
       await this.setupProvider();
@@ -992,10 +1021,11 @@ export class RealTimeHFService extends EventEmitter {
       // Convert bigint to number safely to avoid precision loss
       // Most Chainlink feeds use 8 decimals, so this should be safe for typical price values
       const currentPrice = parseFloat(currentAnswer.toString());
-      const symbol = this.chainlinkFeedToSymbol.get(feedAddress) || feedAddress;
+      const rawSymbol = this.chainlinkFeedToSymbol.get(feedAddress) || feedAddress;
+      const symbol = this.normalizeAssetSymbol(rawSymbol);
       
       // Check if this asset is in the monitored set (if filter is configured)
-      if (this.priceMonitorAssets !== null && !this.priceMonitorAssets.has(symbol.toUpperCase())) {
+      if (this.priceMonitorAssets !== null && !this.priceMonitorAssets.has(symbol)) {
         return;
       }
       
@@ -1007,6 +1037,8 @@ export class RealTimeHFService extends EventEmitter {
       
       // Skip trigger if this is the first time seeing this feed
       if (lastPrice === undefined) {
+        // eslint-disable-next-line no-console
+        console.log(`[price-trigger] Initialized price tracking for ${symbol} (first update)`);
         return;
       }
       
@@ -1027,13 +1059,31 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
+      // Check debounce: prevent repeated scans on rapid ticks
+      const now = Date.now();
+      const lastTriggerTime = this.lastPriceTriggerTime.get(symbol);
+      const debounceMs = config.priceTriggerDebounceSec * 1000;
+      
+      if (lastTriggerTime && (now - lastTriggerTime) < debounceMs) {
+        const elapsedSec = Math.floor((now - lastTriggerTime) / 1000);
+        // eslint-disable-next-line no-console
+        console.log(
+          `[price-trigger] Debounced: asset=${symbol} drop=${Math.abs(priceDiffPct).toFixed(2)}bps ` +
+          `elapsed=${elapsedSec}s debounce=${config.priceTriggerDebounceSec}s`
+        );
+        return;
+      }
+      
+      // Update last trigger time
+      this.lastPriceTriggerTime.set(symbol, now);
+      
       // Price dropped significantly - trigger emergency scan
       const dropBps = Math.abs(priceDiffPct);
       // eslint-disable-next-line no-console
       console.log(
         `[price-trigger] Sharp price drop detected: asset=${symbol} ` +
         `drop=${dropBps.toFixed(2)}bps threshold=${config.priceTriggerDropBps}bps ` +
-        `block=${blockNumber}`
+        `block=${blockNumber} trigger=price`
       );
       
       // Select candidates for emergency scan
@@ -1058,7 +1108,7 @@ export class RealTimeHFService extends EventEmitter {
       // eslint-disable-next-line no-console
       console.log(
         `[price-trigger] Emergency scan complete: asset=${symbol} ` +
-        `candidates=${affectedUsers.length} latency=${latencyMs}ms`
+        `candidates=${affectedUsers.length} latency=${latencyMs}ms trigger=price`
       );
     } catch (err) {
       // eslint-disable-next-line no-console

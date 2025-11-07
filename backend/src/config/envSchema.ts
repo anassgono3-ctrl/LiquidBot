@@ -87,6 +87,7 @@ export const rawEnvSchema = z.object({
   PRICE_TRIGGER_DROP_BPS: z.string().optional(),
   PRICE_TRIGGER_MAX_SCAN: z.string().optional(),
   PRICE_TRIGGER_ASSETS: z.string().optional(),
+  PRICE_TRIGGER_DEBOUNCE_SEC: z.string().optional(),
 
   // At-risk user scanning
   AT_RISK_SCAN_LIMIT: z.string().optional(),
@@ -275,6 +276,7 @@ export const env = (() => {
     priceTriggerDropBps: Number(parsed.PRICE_TRIGGER_DROP_BPS || 30),
     priceTriggerMaxScan: Number(parsed.PRICE_TRIGGER_MAX_SCAN || 500),
     priceTriggerAssets: parsed.PRICE_TRIGGER_ASSETS,
+    priceTriggerDebounceSec: Number(parsed.PRICE_TRIGGER_DEBOUNCE_SEC || 60),
 
     // At-risk user scanning
     atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),
