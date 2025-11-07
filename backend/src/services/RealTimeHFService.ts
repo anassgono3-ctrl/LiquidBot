@@ -1067,11 +1067,13 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Select candidates for emergency scan based on asset
+   * Select candidates for emergency scan based on asset symbol
+   * @param assetSymbol Token symbol (e.g., 'ETH', 'USDC') - used to query reserve associations
    */
-  private selectCandidatesForEmergencyScan(asset: string): string[] {
+  private selectCandidatesForEmergencyScan(assetSymbol: string): string[] {
     // Get users associated with this reserve
-    const reserveUsers = this.candidateManager.getUsersForReserve(asset);
+    // Note: Reserve associations are tracked using lowercase addresses/symbols from Aave events
+    const reserveUsers = this.candidateManager.getUsersForReserve(assetSymbol);
     
     if (reserveUsers.length > 0) {
       // Cap by configured max scan limit

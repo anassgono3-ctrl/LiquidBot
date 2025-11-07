@@ -97,7 +97,8 @@ export class CandidateManager {
       this.lastTouchedReserves.set(address, reserves);
     }
     
-    // If reserve already exists, remove it first so we can re-add it at the end (LRU)
+    // If reserve already exists, remove and re-add to implement most-recently-used semantics
+    // This moves the item to the end of the Set's iteration order
     if (reserves.has(normalized)) {
       reserves.delete(normalized);
     }
@@ -105,7 +106,7 @@ export class CandidateManager {
     reserves.add(normalized);
     
     // Keep only the most recent 5 reserves per user to avoid unbounded growth
-    // Evict oldest (first item in Set) when exceeding limit
+    // Evict oldest (first item in Set's iteration order) when exceeding limit
     if (reserves.size > 5) {
       const oldest = reserves.values().next().value;
       if (oldest) {
