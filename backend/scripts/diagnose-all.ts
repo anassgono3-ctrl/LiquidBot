@@ -31,6 +31,7 @@ import { HealthCalculator } from '../src/services/HealthCalculator.js';
 import { OpportunityService } from '../src/services/OpportunityService.js';
 import { NotificationService } from '../src/services/NotificationService.js';
 import { registry } from '../src/metrics/index.js';
+import { normalizeChainlinkPrice } from '../src/utils/chainlinkMath.js';
 
 // ANSI color codes
 const GREEN = '\x1b[32m';
@@ -256,19 +257,20 @@ async function checkChainlinkPrices() {
         
         // Call latestRoundData()
         const roundData = await aggregator.latestRoundData();
-        const answer = roundData[1];
-        const updatedAt = roundData[3];
+        const answer = roundData[1] as bigint;
+        const updatedAt = roundData[3] as bigint;
         
-        const price = Number(answer) / Math.pow(10, Number(decimals));
-        details.push(`  Latest price: ${price} (answer: ${answer.toString()})`);
+        // Use safe BigInt normalization helper with explicit Number conversion
+        const price = normalizeChainlinkPrice(answer, Number(decimals));
+        details.push(`  Latest price: ${price.toFixed(8)} (answer: ${answer.toString()})`);
         
         // Check for invalid answer
-        if (answer <= 0) {
+        if (answer <= 0n) {
           details.push(`  ${RED}✗ Warning: answer <= 0${RESET}`);
           hasErrors = true;
         }
         
-        // Check freshness
+        // Check freshness - explicit Number conversion for age calculation
         const now = Math.floor(Date.now() / 1000);
         const age = now - Number(updatedAt);
         details.push(`  Updated: ${age}s ago`);

@@ -172,7 +172,8 @@ export class RealTimeHFService extends EventEmitter {
   private runningEventBatches = 0;
 
   // Price trigger tracking for emergency scans
-  private lastSeenPrices: Map<string, number> = new Map(); // feedAddress -> last price
+  private lastSeenPrices: Map<string, number> = new Map(); // feedAddress -> last price (for single-round delta mode)
+  private baselinePrices: Map<string, number> = new Map(); // feedAddress -> baseline price (for cumulative mode)
   private chainlinkFeedToSymbol: Map<string, string> = new Map(); // feedAddress -> symbol
   private priceMonitorAssets: Set<string> | null = null; // null = monitor all
   private lastPriceTriggerTime: Map<string, number> = new Map(); // symbol -> timestamp in ms
@@ -260,7 +261,8 @@ export class RealTimeHFService extends EventEmitter {
         : [];
       // eslint-disable-next-line no-console
       console.log(
-        `[price-trigger] enabled=true dropBps=${config.priceTriggerDropBps} ` +
+        `[price-trigger] enabled=true mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} ` +
+        `dropBps=${config.priceTriggerDropBps} ` +
         `maxScan=${config.priceTriggerMaxScan} debounceSec=${config.priceTriggerDebounceSec} ` +
         `assets=${assets.length > 0 ? assets.join(',') : 'ALL'}`
       );
@@ -1005,6 +1007,9 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Handle price trigger for emergency scans on sharp price drops
+   * Supports two modes:
+   * - Single-round delta mode (default): triggers on price drop between consecutive updates
+   * - Cumulative mode (PRICE_TRIGGER_CUMULATIVE=true): triggers on cumulative drop from baseline
    */
   private async handlePriceTrigger(
     feedAddress: string,
@@ -1029,29 +1034,40 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
-      // Get last seen price for this feed
+      // Get last seen price and baseline price for this feed
       const lastPrice = this.lastSeenPrices.get(feedAddress);
+      const baselinePrice = this.baselinePrices.get(feedAddress);
       
       // Update last seen price
       this.lastSeenPrices.set(feedAddress, currentPrice);
       
-      // Skip trigger if this is the first time seeing this feed
-      if (lastPrice === undefined) {
+      // Initialize baseline on first update
+      if (baselinePrice === undefined) {
+        this.baselinePrices.set(feedAddress, currentPrice);
         // eslint-disable-next-line no-console
-        console.log(`[price-trigger] Initialized price tracking for ${symbol} (first update)`);
+        console.log(
+          `[price-trigger] Initialized price tracking for ${symbol}: ` +
+          `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} baseline=${currentPrice}`
+        );
+        return;
+      }
+      
+      // Skip trigger if this is the first time seeing this feed (for delta mode)
+      if (lastPrice === undefined) {
         return;
       }
       
       // Guard against division by zero
-      if (lastPrice <= 0) {
+      const referencePrice = config.priceTriggerCumulative ? baselinePrice : lastPrice;
+      if (referencePrice <= 0) {
         // eslint-disable-next-line no-console
-        console.warn(`[price-trigger] Invalid last price (${lastPrice}) for ${symbol}, skipping trigger`);
+        console.warn(`[price-trigger] Invalid reference price (${referencePrice}) for ${symbol}, skipping trigger`);
         return;
       }
       
       // Calculate price change in basis points
-      const priceDiff = currentPrice - lastPrice;
-      const priceDiffPct = (priceDiff / lastPrice) * 10000; // basis points
+      const priceDiff = currentPrice - referencePrice;
+      const priceDiffPct = (priceDiff / referencePrice) * 10000; // basis points
       
       // Check if price dropped by threshold or more
       if (priceDiffPct >= -config.priceTriggerDropBps) {
@@ -1069,7 +1085,8 @@ export class RealTimeHFService extends EventEmitter {
         // eslint-disable-next-line no-console
         console.log(
           `[price-trigger] Debounced: asset=${symbol} drop=${Math.abs(priceDiffPct).toFixed(2)}bps ` +
-          `elapsed=${elapsedSec}s debounce=${config.priceTriggerDebounceSec}s`
+          `elapsed=${elapsedSec}s debounce=${config.priceTriggerDebounceSec}s ` +
+          `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'}`
         );
         return;
       }
@@ -1077,12 +1094,19 @@ export class RealTimeHFService extends EventEmitter {
       // Update last trigger time
       this.lastPriceTriggerTime.set(symbol, now);
       
+      // Reset baseline to current price after trigger (for cumulative mode)
+      if (config.priceTriggerCumulative) {
+        this.baselinePrices.set(feedAddress, currentPrice);
+      }
+      
       // Price dropped significantly - trigger emergency scan
       const dropBps = Math.abs(priceDiffPct);
       // eslint-disable-next-line no-console
       console.log(
         `[price-trigger] Sharp price drop detected: asset=${symbol} ` +
         `drop=${dropBps.toFixed(2)}bps threshold=${config.priceTriggerDropBps}bps ` +
+        `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} ` +
+        `reference=${referencePrice} current=${currentPrice} ` +
         `block=${blockNumber} trigger=price`
       );
       

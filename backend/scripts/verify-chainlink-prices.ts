@@ -53,15 +53,25 @@ async function main() {
         console.log(`⚠️  ${feed.symbol}: STALE DATA - answeredInRound=${answeredInRound} < roundId=${roundId}`);
       }
       
-      // Check freshness
+      // Check freshness - flag stale when > 15 minutes (900s)
       const now = BigInt(Math.floor(Date.now() / 1000));
       const age = Number(now - updatedAt);
-      const ageWarning = age > 3600 ? ` (⚠️  ${age}s old, threshold: 3600s)` : ` (${age}s old)`;
+      const isStale = age > 900; // 15 minutes
+      const ageWarning = isStale ? ` (⚠️  STALE: ${age}s old, threshold: 900s)` : ` (${age}s old)`;
       
-      // Safe normalization using high-precision helper
+      // Safe normalization using high-precision helper with explicit Number conversion
       const normalized = normalizeChainlinkPrice(rawAnswer, decimals);
       
-      console.log(`✅ ${feed.symbol}: price=${normalized.toFixed(8)} decimals=${decimals} roundId=${roundId} updatedAt=${updatedAt}${ageWarning}`);
+      // Enhanced diagnostics output
+      console.log(
+        `${isStale ? '⚠️ ' : '✅'} ${feed.symbol}: ` +
+        `price=${normalized.toFixed(8)} ` +
+        `rawAnswer=${rawAnswer.toString()} ` +
+        `decimals=${decimals} ` +
+        `roundId=${roundId.toString()} ` +
+        `updatedAt=${updatedAt.toString()} ` +
+        `updatedAgo=${age}s${isStale ? ' (STALE)' : ''}`
+      );
     } catch (err) {
       console.log(`❌ ${feed.symbol}: ${(err as Error).message}`);
       failures++;

@@ -223,6 +223,13 @@ export class PriceService {
         console.warn(`[price] Chainlink price for ${symbol} is ${age}s old (threshold: 3600s)`);
       }
 
+      // Log successful price fetch with details
+      // eslint-disable-next-line no-console
+      console.log(
+        `[price] Chainlink success: ${symbol}=$${price.toFixed(8)} ` +
+        `decimals=${decimals} age=${age}s roundId=${roundId.toString()}`
+      );
+
       priceOracleChainlinkRequestsTotal.inc({ status: 'success', symbol });
       return price;
     } catch (err) {
