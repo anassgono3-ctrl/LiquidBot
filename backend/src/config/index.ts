@@ -126,6 +126,12 @@ export const config = {
   get chainlinkRpcUrl() { return env.chainlinkRpcUrl; },
   get chainlinkFeeds() { return env.chainlinkFeeds; },
 
+  // Price-triggered emergency scans
+  get priceTriggerEnabled() { return env.priceTriggerEnabled; },
+  get priceTriggerDropBps() { return env.priceTriggerDropBps; },
+  get priceTriggerMaxScan() { return env.priceTriggerMaxScan; },
+  get priceTriggerAssets() { return env.priceTriggerAssets; },
+
   // At-risk user scanning
   get atRiskScanLimit() { return env.atRiskScanLimit; },
   get atRiskWarnThreshold() { return env.atRiskWarnThreshold; },

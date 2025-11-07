@@ -211,6 +211,21 @@ export const liquidatableEdgeTriggersTotal = new Counter({
   registers: [registry]
 });
 
+// Price-triggered emergency scan metrics
+export const realtimePriceEmergencyScansTotal = new Counter({
+  name: 'liquidbot_realtime_price_emergency_scans_total',
+  help: 'Total number of emergency scans triggered by price drops',
+  labelNames: ['asset'],
+  registers: [registry]
+});
+
+export const emergencyScanLatency = new Histogram({
+  name: 'liquidbot_emergency_scan_latency_ms',
+  help: 'Latency of emergency scans in milliseconds',
+  buckets: [50, 100, 250, 500, 1000, 2000, 5000],
+  registers: [registry]
+});
+
 // Timeout and recovery metrics
 export const chunkTimeoutsTotal = new Counter({
   name: 'liquidbot_chunk_timeouts_total',

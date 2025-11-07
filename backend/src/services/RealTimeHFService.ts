@@ -171,6 +171,11 @@ export class RealTimeHFService extends EventEmitter {
   private eventBatchesPerBlock: Map<number, number> = new Map();
   private runningEventBatches = 0;
 
+  // Price trigger tracking for emergency scans
+  private lastSeenPrices: Map<string, number> = new Map(); // feedAddress -> last price
+  private chainlinkFeedToSymbol: Map<string, string> = new Map(); // feedAddress -> symbol
+  private priceMonitorAssets: Set<string> | null = null; // null = monitor all
+
   // Metrics
   private metrics = {
     blocksReceived: 0,
@@ -197,6 +202,16 @@ export class RealTimeHFService extends EventEmitter {
     
     // Initialize dynamic page size to current config value
     this.currentDynamicPageSize = config.headCheckPageSize;
+    
+    // Initialize price monitoring asset filter if configured
+    if (config.priceTriggerEnabled && config.priceTriggerAssets) {
+      this.priceMonitorAssets = new Set(
+        config.priceTriggerAssets
+          .split(',')
+          .map((s: string) => s.trim().toUpperCase())
+          .filter((s: string) => s.length > 0)
+      );
+    }
   }
 
   /**
@@ -456,6 +471,9 @@ export class RealTimeHFService extends EventEmitter {
         });
         
         for (const [token, feedAddress] of Object.entries(feeds)) {
+          // Build reverse mapping for price trigger feature
+          this.chainlinkFeedToSymbol.set(feedAddress.toLowerCase(), token);
+          
           try {
             const chainlinkFilter = {
               address: feedAddress,
@@ -834,6 +852,10 @@ export class RealTimeHFService extends EventEmitter {
         // Mark users and reserves as dirty for next head-check prioritization (Goal 2)
         for (const user of users) {
           this.dirtyUsers.add(user.toLowerCase());
+          // Track reserve association for price trigger targeting
+          if (reserve) {
+            this.candidateManager.touchReserve(user.toLowerCase(), reserve);
+          }
         }
         if (reserve) {
           this.dirtyReserves.add(reserve.toLowerCase());
@@ -841,9 +863,21 @@ export class RealTimeHFService extends EventEmitter {
         
         // Handle based on event type
         if (decoded.name === 'LiquidationCall') {
-          // Log liquidation but still check HF in case user is still liquidatable
+          // Enhanced LiquidationCall tracking with candidate set classification
+          const liquidatedUser = users[0];
+          const candidate = this.candidateManager.get(liquidatedUser);
+          const inSet = candidate !== undefined;
+          const lastHF = candidate?.lastHF ?? null;
+          
           // eslint-disable-next-line no-console
-          console.log(`[realtime-hf] LiquidationCall detected for user ${users[0]}, rechecking HF`);
+          console.log(
+            `[realtime-hf] LiquidationCall detected: user=${liquidatedUser} ` +
+            `in_set=${inSet} last_hf=${lastHF !== null ? lastHF.toFixed(4) : 'unknown'} ` +
+            `block=${blockNumber}`
+          );
+          
+          // TODO: Send Telegram notification with classification
+          // This will be implemented when TelegramService is integrated
         }
         
         // For all user-affecting events, enqueue with coalescing
@@ -877,21 +911,27 @@ export class RealTimeHFService extends EventEmitter {
       this.metrics.priceUpdatesReceived++;
       realtimePriceUpdatesReceived.inc();
       
-      // Try to decode Chainlink event for better logging
+      const feedAddress = log.address.toLowerCase();
+      const currentBlock = typeof log.blockNumber === 'string' 
+        ? parseInt(log.blockNumber, 16) 
+        : log.blockNumber;
+      
+      // Try to decode Chainlink event for better logging and price extraction
       const decoded = eventRegistry.decode(log.topics as string[], log.data);
       if (decoded && decoded.name === 'AnswerUpdated') {
         // eslint-disable-next-line no-console
         console.log(`[realtime-hf] ${formatDecodedEvent(decoded)}`);
+        
+        // Handle price trigger logic if enabled
+        if (config.priceTriggerEnabled) {
+          await this.handlePriceTrigger(feedAddress, decoded, currentBlock);
+        }
       } else {
         // eslint-disable-next-line no-console
         console.log('[realtime-hf] Chainlink price update detected');
       }
       
       // Per-block gating: prevent multiple price-triggered rechecks in same block (Goal 5)
-      const currentBlock = typeof log.blockNumber === 'string' 
-        ? parseInt(log.blockNumber, 16) 
-        : log.blockNumber;
-      
       if (this.lastPriceCheckBlock === currentBlock) {
         // eslint-disable-next-line no-console
         console.log(`[realtime-hf] Price update - skipping recheck (already checked this block)`);
@@ -932,6 +972,113 @@ export class RealTimeHFService extends EventEmitter {
       console.warn('[realtime-hf] Failed to parse log:', err);
       return null;
     }
+  }
+
+  /**
+   * Handle price trigger for emergency scans on sharp price drops
+   */
+  private async handlePriceTrigger(
+    feedAddress: string,
+    decoded: { name: string; args: Record<string, unknown> },
+    blockNumber: number
+  ): Promise<void> {
+    try {
+      // Extract current price from AnswerUpdated event
+      const currentAnswer = decoded.args.current;
+      if (!currentAnswer || typeof currentAnswer !== 'bigint') {
+        return;
+      }
+      
+      const currentPrice = Number(currentAnswer);
+      const symbol = this.chainlinkFeedToSymbol.get(feedAddress) || feedAddress;
+      
+      // Check if this asset is in the monitored set (if filter is configured)
+      if (this.priceMonitorAssets !== null && !this.priceMonitorAssets.has(symbol.toUpperCase())) {
+        return;
+      }
+      
+      // Get last seen price for this feed
+      const lastPrice = this.lastSeenPrices.get(feedAddress);
+      
+      // Update last seen price
+      this.lastSeenPrices.set(feedAddress, currentPrice);
+      
+      // Skip trigger if this is the first time seeing this feed
+      if (lastPrice === undefined) {
+        return;
+      }
+      
+      // Calculate price change in basis points
+      const priceDiff = currentPrice - lastPrice;
+      const priceDiffPct = (priceDiff / lastPrice) * 10000; // basis points
+      
+      // Check if price dropped by threshold or more
+      if (priceDiffPct >= -config.priceTriggerDropBps) {
+        // Price increased or dropped less than threshold - no emergency scan
+        return;
+      }
+      
+      // Price dropped significantly - trigger emergency scan
+      const dropBps = Math.abs(priceDiffPct);
+      // eslint-disable-next-line no-console
+      console.log(
+        `[price-trigger] Sharp price drop detected: asset=${symbol} ` +
+        `drop=${dropBps.toFixed(2)}bps threshold=${config.priceTriggerDropBps}bps ` +
+        `block=${blockNumber}`
+      );
+      
+      // Select candidates for emergency scan
+      const affectedUsers = this.selectCandidatesForEmergencyScan(symbol);
+      
+      if (affectedUsers.length === 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[price-trigger] No candidates associated with ${symbol}, skipping emergency scan`);
+        return;
+      }
+      
+      // Increment metric
+      const { realtimePriceEmergencyScansTotal, emergencyScanLatency } = await import('../metrics/index.js');
+      realtimePriceEmergencyScansTotal.inc({ asset: symbol });
+      
+      // Perform emergency scan with latency tracking
+      const startTime = Date.now();
+      await this.batchCheckCandidates(affectedUsers, 'price', blockNumber);
+      const latencyMs = Date.now() - startTime;
+      emergencyScanLatency.observe(latencyMs);
+      
+      // eslint-disable-next-line no-console
+      console.log(
+        `[price-trigger] Emergency scan complete: asset=${symbol} ` +
+        `candidates=${affectedUsers.length} latency=${latencyMs}ms`
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[price-trigger] Error handling price trigger:', err);
+    }
+  }
+
+  /**
+   * Select candidates for emergency scan based on asset
+   */
+  private selectCandidatesForEmergencyScan(asset: string): string[] {
+    // Get users associated with this reserve
+    const reserveUsers = this.candidateManager.getUsersForReserve(asset);
+    
+    if (reserveUsers.length > 0) {
+      // Cap by configured max scan limit
+      return reserveUsers.slice(0, config.priceTriggerMaxScan);
+    }
+    
+    // Fallback: if no reserve mapping, check all candidates up to limit
+    // Prioritize low HF candidates
+    const allCandidates = this.candidateManager.getAll();
+    const sorted = allCandidates
+      .filter(c => c.lastHF !== null)
+      .sort((a, b) => (a.lastHF || Infinity) - (b.lastHF || Infinity));
+    
+    return sorted
+      .slice(0, config.priceTriggerMaxScan)
+      .map(c => c.address);
   }
 
   /**
