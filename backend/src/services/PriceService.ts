@@ -15,6 +15,9 @@ const AGGREGATOR_V3_ABI = [
   'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)'
 ];
 
+// Default decimals for Chainlink feeds (most feeds use 8 decimals)
+const CHAINLINK_DEFAULT_DECIMALS = 8;
+
 /**
  * PriceService provides USD price lookups for tokens.
  * Supports Chainlink price feeds with fallback to stub prices.
@@ -24,6 +27,7 @@ export class PriceService {
   private readonly cacheTtlMs = 60000; // 1 minute cache
   private chainlinkFeeds: Map<string, string> = new Map(); // symbol -> feed address
   private feedDecimals: Map<string, number> = new Map(); // symbol -> decimals
+  private decimalsInitialized: boolean = false; // Track initialization status
   private provider: ethers.JsonRpcProvider | null = null;
 
   /**
@@ -68,6 +72,8 @@ export class PriceService {
         console.log(`[price] Chainlink feeds enabled for ${this.chainlinkFeeds.size} symbols`);
         
         // Fetch decimals for each feed asynchronously
+        // Note: This is fire-and-forget to avoid blocking construction
+        // If fetching fails, fallback to CHAINLINK_DEFAULT_DECIMALS (8)
         this.initializeFeedDecimals().catch(err => {
           // eslint-disable-next-line no-console
           console.error('[price] Failed to initialize feed decimals:', err);
@@ -85,6 +91,7 @@ export class PriceService {
 
   /**
    * Initialize decimals for all configured feeds
+   * Note: Called asynchronously during construction to avoid blocking
    */
   private async initializeFeedDecimals(): Promise<void> {
     if (!this.provider) return;
@@ -99,10 +106,16 @@ export class PriceService {
       } catch (err) {
         // eslint-disable-next-line no-console
         console.error(`[price] Failed to fetch decimals for ${symbol}:`, err);
-        // Default to 8 decimals if we can't fetch
-        this.feedDecimals.set(symbol, 8);
+        // Fallback to default decimals if we can't fetch
+        this.feedDecimals.set(symbol, CHAINLINK_DEFAULT_DECIMALS);
+        // eslint-disable-next-line no-console
+        console.warn(`[price] Using fallback decimals (${CHAINLINK_DEFAULT_DECIMALS}) for ${symbol}`);
       }
     }
+    
+    this.decimalsInitialized = true;
+    // eslint-disable-next-line no-console
+    console.log(`[price] Feed decimals initialization complete (${this.feedDecimals.size} feeds)`);
   }
 
   /**
@@ -187,8 +200,8 @@ export class PriceService {
         return null;
       }
       
-      // Get decimals for this feed (fallback to 8 if not initialized yet)
-      const decimals = this.feedDecimals.get(symbol) ?? 8;
+      // Get decimals for this feed (fallback to default if not initialized yet)
+      const decimals = this.feedDecimals.get(symbol) ?? CHAINLINK_DEFAULT_DECIMALS;
       
       // High-precision normalization using chainlinkMath helper
       const price = normalizeChainlinkPrice(answer, decimals);
