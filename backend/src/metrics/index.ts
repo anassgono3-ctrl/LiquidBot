@@ -251,3 +251,25 @@ export const chunkLatency = new Histogram({
   buckets: [0.1, 0.25, 0.5, 1, 2, 5, 10],
   registers: [registry]
 });
+
+// Price oracle metrics
+export const priceOracleChainlinkRequestsTotal = new Counter({
+  name: 'liquidbot_price_oracle_chainlink_requests_total',
+  help: 'Total Chainlink price oracle requests',
+  labelNames: ['status', 'symbol'],
+  registers: [registry]
+});
+
+export const priceOracleChainlinkStaleTotal = new Counter({
+  name: 'liquidbot_price_oracle_chainlink_stale_total',
+  help: 'Total number of stale Chainlink price data detected',
+  labelNames: ['symbol'],
+  registers: [registry]
+});
+
+export const priceOracleStubFallbackTotal = new Counter({
+  name: 'liquidbot_price_oracle_stub_fallback_total',
+  help: 'Total number of times price oracle fell back to stub prices',
+  labelNames: ['symbol', 'reason'],
+  registers: [registry]
+});
