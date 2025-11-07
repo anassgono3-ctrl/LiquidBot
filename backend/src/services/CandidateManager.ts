@@ -19,6 +19,8 @@ export interface CandidateManagerOptions {
 export class CandidateManager {
   private candidates: Map<string, Candidate> = new Map();
   private readonly maxCandidates: number;
+  // Track which reserves (assets) each user has interacted with
+  private lastTouchedReserves: Map<string, Set<string>> = new Map();
 
   constructor(options: CandidateManagerOptions = {}) {
     this.maxCandidates = options.maxCandidates || 300;
@@ -68,12 +70,65 @@ export class CandidateManager {
 
   /**
    * Mark candidate as touched (seen in events)
+   * Optionally associate with a reserve (asset)
    */
-  touch(address: string): void {
+  touch(address: string, reserve?: string): void {
     const candidate = this.candidates.get(address);
     if (candidate) {
       candidate.touchedAt = Date.now();
     }
+    
+    // Track reserve association if provided
+    if (reserve) {
+      this.touchReserve(address, reserve);
+    }
+  }
+
+  /**
+   * Associate a user with a reserve (asset) they've interacted with
+   * Uses LRU eviction when exceeding 5 reserves per user
+   */
+  touchReserve(address: string, reserve: string): void {
+    const normalized = reserve.toLowerCase();
+    let reserves = this.lastTouchedReserves.get(address);
+    
+    if (!reserves) {
+      reserves = new Set();
+      this.lastTouchedReserves.set(address, reserves);
+    }
+    
+    // If reserve already exists, remove and re-add to implement most-recently-used semantics
+    // This moves the item to the end of the Set's iteration order
+    if (reserves.has(normalized)) {
+      reserves.delete(normalized);
+    }
+    
+    reserves.add(normalized);
+    
+    // Keep only the most recent 5 reserves per user to avoid unbounded growth
+    // Evict oldest (first item in Set's iteration order) when exceeding limit
+    if (reserves.size > 5) {
+      const oldest = reserves.values().next().value;
+      if (oldest) {
+        reserves.delete(oldest);
+      }
+    }
+  }
+
+  /**
+   * Get users associated with a specific reserve
+   */
+  getUsersForReserve(reserve: string): string[] {
+    const normalized = reserve.toLowerCase();
+    const users: string[] = [];
+    
+    for (const [address, reserves] of this.lastTouchedReserves) {
+      if (reserves.has(normalized)) {
+        users.push(address);
+      }
+    }
+    
+    return users;
   }
 
   /**
@@ -158,6 +213,7 @@ export class CandidateManager {
    */
   remove(address: string): void {
     this.candidates.delete(address);
+    this.lastTouchedReserves.delete(address);
   }
 
   /**
@@ -165,6 +221,7 @@ export class CandidateManager {
    */
   clear(): void {
     this.candidates.clear();
+    this.lastTouchedReserves.clear();
   }
 
   /**

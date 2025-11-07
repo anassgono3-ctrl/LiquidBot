@@ -82,6 +82,12 @@ export const rawEnvSchema = z.object({
   CHAINLINK_RPC_URL: z.string().optional(),
   CHAINLINK_FEEDS: z.string().optional(),
 
+  // Price-triggered emergency scans
+  PRICE_TRIGGER_ENABLED: z.string().optional(),
+  PRICE_TRIGGER_DROP_BPS: z.string().optional(),
+  PRICE_TRIGGER_MAX_SCAN: z.string().optional(),
+  PRICE_TRIGGER_ASSETS: z.string().optional(),
+
   // At-risk user scanning
   AT_RISK_SCAN_LIMIT: z.string().optional(),
   AT_RISK_WARN_THRESHOLD: z.string().optional(),
@@ -263,6 +269,12 @@ export const env = (() => {
     // Chainlink price feeds
     chainlinkRpcUrl: parsed.CHAINLINK_RPC_URL,
     chainlinkFeeds: parsed.CHAINLINK_FEEDS,
+
+    // Price-triggered emergency scans
+    priceTriggerEnabled: (parsed.PRICE_TRIGGER_ENABLED || 'false').toLowerCase() === 'true',
+    priceTriggerDropBps: Number(parsed.PRICE_TRIGGER_DROP_BPS || 30),
+    priceTriggerMaxScan: Number(parsed.PRICE_TRIGGER_MAX_SCAN || 500),
+    priceTriggerAssets: parsed.PRICE_TRIGGER_ASSETS,
 
     // At-risk user scanning
     atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),

@@ -175,4 +175,92 @@ describe('CandidateManager', () => {
       expect(manager.size()).toBe(0);
     });
   });
+
+  describe('reserve tracking', () => {
+    it('should track reserve associations via touch', () => {
+      manager.add('0xuser1');
+      manager.touch('0xuser1', '0xETH');
+      
+      const users = manager.getUsersForReserve('0xETH');
+      expect(users).toContain('0xuser1');
+    });
+
+    it('should track reserve associations via touchReserve', () => {
+      manager.add('0xuser1');
+      manager.touchReserve('0xuser1', '0xUSDC');
+      
+      const users = manager.getUsersForReserve('0xUSDC');
+      expect(users).toContain('0xuser1');
+    });
+
+    it('should normalize reserve addresses to lowercase', () => {
+      manager.add('0xuser1');
+      manager.touchReserve('0xuser1', '0xETH');
+      
+      const users = manager.getUsersForReserve('0xeth');
+      expect(users).toContain('0xuser1');
+    });
+
+    it('should return multiple users for same reserve', () => {
+      manager.add('0xuser1');
+      manager.add('0xuser2');
+      manager.touchReserve('0xuser1', '0xETH');
+      manager.touchReserve('0xuser2', '0xETH');
+      
+      const users = manager.getUsersForReserve('0xETH');
+      expect(users).toContain('0xuser1');
+      expect(users).toContain('0xuser2');
+      expect(users.length).toBe(2);
+    });
+
+    it('should return empty array for unknown reserve', () => {
+      const users = manager.getUsersForReserve('0xunknown');
+      expect(users).toEqual([]);
+    });
+
+    it('should limit reserves per user to 5', () => {
+      manager.add('0xuser1');
+      manager.touchReserve('0xuser1', '0xreserve1');
+      manager.touchReserve('0xuser1', '0xreserve2');
+      manager.touchReserve('0xuser1', '0xreserve3');
+      manager.touchReserve('0xuser1', '0xreserve4');
+      manager.touchReserve('0xuser1', '0xreserve5');
+      manager.touchReserve('0xuser1', '0xreserve6');
+      
+      // Should have evicted oldest reserve
+      const allReserves = [
+        manager.getUsersForReserve('0xreserve1'),
+        manager.getUsersForReserve('0xreserve2'),
+        manager.getUsersForReserve('0xreserve3'),
+        manager.getUsersForReserve('0xreserve4'),
+        manager.getUsersForReserve('0xreserve5'),
+        manager.getUsersForReserve('0xreserve6')
+      ];
+      
+      const nonEmpty = allReserves.filter(arr => arr.length > 0);
+      expect(nonEmpty.length).toBe(5);
+    });
+
+    it('should clean up reserve associations when removing candidate', () => {
+      manager.add('0xuser1');
+      manager.touchReserve('0xuser1', '0xETH');
+      
+      manager.remove('0xuser1');
+      
+      const users = manager.getUsersForReserve('0xETH');
+      expect(users).not.toContain('0xuser1');
+    });
+
+    it('should clean up all reserve associations when clearing', () => {
+      manager.add('0xuser1');
+      manager.add('0xuser2');
+      manager.touchReserve('0xuser1', '0xETH');
+      manager.touchReserve('0xuser2', '0xUSDC');
+      
+      manager.clear();
+      
+      expect(manager.getUsersForReserve('0xETH')).toEqual([]);
+      expect(manager.getUsersForReserve('0xUSDC')).toEqual([]);
+    });
+  });
 });
