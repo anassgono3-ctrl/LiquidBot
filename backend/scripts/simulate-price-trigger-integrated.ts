@@ -140,7 +140,8 @@ async function main() {
 
   pt.logConfig(m => console.log(m));
 
-  function runEmergencyScan(symbol: string): Promise<{ scanned: number; liquidatable: number }> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  function runEmergencyScan(_symbol: string): Promise<{ scanned: number; liquidatable: number }> {
     const slice = candidateManager.list().slice(0, priceTriggerConfig.maxScan);
     const liquidatable = slice.filter((_, idx) => idx % 2 === 0).length; // synthetic
     return Promise.resolve({ scanned: slice.length, liquidatable });
