@@ -86,6 +86,7 @@ export interface LowHFTrackerOptions {
  */
 export class LowHFTracker {
   private entries: Map<string, LowHFEntry> = new Map();
+  private extendedEntries: Map<string, LowHFExtendedEntry> = new Map(); // Extended format with full provenance
   private readonly maxEntries: number;
   private readonly recordMode: 'all' | 'min';
   private readonly dumpOnShutdown: boolean;
@@ -205,6 +206,81 @@ export class LowHFTracker {
   }
 
   /**
+   * Record an extended low HF snapshot with full reserve-level provenance
+   * @param extendedEntry Extended entry with reserve detail and inline verification
+   */
+  recordExtended(extendedEntry: LowHFExtendedEntry): void {
+    const healthFactor = extendedEntry.reportedHfFloat;
+    const address = extendedEntry.user;
+
+    // Check if we should record based on ALWAYS_INCLUDE_HF_BELOW threshold
+    if (healthFactor >= config.alwaysIncludeHfBelow) {
+      return;
+    }
+
+    // Track minimum HF
+    if (this.minHF === null || healthFactor < this.minHF) {
+      this.minHF = healthFactor;
+      lowHfMinHealthFactor.observe(healthFactor);
+    }
+
+    // Check for inline recomputation mismatch
+    const tolerance = 1e-6; // Very tight tolerance for inline check
+    if (Math.abs(extendedEntry.deltaReportedVsRecomputed) > tolerance && 
+        extendedEntry.recomputedHf !== Infinity && 
+        extendedEntry.reportedHfFloat !== Infinity) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[lowhf-tracker] Recomputation mismatch for ${address}: ` +
+        `reported=${extendedEntry.reportedHfFloat.toFixed(6)} ` +
+        `recomputed=${extendedEntry.recomputedHf.toFixed(6)} ` +
+        `delta=${extendedEntry.deltaReportedVsRecomputed.toFixed(6)}`
+      );
+      lowHfMismatchTotal.inc();
+    }
+
+    // In 'min' mode, only record the minimum HF candidate
+    if (this.recordMode === 'min') {
+      let minEntry: LowHFExtendedEntry | null = null;
+      for (const entry of this.extendedEntries.values()) {
+        if (!minEntry || entry.reportedHfFloat < minEntry.reportedHfFloat) {
+          minEntry = entry;
+        }
+      }
+
+      // Only record if this is lower than current min or no entries exist
+      if (!minEntry || healthFactor < minEntry.reportedHfFloat) {
+        if (minEntry) {
+          this.extendedEntries.delete(minEntry.user);
+        }
+        this.extendedEntries.set(address, extendedEntry);
+        lowHfSnapshotTotal.inc({ mode: 'min' });
+      }
+      return;
+    }
+
+    // 'all' mode: record all low HF candidates with eviction if at capacity
+    if (this.extendedEntries.size >= this.maxEntries && !this.extendedEntries.has(address)) {
+      // Find and remove the highest HF entry
+      let highestEntry: { addr: string; hf: number } | null = null;
+      for (const [addr, entry] of this.extendedEntries.entries()) {
+        if (!highestEntry || entry.reportedHfFloat > highestEntry.hf) {
+          highestEntry = { addr, hf: entry.reportedHfFloat };
+        }
+      }
+
+      if (highestEntry && healthFactor < highestEntry.hf) {
+        this.extendedEntries.delete(highestEntry.addr);
+      } else {
+        return; // This entry has higher HF than all existing entries, skip it
+      }
+    }
+
+    this.extendedEntries.set(address, extendedEntry);
+    lowHfSnapshotTotal.inc({ mode: 'all' });
+  }
+
+  /**
    * Get all recorded entries
    */
   getAll(): LowHFEntry[] {
@@ -232,7 +308,7 @@ export class LowHFTracker {
    * Get count of tracked entries
    */
   getCount(): number {
-    return this.entries.size;
+    return this.entries.size + this.extendedEntries.size;
   }
 
   /**
@@ -248,10 +324,19 @@ export class LowHFTracker {
   getStats() {
     return {
       count: this.entries.size,
+      extendedCount: this.extendedEntries.size,
+      totalCount: this.entries.size + this.extendedEntries.size,
       minHF: this.minHF,
       mode: this.recordMode,
       maxEntries: this.maxEntries
     };
+  }
+
+  /**
+   * Get all extended entries
+   */
+  getAllExtended(): LowHFExtendedEntry[] {
+    return Array.from(this.extendedEntries.values());
   }
 
   /**
@@ -292,28 +377,54 @@ export class LowHFTracker {
         await mkdir(absDir, { recursive: true });
       }
 
-      // Generate timestamped filename
+      // Generate timestamped filename based on which format has data
       const timestamp = new Date().toISOString().replace(/:/g, '-').replace(/\./g, '-');
-      const filename = `lowhf-dump-${timestamp}.json`;
+      const hasExtended = this.extendedEntries.size > 0;
+      const filename = hasExtended 
+        ? `lowhf-extended-dump-${timestamp}.json`
+        : `lowhf-dump-${timestamp}.json`;
       const filepath = join(absDir, filename);
 
-      // Prepare dump data
-      const dumpData = {
+      // Prepare dump data with both formats (for compatibility)
+      const dumpData: {
+        metadata: {
+          timestamp: string;
+          schemaVersion: string;
+          mode: string;
+          count: number;
+          extendedCount: number;
+          minHF: number | null;
+          threshold: number;
+        };
+        entries: LowHFEntry[];
+        extendedEntries?: LowHFExtendedEntry[];
+      } = {
         metadata: {
           timestamp: new Date().toISOString(),
+          schemaVersion: hasExtended ? '2.0' : '1.0',
           mode: this.recordMode,
           count: this.entries.size,
+          extendedCount: this.extendedEntries.size,
           minHF: this.minHF,
           threshold: config.alwaysIncludeHfBelow
         },
         entries: this.getAll()
       };
 
+      // Include extended entries if present
+      if (hasExtended) {
+        dumpData.extendedEntries = Array.from(this.extendedEntries.values());
+      }
+
       // Write to file
       await writeFile(filepath, JSON.stringify(dumpData, null, 2), 'utf-8');
 
+      const totalEntries = this.entries.size + this.extendedEntries.size;
       // eslint-disable-next-line no-console
-      console.log(`[lowhf-tracker] Dump written to ${filepath} (${this.entries.size} entries)`);
+      console.log(
+        `[lowhf-tracker] Dump written to ${filepath} ` +
+        `(${totalEntries} entries: ${this.entries.size} basic, ${this.extendedEntries.size} extended)`
+      );
 
       return filepath;
     } catch (err) {
@@ -338,6 +449,7 @@ export class LowHFTracker {
    */
   clear(): void {
     this.entries.clear();
+    this.extendedEntries.clear();
     this.minHF = null;
   }
 }

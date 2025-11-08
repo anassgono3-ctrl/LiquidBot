@@ -32,6 +32,7 @@
     "verify:hf": "node -r dotenv/config dist/scripts/verify-data.js --recent=10 --show-hf",
     "verify:chainlink": "npm run build --silent && node -r dotenv/config dist/scripts/verify-chainlink-prices.js",
     "verify:lowhf": "tsx scripts/verify-lowhf.ts",
+    "verify:lowhf-dump": "tsx scripts/verify-lowhf-extended.ts",
     "diagnose": "tsx scripts/diagnose-all.ts",
     "hf:harness": "tsx -r dotenv/config scripts/hf-realtime-harness.ts",
     "test:dynamic-liquidation": "API_KEY=test-key JWT_SECRET=test-secret USE_MOCK_SUBGRAPH=true tsx scripts/test-dynamic-liquidation.ts",
