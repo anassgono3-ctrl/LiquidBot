@@ -211,4 +211,11 @@ export const config = {
   // Health factor thresholds (legacy, use healthAlertThreshold and healthEmergencyThreshold instead)
   alertThreshold: 1.1,
   emergencyThreshold: 1.05,
+
+  // Low HF Tracker for observability
+  get lowHfTrackerEnabled() { return env.lowHfTrackerEnabled; },
+  get lowHfTrackerMax() { return env.lowHfTrackerMax; },
+  get lowHfRecordMode() { return env.lowHfRecordMode; },
+  get lowHfDumpOnShutdown() { return env.lowHfDumpOnShutdown; },
+  get lowHfSummaryIntervalSec() { return env.lowHfSummaryIntervalSec; },
 };

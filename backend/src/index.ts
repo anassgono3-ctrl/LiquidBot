@@ -293,6 +293,57 @@ app.get("/health", (_req, res) => {
   res.json(healthData);
 });
 
+// Status endpoint with low HF tracking data
+app.get("/status", (_req, res) => {
+  const statusData: Record<string, unknown> = {
+    lastBlock: null,
+    candidateCount: 0,
+    lastMinHF: null,
+    lowHfCount: 0
+  };
+
+  if (realtimeHFService) {
+    const metrics = realtimeHFService.getMetrics();
+    statusData.candidateCount = metrics.candidateCount;
+    statusData.lastMinHF = metrics.minHF;
+
+    const tracker = realtimeHFService.getLowHFTracker();
+    if (tracker) {
+      statusData.lowHfCount = tracker.getCount();
+    }
+  }
+
+  res.json(statusData);
+});
+
+// Low HF entries endpoint with pagination
+app.get("/lowhf", (req, res) => {
+  if (!realtimeHFService) {
+    return res.status(503).json({ error: 'Real-time HF service not available' });
+  }
+
+  const tracker = realtimeHFService.getLowHFTracker();
+  if (!tracker) {
+    return res.status(503).json({ error: 'Low HF tracker not enabled' });
+  }
+
+  // Parse query parameters
+  const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
+  const offset = parseInt(req.query.offset as string) || 0;
+  const includeReserves = (req.query.includeReserves as string) !== '0';
+
+  const entries = tracker.getPaginated(limit, offset, includeReserves);
+
+  res.json({
+    entries,
+    count: entries.length,
+    total: tracker.getCount(),
+    limit,
+    offset,
+    minHF: tracker.getMinHF()
+  });
+});
+
 // Inject the singleton service
 app.use("/api/v1", authenticate, buildRoutes(subgraphService || SubgraphService.createMock()));
 

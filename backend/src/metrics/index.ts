@@ -273,3 +273,24 @@ export const priceOracleStubFallbackTotal = new Counter({
   labelNames: ['symbol', 'reason'],
   registers: [registry]
 });
+
+// Low HF Tracker metrics
+export const lowHfSnapshotTotal = new Counter({
+  name: 'liquidbot_lowhf_snapshot_total',
+  help: 'Total number of low HF snapshots captured',
+  labelNames: ['mode'],
+  registers: [registry]
+});
+
+export const lowHfMinHealthFactor = new Histogram({
+  name: 'liquidbot_lowhf_min_hf',
+  help: 'Distribution of minimum health factors tracked',
+  buckets: [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.5],
+  registers: [registry]
+});
+
+export const lowHfMismatchTotal = new Counter({
+  name: 'liquidbot_lowhf_mismatch_total',
+  help: 'Total number of HF verification mismatches detected',
+  registers: [registry]
+});
