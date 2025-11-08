@@ -132,6 +132,7 @@ export const config = {
   get priceTriggerMaxScan() { return env.priceTriggerMaxScan; },
   get priceTriggerAssets() { return env.priceTriggerAssets; },
   get priceTriggerDebounceSec() { return env.priceTriggerDebounceSec; },
+  get priceTriggerCumulative() { return env.priceTriggerCumulative; },
 
   // At-risk user scanning
   get atRiskScanLimit() { return env.atRiskScanLimit; },

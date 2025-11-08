@@ -2,16 +2,18 @@
 
 ## Problem Statement
 
-The Chainlink verification script (`backend/scripts/verify-chainlink-prices.ts`) had runtime errors due to BigInt arithmetic issues, and PriceService assumed all feeds use 8 decimals, which could lead to price mis-scaling.
+The verify-chainlink-prices script still throws "Cannot mix BigInt and other types" at runtime on Windows/Node 20, indicating BigInt/Number mixing remains in the compiled dist or scripts run without rebuilds. PriceService currently assumes 8 decimals for all feeds which is true for most Base feeds but is a brittle assumption and reduces future-proofing. Observability for price oracle failures is limited. The price-trigger feature works but operators need an option for cumulative drop detection and clearer diagnostics.
 
 ## Issues Fixed
 
-### 1. BigInt Arithmetic Errors
-**Problem**: Script performed arithmetic directly on BigInt with Number operands (`rawAnswer / 10 ** decimals`)
+### 1. BigInt Arithmetic Errors & Windows Compatibility
+**Problem**: Script performed arithmetic directly on BigInt with Number operands, causing runtime errors on Windows/Node 20. Scripts could run with stale builds.
 **Solution**: 
 - Created `normalizeChainlinkPrice()` utility in `src/utils/chainlinkMath.ts`
-- Converts BigInt safely: splits into integer and fractional parts
-- Used in both verification script and PriceService
+- Converts BigInt safely: splits into integer and fractional parts with explicit Number() conversions
+- Used in both verification script, diagnose-all script, and PriceService
+- Updated npm script to auto-build: `verify:chainlink` now runs `npm run build --silent` first
+- Enhanced diagnostics: roundId, rawAnswer, decimals, updatedAgo (seconds), stale flag (>15 min)
 
 ### 2. Hard-Coded Decimals Assumption
 **Problem**: PriceService assumed all feeds use 8 decimals (`price = Number(answer) / 1e8`)
@@ -24,11 +26,22 @@ The Chainlink verification script (`backend/scripts/verify-chainlink-prices.ts`)
 ### 3. Silent Fallback Issues
 **Problem**: Stub fallback could mask oracle failures without warnings or metrics
 **Solution**:
+- Added explicit success logs with detailed metrics for Chainlink fetches
 - Added warning logs when falling back to stub prices
 - Added Prometheus metrics:
   - `liquidbot_price_oracle_chainlink_requests_total{status, symbol}`
   - `liquidbot_price_oracle_chainlink_stale_total{symbol}`
   - `liquidbot_price_oracle_stub_fallback_total{symbol, reason}`
+
+### 4. Cumulative Price Drop Trigger Mode
+**Problem**: Single-round delta mode may miss gradual cumulative price erosion
+**Solution**:
+- Added `PRICE_TRIGGER_CUMULATIVE` environment variable (default: false)
+- **Delta mode (default)**: Triggers on each single-round price drop >= threshold
+- **Cumulative mode**: Triggers when cumulative drop from baseline >= threshold
+- Baseline resets after each trigger in cumulative mode
+- Debounce applies to both modes
+- Enhanced logging distinguishes between modes
 
 ## Implementation Details
 
@@ -146,11 +159,112 @@ All feeds verified successfully.
 - **No breaking changes**: Graceful fallback maintains compatibility
 - **Improved observability**: Metrics enable proactive monitoring
 
+## Price Trigger Modes
+
+### Delta Mode (Default)
+**Use Case**: Detect sharp single-round price drops
+**Behavior**: Compares each update against the previous price
+**Example**:
+```
+100 -> 99.9 (10 bps, no trigger)
+99.9 -> 98.8 (110 bps, TRIGGER!)
+98.8 -> 97.7 (111 bps, TRIGGER after debounce)
+```
+
+### Cumulative Mode (PRICE_TRIGGER_CUMULATIVE=true)
+**Use Case**: Detect gradual cumulative price erosion
+**Behavior**: Tracks total drop from baseline, resets baseline after trigger
+**Example**:
+```
+Baseline: 100
+100 -> 99.9 (10 bps cumulative, no trigger)
+99.9 -> 99.85 (15 bps cumulative, no trigger)
+99.85 -> 99.7 (30 bps cumulative, TRIGGER!)
+New baseline: 99.7
+99.7 -> 99.4 (30 bps from new baseline, TRIGGER after debounce)
+```
+
+### Configuration
+
+Add to `.env`:
+```bash
+# Enable cumulative mode for price triggers
+PRICE_TRIGGER_CUMULATIVE=true
+# Threshold in basis points (30 = 0.3%)
+PRICE_TRIGGER_DROP_BPS=30
+# Debounce window in seconds
+PRICE_TRIGGER_DEBOUNCE_SEC=60
+```
+
+### Operator Runbook
+
+#### Verifying Chainlink Prices
+```bash
+# Auto-builds before running (Windows-safe)
+npm run verify:chainlink
+```
+
+Expected output:
+```
+verify-chainlink-prices: Starting verification...
+RPC: https://mainnet.base.org
+Feeds: ETH, USDC
+
+✅ ETH: price=3000.50000000 rawAnswer=300050000000 decimals=8 roundId=123456 updatedAt=1234567890 updatedAgo=120s
+✅ USDC: price=1.00000000 rawAnswer=100000000 decimals=8 roundId=789012 updatedAt=1234567890 updatedAgo=120s
+
+Verification complete.
+All feeds verified successfully.
+```
+
+Stale data warnings:
+```
+⚠️  ETH: price=3000.50000000 rawAnswer=300050000000 decimals=8 roundId=123456 updatedAt=1234567890 updatedAgo=1200s (STALE)
+```
+
+#### Running Comprehensive Diagnostics
+```bash
+npm run diagnose
+```
+
+This runs all system checks including:
+- Environment validation
+- Subgraph connectivity
+- Chainlink price feeds (with safe BigInt handling)
+- Health factor computation
+- Opportunity building
+- Telegram notifications
+- WebSocket server
+- Metrics registry
+
+#### Monitoring Price Triggers
+
+Watch logs for price trigger events:
+```
+[price-trigger] enabled=true mode=cumulative dropBps=30 maxScan=500 debounceSec=60 assets=WETH,WBTC
+[price-trigger] Initialized price tracking for WETH: mode=cumulative baseline=300050000000
+[price-trigger] Sharp price drop detected: asset=WETH drop=30.50bps threshold=30bps mode=cumulative reference=300050000000 current=299140000000 block=12345678 trigger=price
+[price-trigger] Emergency scan complete: asset=WETH candidates=150 latency=250ms trigger=price
+```
+
+#### Metrics to Monitor
+
+- `liquidbot_price_oracle_chainlink_requests_total` - Total requests to Chainlink feeds
+- `liquidbot_price_oracle_chainlink_stale_total` - Stale data detections
+- `liquidbot_price_oracle_stub_fallback_total` - Fallbacks to stub prices
+- `liquidbot_realtime_price_emergency_scans_total` - Price-triggered emergency scans
+
 ## Files Changed
 
-1. `backend/scripts/verify-chainlink-prices.ts` - Fixed BigInt errors, added diagnostics
-2. `backend/src/services/PriceService.ts` - Dynamic decimals, metrics, logging
-3. `backend/src/utils/chainlinkMath.ts` - New high-precision utility
-4. `backend/src/metrics/index.ts` - Added price oracle metrics
-5. `backend/tests/unit/chainlinkMath.test.ts` - 17 new test cases
-6. `backend/README.md` - Comprehensive Chainlink documentation
+1. `backend/scripts/verify-chainlink-prices.ts` - Enhanced BigInt safety, diagnostics, stale detection
+2. `backend/scripts/diagnose-all.ts` - Safe BigInt normalization via chainlinkMath
+3. `backend/package.json` - Auto-build for verify:chainlink script
+4. `backend/src/services/PriceService.ts` - Dynamic decimals, explicit success logging
+5. `backend/src/services/RealTimeHFService.ts` - Cumulative price trigger mode
+6. `backend/src/config/envSchema.ts` - PRICE_TRIGGER_CUMULATIVE env variable
+7. `backend/src/config/index.ts` - Export priceTriggerCumulative config
+8. `backend/src/utils/chainlinkMath.ts` - High-precision BigInt utility (already existed)
+9. `backend/tests/unit/chainlinkMath.test.ts` - Comprehensive test coverage (already existed)
+10. `backend/tests/unit/PriceTrigger.test.ts` - New tests for cumulative/delta modes
+11. `backend/.env.example` - Added PRICE_TRIGGER_CUMULATIVE documentation
+12. `backend/docs/CHAINLINK_ORACLE_ENHANCEMENT.md` - This document
