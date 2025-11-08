@@ -549,6 +549,57 @@ All metrics are prefixed with `liquidbot_`:
 | `liquidbot_liquidation_seen_total` | Gauge | none | Unique liquidation IDs tracked |
 | **`liquidbot_opportunities_generated_total`** | Counter | none | **Liquidation opportunities generated** |
 | **`liquidbot_opportunity_profit_estimate`** | Histogram | none | **Estimated profit in USD (buckets: 1-1000)** |
+| `liquidbot_lowhf_snapshot_total` | Counter | `mode` (all\|min) | Low-HF snapshots captured |
+| `liquidbot_lowhf_min_hf` | Histogram | none | Distribution of minimum health factors |
+| `liquidbot_lowhf_recompute_mismatch_total` | Counter | none | Inline HF recomputation mismatches |
+| `liquidbot_lowhf_archive_mismatch_total` | Counter | none | Archive verification mismatches |
+| `liquidbot_lowhf_archive_verified_total` | Counter | none | Entries verified against archive node |
+
+### Low-HF Tracking and Verification
+
+The system includes comprehensive low health factor tracking for observability and verification:
+
+**Features:**
+- Captures detailed snapshots of users below configurable HF threshold
+- Stores full reserve-level provenance (balances, prices, oracle metadata)
+- Inline mathematical verification of HF calculations
+- Optional archive node verification for full data provenance
+- Automatic dump generation on shutdown
+
+**Configuration:**
+```bash
+LOW_HF_TRACKER_ENABLED=true         # Enable tracking (default: true)
+LOW_HF_TRACKER_MAX=1000             # Max entries (default: 1000)
+LOW_HF_RECORD_MODE=all              # all|min (default: all)
+ALWAYS_INCLUDE_HF_BELOW=1.10        # Recording threshold (default: 1.10)
+```
+
+**Verification Workflow:**
+```bash
+# 1. Run bot and capture low-HF data
+npm start
+
+# 2. Graceful shutdown generates dump file
+^C  # Creates diagnostics/lowhf-extended-dump-<timestamp>.json
+
+# 3. Verify mathematical consistency
+npm run verify:lowhf-dump diagnostics/lowhf-extended-dump-<timestamp>.json
+
+# 4. Optional: Archive node verification
+LOW_HF_ARCHIVE_RPC_URL=https://archive.node \
+npm run verify:lowhf-dump <file>
+```
+
+**API Access:**
+```bash
+# Get low-HF entries with reserve detail
+curl 'http://localhost:3000/lowhf?detail=1&limit=50'
+
+# Get summary without reserve detail
+curl 'http://localhost:3000/lowhf?detail=0'
+```
+
+See **[Deterministic HF Validation](docs/DETERMINISTIC_HF_VALIDATION.md)** for complete documentation.
 
 ### Enhanced Health Endpoint
 
@@ -627,6 +678,7 @@ Lower values = faster failover, higher values = more retry attempts before degra
 ## Documentation
 
 - **[Health Monitoring & Alerts](docs/ALERTS.md)** - Opportunity detection, profit simulation, Telegram notifications
+- **[Deterministic HF Validation](docs/DETERMINISTIC_HF_VALIDATION.md)** - Extended low-HF tracking and verification workflow
 - [Liquidation Tracking](docs/LIQUIDATION_TRACKING.md) - Incremental liquidation detection
 - [OpenAPI Spec](docs/openapi.yaml)
 - [GraphQL Examples](examples/)
