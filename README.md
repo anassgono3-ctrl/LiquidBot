@@ -28,6 +28,15 @@ Liquidations are costly, stressful, and often preventable for leveraged DeFi use
 - Live price deltas via oracles to reduce query load
 - Adjustable risk models per subscription tier
 
+### Observability & Diagnostics
+- **Low HF Tracker**: Non-intrusive capture of detailed per-user snapshots for candidates below configurable HF threshold
+  - Zero performance impact (reuses existing batch check results)
+  - Graceful shutdown dumps to timestamped JSON files
+  - HTTP endpoints (`/status`, `/lowhf`) for real-time inspection
+  - Verification script to validate HF calculations
+  - Prometheus metrics for monitoring
+  - See [Low HF Tracker Documentation](./backend/LOW_HF_TRACKER_IMPLEMENTATION.md) for details
+
 ## Revenue Model
 
 | Component | Details |

@@ -188,7 +188,14 @@ export const rawEnvSchema = z.object({
   // Event batch coalescing and limits
   EVENT_BATCH_COALESCE_MS: z.string().optional(),
   EVENT_BATCH_MAX_PER_BLOCK: z.string().optional(),
-  MAX_PARALLEL_EVENT_BATCHES: z.string().optional()
+  MAX_PARALLEL_EVENT_BATCHES: z.string().optional(),
+
+  // Low HF Tracker for observability
+  LOW_HF_TRACKER_ENABLED: z.string().optional(),
+  LOW_HF_TRACKER_MAX: z.string().optional(),
+  LOW_HF_RECORD_MODE: z.string().optional(),
+  LOW_HF_DUMP_ON_SHUTDOWN: z.string().optional(),
+  LOW_HF_SUMMARY_INTERVAL_SEC: z.string().optional()
 });
 
 export const env = (() => {
@@ -387,6 +394,13 @@ export const env = (() => {
     // Event batch coalescing and limits
     eventBatchCoalesceMs: Number(parsed.EVENT_BATCH_COALESCE_MS || 120),
     eventBatchMaxPerBlock: Number(parsed.EVENT_BATCH_MAX_PER_BLOCK || 2),
-    maxParallelEventBatches: Number(parsed.MAX_PARALLEL_EVENT_BATCHES || 1)
+    maxParallelEventBatches: Number(parsed.MAX_PARALLEL_EVENT_BATCHES || 1),
+
+    // Low HF Tracker for observability
+    lowHfTrackerEnabled: (parsed.LOW_HF_TRACKER_ENABLED || 'true').toLowerCase() === 'true',
+    lowHfTrackerMax: Number(parsed.LOW_HF_TRACKER_MAX || 1000),
+    lowHfRecordMode: (parsed.LOW_HF_RECORD_MODE || 'all') as 'all' | 'min',
+    lowHfDumpOnShutdown: (parsed.LOW_HF_DUMP_ON_SHUTDOWN || 'true').toLowerCase() === 'true',
+    lowHfSummaryIntervalSec: Number(parsed.LOW_HF_SUMMARY_INTERVAL_SEC || 900)
   };
 })();

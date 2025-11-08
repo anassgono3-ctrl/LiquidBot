@@ -33,6 +33,7 @@ import type { SubgraphService } from './SubgraphService.js';
 import { OnChainBackfillService } from './OnChainBackfillService.js';
 import { SubgraphSeeder } from './SubgraphSeeder.js';
 import { BorrowersIndexService } from './BorrowersIndexService.js';
+import { LowHFTracker } from './LowHFTracker.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -86,6 +87,7 @@ export class RealTimeHFService extends EventEmitter {
   private subgraphSeeder?: SubgraphSeeder;
   private backfillService?: OnChainBackfillService;
   private borrowersIndex?: BorrowersIndexService;
+  private lowHfTracker?: LowHFTracker;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -195,6 +197,16 @@ export class RealTimeHFService extends EventEmitter {
     this.subgraphService = options.subgraphService;
     this.skipWsConnection = options.skipWsConnection || false;
     
+    // Initialize low HF tracker if enabled
+    if (config.lowHfTrackerEnabled) {
+      this.lowHfTracker = new LowHFTracker();
+      // eslint-disable-next-line no-console
+      console.log(
+        `[lowhf-tracker] Enabled: mode=${config.lowHfRecordMode} ` +
+        `max=${config.lowHfTrackerMax} dumpOnShutdown=${config.lowHfDumpOnShutdown}`
+      );
+    }
+    
     // Initialize adaptive settings
     this.basePendingTickMs = config.flashblocksTickMs;
     this.currentPendingTickMs = config.flashblocksTickMs;
@@ -298,6 +310,21 @@ export class RealTimeHFService extends EventEmitter {
 
     // eslint-disable-next-line no-console
     console.log('[realtime-hf] Shutting down...');
+
+    // Dump low HF tracker data if enabled
+    if (this.lowHfTracker && config.lowHfDumpOnShutdown) {
+      try {
+        await this.lowHfTracker.dumpToFile();
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[realtime-hf] Failed to dump low HF tracker data:', err);
+      }
+    }
+
+    // Stop low HF tracker
+    if (this.lowHfTracker) {
+      this.lowHfTracker.stop();
+    }
 
     // Clear timers
     if (this.seedTimer) clearInterval(this.seedTimer);
@@ -1947,12 +1974,31 @@ export class RealTimeHFService extends EventEmitter {
         if (result.success) {
           try {
             const decoded = aavePoolInterface.decodeFunctionResult('getUserAccountData', result.returnData);
+            const totalCollateralBase = decoded[0]; // in base units (ETH equivalent, 8 decimals)
+            const totalDebtBase = decoded[1]; // in base units (ETH equivalent, 8 decimals)
             const healthFactorRaw = decoded[5]; // 6th element
             const healthFactor = parseFloat(formatUnits(healthFactorRaw, 18));
+            
+            // Extract USD values (assuming 8 decimal base units)
+            const totalCollateralUsd = parseFloat(formatUnits(totalCollateralBase, 8));
+            const totalDebtUsd = parseFloat(formatUnits(totalDebtBase, 8));
 
             this.candidateManager.updateHF(userAddress, healthFactor);
             this.metrics.healthChecksPerformed++;
             realtimeHealthChecksPerformed.inc();
+            
+            // Track for low HF recording
+            if (this.lowHfTracker && healthFactor < config.alwaysIncludeHfBelow) {
+              this.lowHfTracker.record(
+                userAddress,
+                healthFactor,
+                blockNumber,
+                triggerType,
+                totalCollateralUsd,
+                totalDebtUsd
+                // Note: reserves data not available without additional RPC calls
+              );
+            }
 
             // Track min HF
             if (minHF === null || healthFactor < minHF) {
@@ -2192,5 +2238,12 @@ export class RealTimeHFService extends EventEmitter {
    */
   getCandidateManager(): CandidateManager {
     return this.candidateManager;
+  }
+
+  /**
+   * Get low HF tracker (for API endpoints)
+   */
+  getLowHFTracker(): LowHFTracker | undefined {
+    return this.lowHfTracker;
   }
 }
