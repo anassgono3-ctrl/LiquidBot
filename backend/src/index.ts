@@ -330,7 +330,9 @@ app.get("/lowhf", (req, res) => {
   // Parse query parameters
   const limit = Math.min(parseInt(req.query.limit as string) || 100, 1000);
   const offset = parseInt(req.query.offset as string) || 0;
-  const includeReserves = (req.query.includeReserves as string) !== '0';
+  // Support both 'detail' and 'includeReserves' for backward compatibility
+  const detail = req.query.detail as string;
+  const includeReserves = detail ? detail !== '0' : (req.query.includeReserves as string) !== '0';
 
   const entries = tracker.getPaginated(limit, offset, includeReserves);
 

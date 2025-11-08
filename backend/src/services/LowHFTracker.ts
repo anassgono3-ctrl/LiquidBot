@@ -22,6 +22,27 @@ export interface ReserveData {
   sourcePrice: string; // Price source provenance (e.g., "chainlink:0x123...", "oracle", "cached")
 }
 
+/**
+ * Extended reserve detail with full provenance for verification
+ */
+export interface LowHFReserveDetail {
+  tokenAddress: string;
+  symbol: string;
+  tokenDecimals: number;
+  collateralRaw: string;       // BigInt string
+  debtRaw: string;             // BigInt string
+  collateralUsd: number;       // normalized using price
+  debtUsd: number;
+  liquidationThresholdBps: number;
+  liquidationBonusBps?: number;
+  ltvBps?: number;
+  priceSource: 'chainlink' | 'stub' | 'other';
+  priceAnswerRaw: string;      // oracle raw answer as BigInt string
+  priceDecimals: number;
+  priceRoundId?: string;
+  priceUpdatedAt?: number;     // unix seconds
+}
+
 export interface LowHFEntry {
   address: string;
   lastHF: number;
@@ -31,6 +52,25 @@ export interface LowHFEntry {
   totalCollateralUsd: number;
   totalDebtUsd: number;
   reserves?: ReserveData[]; // Only included in 'all' mode
+}
+
+/**
+ * Extended low HF entry with full reserve-level detail and inline verification
+ */
+export interface LowHFExtendedEntry {
+  timestamp: string;              // ISO 8601 timestamp
+  blockNumber: number;
+  blockHash: string;
+  trigger: 'head' | 'event' | 'price';
+  user: string;
+  reportedHfFloat: number;
+  reportedHfRawBps: number;       // HF in basis points for precision
+  reserves: LowHFReserveDetail[];
+  weightedCollateralUsd: number;  // Σ(collateralUsd * liquidationThresholdBps/10000)
+  totalCollateralUsd: number;     // Σ(collateralUsd)
+  totalDebtUsd: number;           // Σ(debtUsd)
+  recomputedHf: number;           // weightedCollateralUsd / totalDebtUsd (∞ if debt=0)
+  deltaReportedVsRecomputed: number;
 }
 
 export interface LowHFTrackerOptions {

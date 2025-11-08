@@ -195,7 +195,12 @@ export const rawEnvSchema = z.object({
   LOW_HF_TRACKER_MAX: z.string().optional(),
   LOW_HF_RECORD_MODE: z.string().optional(),
   LOW_HF_DUMP_ON_SHUTDOWN: z.string().optional(),
-  LOW_HF_SUMMARY_INTERVAL_SEC: z.string().optional()
+  LOW_HF_SUMMARY_INTERVAL_SEC: z.string().optional(),
+  
+  // Low HF Archive Verification
+  LOW_HF_ARCHIVE_RPC_URL: z.string().optional(),
+  LOW_HF_ARCHIVE_VERIFY_SAMPLE: z.string().optional(),
+  LOW_HF_ARCHIVE_TIMEOUT_MS: z.string().optional()
 });
 
 export const env = (() => {
@@ -401,6 +406,11 @@ export const env = (() => {
     lowHfTrackerMax: Number(parsed.LOW_HF_TRACKER_MAX || 1000),
     lowHfRecordMode: (parsed.LOW_HF_RECORD_MODE || 'all') as 'all' | 'min',
     lowHfDumpOnShutdown: (parsed.LOW_HF_DUMP_ON_SHUTDOWN || 'true').toLowerCase() === 'true',
-    lowHfSummaryIntervalSec: Number(parsed.LOW_HF_SUMMARY_INTERVAL_SEC || 900)
+    lowHfSummaryIntervalSec: Number(parsed.LOW_HF_SUMMARY_INTERVAL_SEC || 900),
+    
+    // Low HF Archive Verification
+    lowHfArchiveRpcUrl: parsed.LOW_HF_ARCHIVE_RPC_URL,
+    lowHfArchiveVerifySample: Number(parsed.LOW_HF_ARCHIVE_VERIFY_SAMPLE || 0),
+    lowHfArchiveTimeoutMs: Number(parsed.LOW_HF_ARCHIVE_TIMEOUT_MS || 8000)
   };
 })();

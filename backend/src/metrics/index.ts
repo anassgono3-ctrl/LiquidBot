@@ -294,3 +294,21 @@ export const lowHfMismatchTotal = new Counter({
   help: 'Total number of HF verification mismatches detected',
   registers: [registry]
 });
+
+export const lowHfRecomputeMismatchTotal = new Counter({
+  name: 'liquidbot_lowhf_recompute_mismatch_total',
+  help: 'Total number of inline HF recomputation mismatches detected',
+  registers: [registry]
+});
+
+export const lowHfArchiveMismatchTotal = new Counter({
+  name: 'liquidbot_lowhf_archive_mismatch_total',
+  help: 'Total number of archive verification mismatches detected',
+  registers: [registry]
+});
+
+export const lowHfArchiveVerifiedTotal = new Counter({
+  name: 'liquidbot_lowhf_archive_verified_total',
+  help: 'Total number of entries verified against archive node',
+  registers: [registry]
+});

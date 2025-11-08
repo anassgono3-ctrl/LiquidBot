@@ -19,11 +19,24 @@ const AGGREGATOR_V3_ABI = [
 const CHAINLINK_DEFAULT_DECIMALS = 8;
 
 /**
+ * Metadata about a price feed answer for provenance tracking
+ */
+export interface PriceFeedMetadata {
+  source: 'chainlink' | 'stub' | 'other';
+  answerRaw: string;        // Raw oracle answer as BigInt string
+  decimals: number;
+  roundId?: string;
+  updatedAt?: number;       // Unix seconds
+  feedAddress?: string;
+}
+
+/**
  * PriceService provides USD price lookups for tokens.
  * Supports Chainlink price feeds with fallback to stub prices.
  */
 export class PriceService {
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
+  private priceMetadataCache: Map<string, PriceFeedMetadata> = new Map(); // Cache last feed metadata
   private readonly cacheTtlMs = 60000; // 1 minute cache
   private chainlinkFeeds: Map<string, string> = new Map(); // symbol -> feed address
   private feedDecimals: Map<string, number> = new Map(); // symbol -> decimals
@@ -148,6 +161,17 @@ export class PriceService {
     if (price === null) {
       price = this.defaultPrices[upperSymbol] ?? this.defaultPrices.UNKNOWN;
       
+      // Store stub metadata
+      if (!this.priceMetadataCache.has(upperSymbol)) {
+        // Convert price to a "raw" representation (price * 10^8 to mimic 8 decimals)
+        const stubRaw = BigInt(Math.floor(price * 1e8));
+        this.priceMetadataCache.set(upperSymbol, {
+          source: 'stub',
+          answerRaw: stubRaw.toString(),
+          decimals: 8
+        });
+      }
+      
       // Log fallback when Chainlink was expected but failed
       if (this.chainlinkFeeds.has(upperSymbol)) {
         // eslint-disable-next-line no-console
@@ -230,6 +254,16 @@ export class PriceService {
         `decimals=${decimals} age=${age}s roundId=${roundId.toString()}`
       );
 
+      // Store metadata for provenance tracking
+      this.priceMetadataCache.set(symbol, {
+        source: 'chainlink',
+        answerRaw: answer.toString(),
+        decimals,
+        roundId: roundId.toString(),
+        updatedAt: Number(updatedAt),
+        feedAddress
+      });
+
       priceOracleChainlinkRequestsTotal.inc({ status: 'success', symbol });
       return price;
     } catch (err) {
@@ -260,9 +294,19 @@ export class PriceService {
   }
 
   /**
+   * Get price metadata for a symbol (if available)
+   * @param symbol Token symbol
+   * @returns Price feed metadata or undefined if not cached
+   */
+  getPriceMetadata(symbol: string): PriceFeedMetadata | undefined {
+    return this.priceMetadataCache.get(symbol.toUpperCase());
+  }
+
+  /**
    * Clear the price cache (useful for testing)
    */
   clearCache(): void {
     this.priceCache.clear();
+    this.priceMetadataCache.clear();
   }
 }
