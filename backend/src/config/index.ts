@@ -219,4 +219,14 @@ export const config = {
   get lowHfDumpOnShutdown() { return env.lowHfDumpOnShutdown; },
   get lowHfSummaryIntervalSec() { return env.lowHfSummaryIntervalSec; },
   get lowHfExtendedEnabled() { return env.lowHfExtendedEnabled; },
+
+  // Dirty candidate TTL and hotlist configuration
+  get dirtyTtlSec() { return env.dirtyTtlSec; },
+  get hotlistEnabled() { return env.hotlistEnabled; },
+  get hotlistMax() { return env.hotlistMax; },
+  get hotlistMinHf() { return env.hotlistMinHf; },
+  get hotlistMaxHf() { return env.hotlistMaxHf; },
+  get hotlistMinDebtUsd() { return env.hotlistMinDebtUsd; },
+  get hotlistRevisitSec() { return env.hotlistRevisitSec; },
+  get priceTriggerTestMode() { return env.priceTriggerTestMode; },
 };
