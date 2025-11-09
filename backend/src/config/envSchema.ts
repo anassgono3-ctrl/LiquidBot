@@ -196,7 +196,17 @@ export const rawEnvSchema = z.object({
   LOW_HF_RECORD_MODE: z.string().optional(),
   LOW_HF_DUMP_ON_SHUTDOWN: z.string().optional(),
   LOW_HF_SUMMARY_INTERVAL_SEC: z.string().optional(),
-  LOW_HF_EXTENDED_ENABLED: z.string().optional()
+  LOW_HF_EXTENDED_ENABLED: z.string().optional(),
+
+  // Dirty candidate TTL and hotlist configuration
+  DIRTY_TTL_SEC: z.string().optional(),
+  HOTLIST_ENABLED: z.string().optional(),
+  HOTLIST_MAX: z.string().optional(),
+  HOTLIST_MIN_HF: z.string().optional(),
+  HOTLIST_MAX_HF: z.string().optional(),
+  HOTLIST_MIN_DEBT_USD: z.string().optional(),
+  HOTLIST_REVISIT_SEC: z.string().optional(),
+  PRICE_TRIGGER_TEST_MODE: z.string().optional()
 });
 
 export const env = (() => {
@@ -403,6 +413,16 @@ export const env = (() => {
     lowHfRecordMode: (parsed.LOW_HF_RECORD_MODE || 'all') as 'all' | 'min',
     lowHfDumpOnShutdown: (parsed.LOW_HF_DUMP_ON_SHUTDOWN || 'true').toLowerCase() === 'true',
     lowHfSummaryIntervalSec: Number(parsed.LOW_HF_SUMMARY_INTERVAL_SEC || 900),
-    lowHfExtendedEnabled: (parsed.LOW_HF_EXTENDED_ENABLED || 'true').toLowerCase() === 'true'
+    lowHfExtendedEnabled: (parsed.LOW_HF_EXTENDED_ENABLED || 'true').toLowerCase() === 'true',
+
+    // Dirty candidate TTL and hotlist configuration
+    dirtyTtlSec: Number(parsed.DIRTY_TTL_SEC || 90),
+    hotlistEnabled: (parsed.HOTLIST_ENABLED || 'false').toLowerCase() === 'true',
+    hotlistMax: Number(parsed.HOTLIST_MAX || 2000),
+    hotlistMinHf: Number(parsed.HOTLIST_MIN_HF || 0.98),
+    hotlistMaxHf: Number(parsed.HOTLIST_MAX_HF || 1.05),
+    hotlistMinDebtUsd: Number(parsed.HOTLIST_MIN_DEBT_USD || 100),
+    hotlistRevisitSec: Number(parsed.HOTLIST_REVISIT_SEC || 8),
+    priceTriggerTestMode: (parsed.PRICE_TRIGGER_TEST_MODE || 'false').toLowerCase() === 'true'
   };
 })();
