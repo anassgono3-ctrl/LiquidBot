@@ -300,3 +300,76 @@ export const lowHfMismatchTotal = new Counter({
   help: 'Total number of HF verification mismatches detected',
   registers: [registry]
 });
+
+// DirtySet metrics
+export const dirtySetSize = new Gauge({
+  name: 'liquidbot_dirty_set_size',
+  help: 'Current number of users in the dirty set',
+  registers: [registry]
+});
+
+export const dirtyMarkedTotal = new Counter({
+  name: 'liquidbot_dirty_marked_total',
+  help: 'Total number of times users were marked as dirty',
+  labelNames: ['reason'],
+  registers: [registry]
+});
+
+export const dirtyConsumedTotal = new Counter({
+  name: 'liquidbot_dirty_consumed_total',
+  help: 'Total number of dirty users consumed (checked and removed from dirty set)',
+  registers: [registry]
+});
+
+export const dirtyExpiredTotal = new Counter({
+  name: 'liquidbot_dirty_expired_total',
+  help: 'Total number of dirty users expired due to TTL',
+  registers: [registry]
+});
+
+export const dirtyOnPageTotal = new Counter({
+  name: 'liquidbot_dirty_on_page_total',
+  help: 'Total number of dirty users found on head pages',
+  registers: [registry]
+});
+
+// Hotlist metrics
+export const hotlistSize = new Gauge({
+  name: 'liquidbot_hotlist_size',
+  help: 'Current number of users in the hotlist',
+  registers: [registry]
+});
+
+export const hotlistPromotedTotal = new Counter({
+  name: 'liquidbot_hotlist_promoted_total',
+  help: 'Total number of users promoted to hotlist',
+  registers: [registry]
+});
+
+export const hotlistRevisitTotal = new Counter({
+  name: 'liquidbot_hotlist_revisit_total',
+  help: 'Total number of hotlist revisit checks performed',
+  registers: [registry]
+});
+
+export const revisitLatencySeconds = new Histogram({
+  name: 'liquidbot_revisit_latency_seconds',
+  help: 'Time between successive checks of the same user (seconds)',
+  buckets: [1, 2, 5, 10, 20, 30, 60, 120, 300],
+  registers: [registry]
+});
+
+// WebSocket resubscribe metrics
+export const wsResubscribeTotal = new Counter({
+  name: 'liquidbot_ws_resubscribe_total',
+  help: 'Total number of WebSocket resubscription attempts',
+  registers: [registry]
+});
+
+// Price trigger metrics (additional)
+export const priceTriggerBreachTotal = new Counter({
+  name: 'liquidbot_price_trigger_breach_total',
+  help: 'Total number of price trigger breaches detected',
+  labelNames: ['asset'],
+  registers: [registry]
+});
