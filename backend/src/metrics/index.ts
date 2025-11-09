@@ -300,3 +300,51 @@ export const lowHfMismatchTotal = new Counter({
   help: 'Total number of HF verification mismatches detected',
   registers: [registry]
 });
+
+// DirtySet metrics
+export const dirtySetSize = new Gauge({
+  name: 'liquidbot_dirty_set_size',
+  help: 'Current size of DirtySet',
+  registers: [registry]
+});
+
+export const dirtyMarkedTotal = new Counter({
+  name: 'liquidbot_dirty_marked_total',
+  help: 'Total number of users marked dirty',
+  labelNames: ['reason'],
+  registers: [registry]
+});
+
+export const dirtyConsumedTotal = new Counter({
+  name: 'liquidbot_dirty_consumed_total',
+  help: 'Total number of dirty users processed and removed',
+  labelNames: ['source'],
+  registers: [registry]
+});
+
+export const dirtyExpiredTotal = new Counter({
+  name: 'liquidbot_dirty_expired_total',
+  help: 'Total number of dirty entries expired before being consumed',
+  registers: [registry]
+});
+
+// Hotlist metrics
+export const hotlistSize = new Gauge({
+  name: 'liquidbot_hotlist_size',
+  help: 'Current size of hotlist',
+  registers: [registry]
+});
+
+export const hotlistPromotedTotal = new Counter({
+  name: 'liquidbot_hotlist_promoted_total',
+  help: 'Total number of users promoted to hotlist',
+  labelNames: ['reason'],
+  registers: [registry]
+});
+
+export const hotlistRevisitTotal = new Counter({
+  name: 'liquidbot_hotlist_revisit_total',
+  help: 'Total number of hotlist revisit cycles',
+  labelNames: ['outcome'],
+  registers: [registry]
+});
