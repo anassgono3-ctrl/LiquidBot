@@ -38,13 +38,16 @@ interface LowHFEntry {
 
 interface DumpData {
   metadata: {
+    schemaVersion?: string;
     timestamp: string;
     mode: 'all' | 'min';
     count: number;
+    extendedCount?: number;
     minHF: number | null;
     threshold: number;
   };
   entries: LowHFEntry[];
+  extendedEntries?: LowHFEntry[];
 }
 
 interface Mismatch {
@@ -61,15 +64,15 @@ interface Mismatch {
  * Recompute health factor from USD components
  * HF = (totalCollateralUsd * avgLiquidationThreshold) / totalDebtUsd
  * 
- * Note: We use a simplified calculation here since we don't have per-reserve liquidation thresholds
- * in the basic dump format (only in 'all' mode with reserves)
+ * When reserves are available (schema v1.1+), we use the actual weighted liquidation threshold
+ * from per-reserve data for deterministic verification. Otherwise, we approximate using 80%.
  */
-function recomputeHealthFactor(entry: LowHFEntry): number {
+function recomputeHealthFactor(entry: LowHFEntry): { hf: number; method: 'deterministic' | 'approximate' } {
   if (entry.totalDebtUsd === 0 || entry.totalDebtUsd < 1e-9) {
-    return Infinity; // No debt means infinite HF
+    return { hf: Infinity, method: 'deterministic' }; // No debt means infinite HF
   }
 
-  // If we have reserves with liquidation thresholds, use weighted average
+  // If we have reserves with liquidation thresholds, use weighted average (deterministic)
   if (entry.reserves && entry.reserves.length > 0) {
     let weightedThreshold = 0;
     let totalCollateral = 0;
@@ -82,13 +85,15 @@ function recomputeHealthFactor(entry: LowHFEntry): number {
     }
 
     const avgLiqThreshold = totalCollateral > 0 ? weightedThreshold / totalCollateral : 0.85; // default to 85%
-    return (entry.totalCollateralUsd * avgLiqThreshold) / entry.totalDebtUsd;
+    const hf = (entry.totalCollateralUsd * avgLiqThreshold) / entry.totalDebtUsd;
+    return { hf, method: 'deterministic' };
   }
 
   // Fallback: use typical average liquidation threshold of 80% (0.80)
   // This is an approximation and may not match exactly
   const estimatedAvgLiqThreshold = 0.80;
-  return (entry.totalCollateralUsd * estimatedAvgLiqThreshold) / entry.totalDebtUsd;
+  const hf = (entry.totalCollateralUsd * estimatedAvgLiqThreshold) / entry.totalDebtUsd;
+  return { hf, method: 'approximate' };
 }
 
 /**
@@ -114,9 +119,13 @@ async function verifyDumpFile(filepath: string): Promise<void> {
   }
 
   console.log(`[verify-lowhf] Dump metadata:`);
+  console.log(`  Schema Version: ${dumpData.metadata.schemaVersion ?? '1.0'}`);
   console.log(`  Timestamp: ${dumpData.metadata.timestamp}`);
   console.log(`  Mode: ${dumpData.metadata.mode}`);
   console.log(`  Count: ${dumpData.metadata.count}`);
+  if (dumpData.metadata.extendedCount !== undefined) {
+    console.log(`  Extended Count (with reserves): ${dumpData.metadata.extendedCount}`);
+  }
   console.log(`  MinHF: ${dumpData.metadata.minHF?.toFixed(4) ?? 'N/A'}`);
   console.log(`  Threshold: ${dumpData.metadata.threshold}`);
   console.log('');
@@ -124,9 +133,18 @@ async function verifyDumpFile(filepath: string): Promise<void> {
   // Verify each entry
   const mismatches: Mismatch[] = [];
   const tolerance = 0.05; // 5% tolerance for rounding errors and approximations
+  let deterministicCount = 0;
+  let approximateCount = 0;
 
   for (const entry of dumpData.entries) {
-    const recomputedHF = recomputeHealthFactor(entry);
+    const { hf: recomputedHF, method } = recomputeHealthFactor(entry);
+    
+    if (method === 'deterministic') {
+      deterministicCount++;
+    } else {
+      approximateCount++;
+    }
+    
     const delta = Math.abs(entry.lastHF - recomputedHF);
     const deltaPct = Math.abs((entry.lastHF - recomputedHF) / entry.lastHF) * 100;
 
@@ -143,6 +161,11 @@ async function verifyDumpFile(filepath: string): Promise<void> {
       });
     }
   }
+
+  console.log(`[verify-lowhf] Verification method breakdown:`);
+  console.log(`  Deterministic (with reserves): ${deterministicCount}`);
+  console.log(`  Approximate (without reserves): ${approximateCount}`);
+  console.log('');
 
   // Report results
   console.log(`[verify-lowhf] Verification results:`);
@@ -179,6 +202,11 @@ async function verifyDumpFile(filepath: string): Promise<void> {
 
     console.log('Note: Mismatches may be expected if dump was captured without reserve details (mode=min)');
     console.log('      or if liquidation thresholds vary significantly across reserves.');
+    console.log('');
+    console.log('Troubleshooting:');
+    console.log('  - If extendedCount=0, set LOW_HF_EXTENDED_ENABLED=true and LOW_HF_RECORD_MODE=all');
+    console.log('  - Ensure reserve data is being passed to tracker.record() from RealTimeHFService');
+    console.log('  - Check that reserves are not filtered out due to configuration');
     process.exit(1);
   }
 }

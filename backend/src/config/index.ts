@@ -218,4 +218,5 @@ export const config = {
   get lowHfRecordMode() { return env.lowHfRecordMode; },
   get lowHfDumpOnShutdown() { return env.lowHfDumpOnShutdown; },
   get lowHfSummaryIntervalSec() { return env.lowHfSummaryIntervalSec; },
+  get lowHfExtendedEnabled() { return env.lowHfExtendedEnabled; },
 };
