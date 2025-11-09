@@ -295,11 +295,44 @@ The tracker integrates seamlessly into the existing real-time health factor moni
    - After decoding each user's health data from Multicall3 results
    - Extracts `totalCollateralUsd` and `totalDebtUsd` from existing results
    - Calls `tracker.record()` if HF < `ALWAYS_INCLUDE_HF_BELOW`
-   - No additional RPC calls
+   - **Current Limitation**: Reserve data not yet populated (see below)
 
 3. **Shutdown** (`stop` method):
    - Dumps tracker data if `LOW_HF_DUMP_ON_SHUTDOWN=true`
    - Stops periodic summary timer
+
+### Reserve Data Implementation Status
+
+**Current Status (v1.1 schema ready, data fetching not yet implemented):**
+
+The tracker and dump schema fully support per-reserve data (schema v1.1), but the current implementation does not yet fetch and pass reserve data from `RealTimeHFService`. This means:
+- `extendedCount` will be 0 in dump files
+- All entries verified using approximate method (80% liquidation threshold)
+- Deterministic verification not yet available
+
+**To implement reserve data fetching:**
+
+The challenge is fetching per-reserve data without adding excessive RPC overhead. The current batch check uses `getUserAccountData`, which only returns aggregate totals. Options:
+
+1. **Second-phase multicall** (recommended):
+   - After initial batch, identify low-HF users
+   - Run secondary multicall batch to fetch per-reserve data for those users only
+   - Use `AaveProtocolDataProvider.getUserReserveData(asset, user)` for each active reserve
+   - Requires knowing active reserves per user (from events or configuration)
+
+2. **Sequential RPC calls**:
+   - Use `AaveDataService.getAllUserReserves(user)` after batch completes
+   - Adds N sequential RPC calls where N = number of low-HF users
+   - Simpler but slower
+
+3. **Event-based reserve tracking**:
+   - Track user's active reserves from Supply/Withdraw/Borrow/Repay events
+   - Cache in CandidateManager alongside user state
+   - Use cached list for targeted multicall queries
+
+**Implementation location**: `RealTimeHFService.batchCheckCandidates()` around line 1992
+
+See TODO comment in code for detailed implementation notes.
 
 ## Performance Considerations
 
