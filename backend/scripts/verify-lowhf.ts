@@ -37,14 +37,19 @@ interface LowHFEntry {
 }
 
 interface DumpData {
+  schemaVersion?: string;
   metadata: {
     timestamp: string;
     mode: 'all' | 'min';
     count: number;
+    basicCount?: number;
+    extendedCount?: number;
     minHF: number | null;
     threshold: number;
+    extendedEnabled?: boolean;
   };
   entries: LowHFEntry[];
+  extendedEntries?: LowHFEntry[];
 }
 
 interface Mismatch {
@@ -114,11 +119,19 @@ async function verifyDumpFile(filepath: string): Promise<void> {
   }
 
   console.log(`[verify-lowhf] Dump metadata:`);
+  console.log(`  Schema Version: ${dumpData.schemaVersion ?? '1.0 (legacy)'}`);
   console.log(`  Timestamp: ${dumpData.metadata.timestamp}`);
   console.log(`  Mode: ${dumpData.metadata.mode}`);
   console.log(`  Count: ${dumpData.metadata.count}`);
+  if (dumpData.metadata.basicCount !== undefined && dumpData.metadata.extendedCount !== undefined) {
+    console.log(`  Basic Count: ${dumpData.metadata.basicCount}`);
+    console.log(`  Extended Count: ${dumpData.metadata.extendedCount}`);
+  }
   console.log(`  MinHF: ${dumpData.metadata.minHF?.toFixed(4) ?? 'N/A'}`);
   console.log(`  Threshold: ${dumpData.metadata.threshold}`);
+  if (dumpData.metadata.extendedEnabled !== undefined) {
+    console.log(`  Extended Enabled: ${dumpData.metadata.extendedEnabled}`);
+  }
   console.log('');
 
   // Verify each entry

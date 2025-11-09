@@ -8,8 +8,8 @@ import { join } from 'path';
 import { config } from '../config/index.js';
 import {
   lowHfSnapshotTotal,
-  lowHfMinHealthFactor,
-  lowHfMismatchTotal
+  lowHfExtendedSnapshotTotal,
+  lowHfMinHealthFactor
 } from '../metrics/index.js';
 
 export interface ReserveData {
@@ -38,6 +38,7 @@ export interface LowHFTrackerOptions {
   recordMode?: 'all' | 'min';
   dumpOnShutdown?: boolean;
   summaryIntervalSec?: number;
+  extendedEnabled?: boolean;
 }
 
 /**
@@ -50,6 +51,7 @@ export class LowHFTracker {
   private readonly recordMode: 'all' | 'min';
   private readonly dumpOnShutdown: boolean;
   private readonly summaryIntervalSec: number;
+  private readonly extendedEnabled: boolean;
   private summaryTimer?: NodeJS.Timeout;
   private minHF: number | null = null;
   private lastSummaryTime: number = Date.now();
@@ -59,6 +61,7 @@ export class LowHFTracker {
     this.recordMode = options.recordMode ?? config.lowHfRecordMode;
     this.dumpOnShutdown = options.dumpOnShutdown ?? config.lowHfDumpOnShutdown;
     this.summaryIntervalSec = options.summaryIntervalSec ?? config.lowHfSummaryIntervalSec;
+    this.extendedEnabled = options.extendedEnabled ?? config.lowHfExtendedEnabled;
 
     if (this.summaryIntervalSec > 0) {
       this.startPeriodicSummary();
@@ -149,6 +152,9 @@ export class LowHFTracker {
       }
     }
 
+    // Include reserves if mode='all' AND extended enabled AND reserves supplied
+    const includeReserves = this.recordMode === 'all' && this.extendedEnabled && reserves && reserves.length > 0;
+    
     const entry: LowHFEntry = {
       address,
       lastHF: healthFactor,
@@ -157,11 +163,16 @@ export class LowHFTracker {
       triggerType,
       totalCollateralUsd,
       totalDebtUsd,
-      reserves: reserves && this.recordMode === 'all' ? reserves : undefined
+      reserves: includeReserves ? reserves : undefined
     };
 
     this.entries.set(address, entry);
     lowHfSnapshotTotal.inc({ mode: 'all' });
+    
+    // Increment extended counter if reserves were included
+    if (includeReserves) {
+      lowHfExtendedSnapshotTotal.inc();
+    }
   }
 
   /**
@@ -257,23 +268,41 @@ export class LowHFTracker {
       const filename = `lowhf-dump-${timestamp}.json`;
       const filepath = join(absDir, filename);
 
-      // Prepare dump data
+      // Get all entries
+      const allEntries = this.getAll();
+      
+      // Compute extended entries (entries with reserves)
+      const extendedEntries = allEntries.filter(e => e.reserves && e.reserves.length > 0);
+      const extendedCount = extendedEntries.length;
+      const basicCount = allEntries.length - extendedCount;
+
+      // Prepare dump data with schema version 1.1
       const dumpData = {
+        schemaVersion: '1.1',
         metadata: {
           timestamp: new Date().toISOString(),
           mode: this.recordMode,
-          count: this.entries.size,
+          count: allEntries.length,
+          basicCount,
+          extendedCount,
           minHF: this.minHF,
-          threshold: config.alwaysIncludeHfBelow
+          threshold: config.alwaysIncludeHfBelow,
+          extendedEnabled: this.extendedEnabled
         },
-        entries: this.getAll()
+        entries: allEntries,
+        extendedEntries
       };
 
       // Write to file
       await writeFile(filepath, JSON.stringify(dumpData, null, 2), 'utf-8');
 
+      // Fixed logging format
       // eslint-disable-next-line no-console
-      console.log(`[lowhf-tracker] Dump written to ${filepath} (${this.entries.size} entries)`);
+      console.log(
+        `[lowhf-tracker] Dump written to ${filepath}\n` +
+        `[lowhf-tracker] Total: ${allEntries.length} entries (${basicCount} basic, ${extendedCount} extended)\n` +
+        `[lowhf-tracker] Mode: ${this.recordMode}, Extended: ${this.extendedEnabled ? 'enabled' : 'disabled'}`
+      );
 
       return filepath;
     } catch (err) {

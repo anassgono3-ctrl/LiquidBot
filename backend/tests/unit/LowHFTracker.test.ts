@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { LowHFTracker } from '../../src/services/LowHFTracker.js';
 
 describe('LowHFTracker', () => {
@@ -177,6 +178,115 @@ describe('LowHFTracker', () => {
 
       expect(tracker.getCount()).toBe(0);
       expect(tracker.getMinHF()).toBeNull();
+    });
+  });
+
+  describe('extended tracking', () => {
+    it('should include reserves when extendedEnabled=true, mode=all, and reserves provided', () => {
+      const trackerWithExtended = new LowHFTracker({
+        maxEntries: 10,
+        recordMode: 'all',
+        extendedEnabled: true,
+        dumpOnShutdown: false,
+        summaryIntervalSec: 0
+      });
+
+      const reserves = [
+        {
+          asset: '0xabcd1234',
+          symbol: 'WETH',
+          ltv: 0.80,
+          liquidationThreshold: 0.85,
+          collateralUsd: 10000,
+          debtUsd: 0,
+          sourcePrice: 'chainlink:0xfeed123'
+        }
+      ];
+
+      trackerWithExtended.record(
+        '0x1234567890abcdef',
+        0.95,
+        12345678,
+        'head',
+        10000,
+        9500,
+        reserves
+      );
+
+      const entries = trackerWithExtended.getAll();
+      expect(entries[0].reserves).toBeDefined();
+      expect(entries[0].reserves?.length).toBe(1);
+      expect(entries[0].reserves?.[0].symbol).toBe('WETH');
+    });
+
+    it('should not include reserves when extendedEnabled=false', () => {
+      const trackerWithoutExtended = new LowHFTracker({
+        maxEntries: 10,
+        recordMode: 'all',
+        extendedEnabled: false,
+        dumpOnShutdown: false,
+        summaryIntervalSec: 0
+      });
+
+      const reserves = [
+        {
+          asset: '0xabcd1234',
+          symbol: 'WETH',
+          ltv: 0.80,
+          liquidationThreshold: 0.85,
+          collateralUsd: 10000,
+          debtUsd: 0,
+          sourcePrice: 'chainlink:0xfeed123'
+        }
+      ];
+
+      trackerWithoutExtended.record(
+        '0x1234567890abcdef',
+        0.95,
+        12345678,
+        'head',
+        10000,
+        9500,
+        reserves
+      );
+
+      const entries = trackerWithoutExtended.getAll();
+      expect(entries[0].reserves).toBeUndefined();
+    });
+
+    it('should not include reserves in min mode even if extended is enabled', () => {
+      const trackerMinMode = new LowHFTracker({
+        maxEntries: 10,
+        recordMode: 'min',
+        extendedEnabled: true,
+        dumpOnShutdown: false,
+        summaryIntervalSec: 0
+      });
+
+      const reserves = [
+        {
+          asset: '0xabcd1234',
+          symbol: 'WETH',
+          ltv: 0.80,
+          liquidationThreshold: 0.85,
+          collateralUsd: 10000,
+          debtUsd: 0,
+          sourcePrice: 'chainlink:0xfeed123'
+        }
+      ];
+
+      trackerMinMode.record(
+        '0x1234567890abcdef',
+        0.95,
+        12345678,
+        'head',
+        10000,
+        9500,
+        reserves
+      );
+
+      const entries = trackerMinMode.getAll();
+      expect(entries[0].reserves).toBeUndefined();
     });
   });
 });

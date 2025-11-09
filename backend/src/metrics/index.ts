@@ -282,6 +282,12 @@ export const lowHfSnapshotTotal = new Counter({
   registers: [registry]
 });
 
+export const lowHfExtendedSnapshotTotal = new Counter({
+  name: 'liquidbot_lowhf_extended_snapshot_total',
+  help: 'Total number of low HF extended snapshots (with reserves) captured',
+  registers: [registry]
+});
+
 export const lowHfMinHealthFactor = new Histogram({
   name: 'liquidbot_lowhf_min_hf',
   help: 'Distribution of minimum health factors tracked',
