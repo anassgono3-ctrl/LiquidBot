@@ -34,6 +34,8 @@ import { OnChainBackfillService } from './OnChainBackfillService.js';
 import { SubgraphSeeder } from './SubgraphSeeder.js';
 import { BorrowersIndexService } from './BorrowersIndexService.js';
 import { LowHFTracker } from './LowHFTracker.js';
+import { DirtySetManager } from './DirtySetManager.js';
+import { HotlistManager } from './HotlistManager.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -146,9 +148,12 @@ export class RealTimeHFService extends EventEmitter {
   private wsHeartbeatTimer?: NodeJS.Timeout;
   private isReconnecting = false;
 
-  // Dirty-first prioritization (Goal 2)
-  private dirtyUsers = new Set<string>();
-  private dirtyReserves = new Set<string>();
+  // Dirty-first prioritization (Goal 2) - replaced with DirtySetManager
+  private dirtySetManager?: DirtySetManager;
+  
+  // Hotlist for optional prioritization
+  private hotlistManager?: HotlistManager;
+  private hotlistTimer?: NodeJS.Timeout;
 
   // Optional secondary provider for fallback (Goal 5)
   private secondaryProvider: JsonRpcProvider | null = null;
@@ -204,6 +209,27 @@ export class RealTimeHFService extends EventEmitter {
       console.log(
         `[lowhf-tracker] Enabled: mode=${config.lowHfRecordMode} ` +
         `max=${config.lowHfTrackerMax} dumpOnShutdown=${config.lowHfDumpOnShutdown}`
+      );
+    }
+    
+    // Initialize DirtySet manager
+    this.dirtySetManager = new DirtySetManager({ ttlSec: config.dirtyTtlSec });
+    // eslint-disable-next-line no-console
+    console.log(`[dirty-set] Initialized with TTL=${config.dirtyTtlSec}s`);
+    
+    // Initialize Hotlist manager if enabled
+    if (config.hotlistEnabled) {
+      this.hotlistManager = new HotlistManager({
+        maxEntries: config.hotlistMax,
+        minHf: config.hotlistMinHf,
+        maxHf: config.hotlistMaxHf,
+        minDebtUsd: config.hotlistMinDebtUsd
+      });
+      // eslint-disable-next-line no-console
+      console.log(
+        `[hotlist] Enabled: max=${config.hotlistMax} ` +
+        `hfRange=[${config.hotlistMinHf},${config.hotlistMaxHf}] ` +
+        `minDebt=${config.hotlistMinDebtUsd} revisit=${config.hotlistRevisitSec}s`
       );
     }
     
@@ -297,8 +323,57 @@ export class RealTimeHFService extends EventEmitter {
       this.startPeriodicSeeding();
     }
 
+    // Start hotlist side loop if enabled
+    if (this.hotlistManager) {
+      this.startHotlistLoop();
+    }
+
     // eslint-disable-next-line no-console
     console.log('[realtime-hf] Service started successfully');
+  }
+
+  /**
+   * Start hotlist side loop for frequent revisits of high-priority users
+   */
+  private startHotlistLoop(): void {
+    if (!this.hotlistManager) return;
+
+    const intervalMs = config.hotlistRevisitSec * 1000;
+    // eslint-disable-next-line no-console
+    console.log(`[hotlist] Starting revisit loop (interval=${config.hotlistRevisitSec}s)`);
+
+    const revisitFn = async () => {
+      if (this.isShuttingDown || !this.hotlistManager) return;
+
+      try {
+        // Get users needing revisit
+        const needRevisit = this.hotlistManager.getNeedingRevisit(config.hotlistRevisitSec);
+        
+        if (needRevisit.length > 0) {
+          // eslint-disable-next-line no-console
+          console.log(`[hotlist] Revisiting ${needRevisit.length} users`);
+          
+          // Perform batch check on hotlist users
+          await this.batchCheckCandidates(needRevisit, 'head');
+          
+          // Touch all checked users to update their lastCheck timestamp
+          for (const addr of needRevisit) {
+            this.hotlistManager.touch(addr);
+          }
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[hotlist] Error in revisit loop:', err);
+      }
+
+      // Schedule next revisit
+      if (!this.isShuttingDown) {
+        this.hotlistTimer = setTimeout(revisitFn, intervalMs);
+      }
+    };
+
+    // Start initial revisit after interval
+    this.hotlistTimer = setTimeout(revisitFn, intervalMs);
   }
 
   /**
@@ -332,6 +407,7 @@ export class RealTimeHFService extends EventEmitter {
     if (this.pendingBlockTimer) clearInterval(this.pendingBlockTimer);
     if (this.runWatchdogTimer) clearTimeout(this.runWatchdogTimer);
     if (this.wsHeartbeatTimer) clearTimeout(this.wsHeartbeatTimer);
+    if (this.hotlistTimer) clearInterval(this.hotlistTimer);
 
     // Clear event batch timers
     for (const [, batch] of this.eventBatchQueue) {
@@ -834,10 +910,6 @@ export class RealTimeHFService extends EventEmitter {
     // Perform batch check on all candidates with blockTag
     const metrics = await this.checkAllCandidates('head', blockNumber);
 
-    // On success, clear dirty sets (users have been checked)
-    this.dirtyUsers.clear();
-    this.dirtyReserves.clear();
-
     // Record metrics for adaptive page sizing
     const elapsed = Date.now() - startTime;
     this.recordHeadRunMetrics(elapsed, metrics.timeouts, metrics.avgLatency);
@@ -907,16 +979,16 @@ export class RealTimeHFService extends EventEmitter {
         // Extract reserve (asset) for context
         const reserve = extractReserveFromAaveEvent(decoded);
         
-        // Mark users and reserves as dirty for next head-check prioritization (Goal 2)
-        for (const user of users) {
-          this.dirtyUsers.add(user.toLowerCase());
-          // Track reserve association for price trigger targeting
-          if (reserve) {
-            this.candidateManager.touchReserve(user.toLowerCase(), reserve);
+        // Mark users as dirty using DirtySetManager
+        if (this.dirtySetManager && users.length > 0) {
+          const eventType = decoded.name.toLowerCase();
+          for (const user of users) {
+            this.dirtySetManager.mark(user.toLowerCase(), eventType);
+            // Track reserve association for price trigger targeting
+            if (reserve) {
+              this.candidateManager.touchReserve(user.toLowerCase(), reserve);
+            }
           }
-        }
-        if (reserve) {
-          this.dirtyReserves.add(reserve.toLowerCase());
         }
         
         // Handle based on event type
@@ -1096,8 +1168,19 @@ export class RealTimeHFService extends EventEmitter {
       const priceDiff = currentPrice - referencePrice;
       const priceDiffPct = (priceDiff / referencePrice) * 10000; // basis points
       
+      // Determine threshold (use test mode threshold if enabled)
+      const effectiveThreshold = config.priceTriggerTestMode ? 5 : config.priceTriggerDropBps;
+      
+      if (config.priceTriggerTestMode && priceDiffPct < -effectiveThreshold) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[price-trigger] TEST MODE: price drop detected for ${symbol} ` +
+          `drop=${Math.abs(priceDiffPct).toFixed(2)}bps test_threshold=${effectiveThreshold}bps`
+        );
+      }
+      
       // Check if price dropped by threshold or more
-      if (priceDiffPct >= -config.priceTriggerDropBps) {
+      if (priceDiffPct >= -effectiveThreshold) {
         // Price increased or dropped less than threshold - no emergency scan
         return;
       }
@@ -1146,9 +1229,15 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
-      // Increment metric
-      const { realtimePriceEmergencyScansTotal, emergencyScanLatency } = await import('../metrics/index.js');
+      // Mark affected users as dirty with "price" reason
+      if (this.dirtySetManager) {
+        this.dirtySetManager.markBulk(affectedUsers, 'price');
+      }
+      
+      // Increment metrics
+      const { realtimePriceEmergencyScansTotal, emergencyScanLatency, priceTriggerBreachTotal } = await import('../metrics/index.js');
       realtimePriceEmergencyScansTotal.inc({ asset: symbol });
+      priceTriggerBreachTotal.inc({ asset: symbol });
       
       // Perform emergency scan with latency tracking
       const startTime = Date.now();
@@ -1302,7 +1391,9 @@ export class RealTimeHFService extends EventEmitter {
       const addressSet = new Set(allAddresses);
 
       // 1. Dirty users first - users touched by recent Aave events
-      const dirtyFirst = Array.from(this.dirtyUsers).filter(addr => addressSet.has(addr));
+      const dirtyFirst = this.dirtySetManager 
+        ? this.dirtySetManager.getIntersection(addressSet)
+        : [];
       
       // 2. Get current rotating page window
       const startIdx = this.headCheckRotatingIndex % totalCandidates;
@@ -1350,9 +1441,27 @@ export class RealTimeHFService extends EventEmitter {
       // Update rotating index for next iteration
       this.headCheckRotatingIndex = (this.headCheckRotatingIndex + pageSize) % totalCandidates;
       
-      // Log paging info with dirty-first stats and dynamic page size if adaptive
+      // Get reason breakdown for dirty users
+      let reasonBreakdown = '';
+      if (this.dirtySetManager && dirtyFirst.length > 0) {
+        const stats = this.dirtySetManager.getReasonStats();
+        const reasonParts: string[] = [];
+        
+        if (stats['borrow']) reasonParts.push(`borrow=${stats['borrow']}`);
+        if (stats['repay']) reasonParts.push(`repay=${stats['repay']}`);
+        if (stats['supply']) reasonParts.push(`supply=${stats['supply']}`);
+        if (stats['withdraw']) reasonParts.push(`withdraw=${stats['withdraw']}`);
+        if (stats['price']) reasonParts.push(`price=${stats['price']}`);
+        if (stats['liquidationcall']) reasonParts.push(`liq=${stats['liquidationcall']}`);
+        
+        if (reasonParts.length > 0) {
+          reasonBreakdown = ` (${reasonParts.join(', ')})`;
+        }
+      }
+      
+      // Log paging info with dirty-first stats, reason breakdown, and dynamic page size if adaptive
       // eslint-disable-next-line no-console
-      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} dirty=${dirtyFirst.length} lowHf=${lowHfAddresses.length} pageSize=${pageSize}`);
+      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} dirty=${dirtyFirst.length}${reasonBreakdown} lowHf=${lowHfAddresses.length} pageSize=${pageSize}`);
     }
 
     return await this.batchCheckCandidates(addressesToCheck, triggerType, blockTag);
@@ -1987,6 +2096,20 @@ export class RealTimeHFService extends EventEmitter {
             this.metrics.healthChecksPerformed++;
             realtimeHealthChecksPerformed.inc();
             
+            // Consider user for hotlist (if enabled)
+            if (this.hotlistManager) {
+              this.hotlistManager.consider(userAddress, healthFactor, totalDebtUsd);
+            }
+            
+            // Get trigger reasons from dirty entry if present
+            let triggerReasons: string[] | undefined;
+            if (this.dirtySetManager) {
+              const dirtyEntry = this.dirtySetManager.get(userAddress);
+              if (dirtyEntry) {
+                triggerReasons = Array.from(dirtyEntry.reasons);
+              }
+            }
+            
             // Track for low HF recording
             if (this.lowHfTracker && healthFactor < config.alwaysIncludeHfBelow) {
               this.lowHfTracker.record(
@@ -1995,9 +2118,21 @@ export class RealTimeHFService extends EventEmitter {
                 blockNumber,
                 triggerType,
                 totalCollateralUsd,
-                totalDebtUsd
-                // Note: reserves data not available without additional RPC calls
+                totalDebtUsd,
+                undefined, // reserves data not available without additional RPC calls
+                triggerReasons
               );
+            }
+            
+            // Consume dirty entry if this user was marked dirty
+            if (this.dirtySetManager) {
+              const consumed = this.dirtySetManager.consume(userAddress);
+              if (consumed) {
+                // Track metrics
+                import('../metrics/index.js').then(({ dirtyOnPageTotal }) => {
+                  dirtyOnPageTotal.inc();
+                });
+              }
             }
 
             // Track min HF

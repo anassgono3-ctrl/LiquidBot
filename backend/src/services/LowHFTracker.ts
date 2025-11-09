@@ -28,6 +28,7 @@ export interface LowHFEntry {
   timestamp: number;
   blockNumber: number;
   triggerType: 'event' | 'head' | 'price';
+  triggerReasons?: string[]; // New optional field for reason breakdown (e.g., ["borrow"], ["price"])
   totalCollateralUsd: number;
   totalDebtUsd: number;
   reserves?: ReserveData[]; // Only included in 'all' mode
@@ -77,6 +78,7 @@ export class LowHFTracker {
    * @param totalCollateralUsd Total collateral in USD
    * @param totalDebtUsd Total debt in USD
    * @param reserves Optional reserve breakdown (only used in 'all' mode)
+   * @param triggerReasons Optional array of specific reasons (e.g., ["borrow"], ["price"])
    */
   record(
     address: string,
@@ -85,7 +87,8 @@ export class LowHFTracker {
     triggerType: 'event' | 'head' | 'price',
     totalCollateralUsd: number,
     totalDebtUsd: number,
-    reserves?: ReserveData[]
+    reserves?: ReserveData[],
+    triggerReasons?: string[]
   ): void {
     // Check if we should record based on ALWAYS_INCLUDE_HF_BELOW threshold
     if (healthFactor >= config.alwaysIncludeHfBelow) {
@@ -121,6 +124,7 @@ export class LowHFTracker {
           timestamp: Date.now(),
           blockNumber,
           triggerType,
+          triggerReasons,
           totalCollateralUsd,
           totalDebtUsd
         };
@@ -161,6 +165,7 @@ export class LowHFTracker {
       timestamp: Date.now(),
       blockNumber,
       triggerType,
+      triggerReasons,
       totalCollateralUsd,
       totalDebtUsd,
       reserves: includeReserves ? reserves : undefined
