@@ -195,7 +195,8 @@ export const rawEnvSchema = z.object({
   LOW_HF_TRACKER_MAX: z.string().optional(),
   LOW_HF_RECORD_MODE: z.string().optional(),
   LOW_HF_DUMP_ON_SHUTDOWN: z.string().optional(),
-  LOW_HF_SUMMARY_INTERVAL_SEC: z.string().optional()
+  LOW_HF_SUMMARY_INTERVAL_SEC: z.string().optional(),
+  LOW_HF_EXTENDED_ENABLED: z.string().optional()
 });
 
 export const env = (() => {
@@ -401,6 +402,7 @@ export const env = (() => {
     lowHfTrackerMax: Number(parsed.LOW_HF_TRACKER_MAX || 1000),
     lowHfRecordMode: (parsed.LOW_HF_RECORD_MODE || 'all') as 'all' | 'min',
     lowHfDumpOnShutdown: (parsed.LOW_HF_DUMP_ON_SHUTDOWN || 'true').toLowerCase() === 'true',
-    lowHfSummaryIntervalSec: Number(parsed.LOW_HF_SUMMARY_INTERVAL_SEC || 900)
+    lowHfSummaryIntervalSec: Number(parsed.LOW_HF_SUMMARY_INTERVAL_SEC || 900),
+    lowHfExtendedEnabled: (parsed.LOW_HF_EXTENDED_ENABLED || 'true').toLowerCase() === 'true'
   };
 })();
