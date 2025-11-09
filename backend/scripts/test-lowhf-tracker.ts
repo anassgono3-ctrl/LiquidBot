@@ -49,18 +49,41 @@ async function main() {
     { address: '0x4444444444444444444444444444444444444444', hf: 1.08, collateral: 20000.00, debt: 18500.00 }
   ];
 
+  // Mock reserve data for demonstration
+  const mockReserves = [
+    [
+      { asset: '0x4200000000000000000000000000000000000006', symbol: 'WETH', ltv: 0.80, liquidationThreshold: 0.825, collateralUsd: 10000.00, debtUsd: 0, sourcePrice: 'chainlink:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70' },
+      { asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', ltv: 0.77, liquidationThreshold: 0.80, collateralUsd: 5234.56, debtUsd: 14890.23, sourcePrice: 'chainlink:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B' }
+    ],
+    [
+      { asset: '0x4200000000000000000000000000000000000006', symbol: 'WETH', ltv: 0.80, liquidationThreshold: 0.825, collateralUsd: 25000.00, debtUsd: 23500.00, sourcePrice: 'chainlink:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70' }
+    ],
+    [
+      { asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', symbol: 'USDC', ltv: 0.77, liquidationThreshold: 0.80, collateralUsd: 10000.00, debtUsd: 9500.00, sourcePrice: 'chainlink:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B' }
+    ],
+    [
+      { asset: '0x4200000000000000000000000000000000000006', symbol: 'WETH', ltv: 0.80, liquidationThreshold: 0.825, collateralUsd: 35000.00, debtUsd: 0, sourcePrice: 'chainlink:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70' },
+      { asset: '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf', symbol: 'cbBTC', ltv: 0.73, liquidationThreshold: 0.78, collateralUsd: 15000.00, debtUsd: 48000.00, sourcePrice: 'chainlink:0x07DA0E54543a844a80ABE69c8A12F22B3aA59f9D' }
+    ]
+  ];
+
   const blockNumber = 12345678;
   for (let i = 0; i < sampleEntries.length; i++) {
     const entry = sampleEntries[i];
+    // Include reserves for first 4 entries to demonstrate extended tracking
+    const reserves = i < mockReserves.length ? mockReserves[i] : undefined;
+    
     tracker.record(
       entry.address,
       entry.hf,
       blockNumber + i,
       'head',
       entry.collateral,
-      entry.debt
+      entry.debt,
+      reserves
     );
-    console.log(`  Recorded: ${entry.address.substring(0, 10)}... HF=${entry.hf.toFixed(4)}`);
+    const reserveInfo = reserves ? ` (${reserves.length} reserves)` : '';
+    console.log(`  Recorded: ${entry.address.substring(0, 10)}... HF=${entry.hf.toFixed(4)}${reserveInfo}`);
   }
 
   console.log('');
@@ -69,6 +92,7 @@ async function main() {
   console.log('[test] Tracker statistics:');
   const stats = tracker.getStats();
   console.log(`  Total entries: ${stats.count}`);
+  console.log(`  Extended entries (with reserves): ${stats.extendedCount}`);
   console.log(`  Min HF: ${stats.minHF?.toFixed(4) ?? 'N/A'}`);
   console.log(`  Mode: ${stats.mode}`);
   console.log(`  Max capacity: ${stats.maxEntries}`);

@@ -160,9 +160,99 @@ describe('LowHFTracker', () => {
 
       const stats = tracker.getStats();
       expect(stats.count).toBe(2);
+      expect(stats.extendedCount).toBe(0);
       expect(stats.minHF).toBe(0.85);
       expect(stats.mode).toBe('all');
       expect(stats.maxEntries).toBe(10);
+    });
+  });
+
+  describe('extended tracking', () => {
+    it('should track entries with reserve data', () => {
+      const reserves = [
+        {
+          asset: '0xabcd',
+          symbol: 'WETH',
+          ltv: 0.80,
+          liquidationThreshold: 0.85,
+          collateralUsd: 10000,
+          debtUsd: 0,
+          sourcePrice: 'chainlink:0xfeed'
+        }
+      ];
+
+      tracker.record('0xaddr1', 0.95, 12345678, 'head', 10000, 9500, reserves);
+      
+      const stats = tracker.getStats();
+      expect(stats.extendedCount).toBe(1);
+      
+      const entries = tracker.getAll();
+      expect(entries[0].reserves).toBeDefined();
+      expect(entries[0].reserves?.length).toBe(1);
+      expect(entries[0].reserves?.[0].symbol).toBe('WETH');
+    });
+
+    it('should not include reserves when extendedEnabled is false', () => {
+      const trackerNoExtended = new LowHFTracker({
+        maxEntries: 10,
+        recordMode: 'all',
+        dumpOnShutdown: false,
+        summaryIntervalSec: 0,
+        extendedEnabled: false
+      });
+
+      const reserves = [
+        {
+          asset: '0xabcd',
+          symbol: 'WETH',
+          ltv: 0.80,
+          liquidationThreshold: 0.85,
+          collateralUsd: 10000,
+          debtUsd: 0,
+          sourcePrice: 'chainlink:0xfeed'
+        }
+      ];
+
+      trackerNoExtended.record('0xaddr1', 0.95, 12345678, 'head', 10000, 9500, reserves);
+      
+      const stats = trackerNoExtended.getStats();
+      expect(stats.extendedCount).toBe(0);
+      
+      const entries = trackerNoExtended.getAll();
+      expect(entries[0].reserves).toBeUndefined();
+    });
+
+    it('should track multiple entries with reserves', () => {
+      const reserves1 = [
+        {
+          asset: '0xabcd',
+          symbol: 'WETH',
+          ltv: 0.80,
+          liquidationThreshold: 0.85,
+          collateralUsd: 10000,
+          debtUsd: 0,
+          sourcePrice: 'chainlink:0xfeed1'
+        }
+      ];
+
+      const reserves2 = [
+        {
+          asset: '0xef01',
+          symbol: 'USDC',
+          ltv: 0.75,
+          liquidationThreshold: 0.80,
+          collateralUsd: 5000,
+          debtUsd: 0,
+          sourcePrice: 'chainlink:0xfeed2'
+        }
+      ];
+
+      tracker.record('0xaddr1', 0.95, 12345678, 'head', 10000, 9500, reserves1);
+      tracker.record('0xaddr2', 0.88, 12345679, 'head', 5000, 4500, reserves2);
+      
+      const stats = tracker.getStats();
+      expect(stats.extendedCount).toBe(2);
+      expect(stats.count).toBe(2);
     });
   });
 

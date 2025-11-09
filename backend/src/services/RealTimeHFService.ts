@@ -1989,14 +1989,29 @@ export class RealTimeHFService extends EventEmitter {
             
             // Track for low HF recording
             if (this.lowHfTracker && healthFactor < config.alwaysIncludeHfBelow) {
+              // TODO: Fetch per-reserve data for extended tracking (schema v1.1)
+              // To enable deterministic HF verification, we need to fetch:
+              // - Per-reserve collateral/debt USD values
+              // - Per-reserve liquidation thresholds
+              // - Price source provenance
+              // 
+              // Options to implement this without excessive RPC overhead:
+              // 1. Add a second multicall batch for low-HF users to fetch getUserReserveData
+              //    for each active reserve (requires knowing reserve list per user)
+              // 2. Use AaveDataService.getAllUserReserves() after initial batch completes
+              //    (adds N extra RPC calls where N = number of low-HF users)
+              // 3. Cache reserve list per user from event logs and reuse
+              //
+              // For now, reserves parameter is undefined, so extendedCount will be 0.
+              // Memory estimate per entry: ~150-200 bytes (basic) vs ~450-800 bytes (with reserves)
               this.lowHfTracker.record(
                 userAddress,
                 healthFactor,
                 blockNumber,
                 triggerType,
                 totalCollateralUsd,
-                totalDebtUsd
-                // Note: reserves data not available without additional RPC calls
+                totalDebtUsd,
+                undefined // reserves: to be implemented in future enhancement
               );
             }
 

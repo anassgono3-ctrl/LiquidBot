@@ -294,3 +294,9 @@ export const lowHfMismatchTotal = new Counter({
   help: 'Total number of HF verification mismatches detected',
   registers: [registry]
 });
+
+export const lowHfExtendedSnapshotTotal = new Counter({
+  name: 'liquidbot_lowhf_extended_snapshot_total',
+  help: 'Total number of low HF snapshots captured with per-reserve data',
+  registers: [registry]
+});

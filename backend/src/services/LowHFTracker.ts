@@ -9,7 +9,8 @@ import { config } from '../config/index.js';
 import {
   lowHfSnapshotTotal,
   lowHfMinHealthFactor,
-  lowHfMismatchTotal
+  lowHfMismatchTotal,
+  lowHfExtendedSnapshotTotal
 } from '../metrics/index.js';
 
 export interface ReserveData {
@@ -38,6 +39,7 @@ export interface LowHFTrackerOptions {
   recordMode?: 'all' | 'min';
   dumpOnShutdown?: boolean;
   summaryIntervalSec?: number;
+  extendedEnabled?: boolean;
 }
 
 /**
@@ -50,15 +52,18 @@ export class LowHFTracker {
   private readonly recordMode: 'all' | 'min';
   private readonly dumpOnShutdown: boolean;
   private readonly summaryIntervalSec: number;
+  private readonly extendedEnabled: boolean;
   private summaryTimer?: NodeJS.Timeout;
   private minHF: number | null = null;
   private lastSummaryTime: number = Date.now();
+  private extendedCount: number = 0; // Count of entries with reserves data
 
   constructor(options: LowHFTrackerOptions = {}) {
     this.maxEntries = options.maxEntries ?? config.lowHfTrackerMax;
     this.recordMode = options.recordMode ?? config.lowHfRecordMode;
     this.dumpOnShutdown = options.dumpOnShutdown ?? config.lowHfDumpOnShutdown;
     this.summaryIntervalSec = options.summaryIntervalSec ?? config.lowHfSummaryIntervalSec;
+    this.extendedEnabled = options.extendedEnabled ?? config.lowHfExtendedEnabled;
 
     if (this.summaryIntervalSec > 0) {
       this.startPeriodicSummary();
@@ -73,7 +78,7 @@ export class LowHFTracker {
    * @param triggerType Type of trigger that caused the check
    * @param totalCollateralUsd Total collateral in USD
    * @param totalDebtUsd Total debt in USD
-   * @param reserves Optional reserve breakdown (only used in 'all' mode)
+   * @param reserves Optional reserve breakdown (only used in 'all' mode with extendedEnabled)
    */
   record(
     address: string,
@@ -107,8 +112,11 @@ export class LowHFTracker {
 
       // Only record if this is lower than current min or no entries exist
       if (!minEntry || healthFactor < minEntry.lastHF) {
-        // Remove old min entry if exists
+        // Remove old min entry if exists (decrement extended count if it had reserves)
         if (minEntry) {
+          if (minEntry.reserves && minEntry.reserves.length > 0) {
+            this.extendedCount--;
+          }
           this.entries.delete(minEntry.address);
         }
 
@@ -133,20 +141,32 @@ export class LowHFTracker {
     if (this.entries.size >= this.maxEntries && !this.entries.has(address)) {
       // At capacity and this is a new address
       // Find and remove the highest HF entry to make room
-      let highestEntry: { addr: string; hf: number } | null = null;
+      let highestEntry: { addr: string; hf: number; hasReserves: boolean } | null = null;
       for (const [addr, entry] of this.entries.entries()) {
         if (!highestEntry || entry.lastHF > highestEntry.hf) {
-          highestEntry = { addr, hf: entry.lastHF };
+          highestEntry = { addr, hf: entry.lastHF, hasReserves: !!(entry.reserves && entry.reserves.length > 0) };
         }
       }
 
       if (highestEntry && healthFactor < highestEntry.hf) {
         // Remove the highest HF entry to make room for this lower one
+        if (highestEntry.hasReserves) {
+          this.extendedCount--;
+        }
         this.entries.delete(highestEntry.addr);
       } else {
         // This entry has higher HF than all existing entries, skip it
         return;
       }
+    }
+
+    // Decide whether to include reserves based on extendedEnabled and mode
+    const shouldIncludeReserves = reserves && this.recordMode === 'all' && this.extendedEnabled;
+    
+    // If updating an existing entry, adjust extended count
+    const existingEntry = this.entries.get(address);
+    if (existingEntry && existingEntry.reserves && existingEntry.reserves.length > 0) {
+      this.extendedCount--;
     }
 
     const entry: LowHFEntry = {
@@ -157,11 +177,17 @@ export class LowHFTracker {
       triggerType,
       totalCollateralUsd,
       totalDebtUsd,
-      reserves: reserves && this.recordMode === 'all' ? reserves : undefined
+      reserves: shouldIncludeReserves ? reserves : undefined
     };
 
     this.entries.set(address, entry);
     lowHfSnapshotTotal.inc({ mode: 'all' });
+    
+    // Increment extended count and metric if reserves are included
+    if (entry.reserves && entry.reserves.length > 0) {
+      this.extendedCount++;
+      lowHfExtendedSnapshotTotal.inc();
+    }
   }
 
   /**
@@ -208,9 +234,11 @@ export class LowHFTracker {
   getStats() {
     return {
       count: this.entries.size,
+      extendedCount: this.extendedCount,
       minHF: this.minHF,
       mode: this.recordMode,
-      maxEntries: this.maxEntries
+      maxEntries: this.maxEntries,
+      extendedEnabled: this.extendedEnabled
     };
   }
 
@@ -257,23 +285,34 @@ export class LowHFTracker {
       const filename = `lowhf-dump-${timestamp}.json`;
       const filepath = join(absDir, filename);
 
-      // Prepare dump data
+      // Separate entries with and without reserves
+      const allEntries = this.getAll();
+      const extendedEntries = allEntries.filter(e => e.reserves && e.reserves.length > 0);
+      const basicCount = this.entries.size;
+
+      // Prepare dump data with enhanced schema
       const dumpData = {
         metadata: {
+          schemaVersion: '1.1',
           timestamp: new Date().toISOString(),
           mode: this.recordMode,
-          count: this.entries.size,
+          count: basicCount,
+          extendedCount: extendedEntries.length,
           minHF: this.minHF,
           threshold: config.alwaysIncludeHfBelow
         },
-        entries: this.getAll()
+        entries: allEntries,
+        extendedEntries: extendedEntries
       };
 
       // Write to file
       await writeFile(filepath, JSON.stringify(dumpData, null, 2), 'utf-8');
 
       // eslint-disable-next-line no-console
-      console.log(`[lowhf-tracker] Dump written to ${filepath} (${this.entries.size} entries)`);
+      console.log(
+        `[lowhf-tracker] Dump written to ${filepath} ` +
+        `(${basicCount} entries: ${basicCount - extendedEntries.length} basic, ${extendedEntries.length} extended)`
+      );
 
       return filepath;
     } catch (err) {
@@ -299,5 +338,6 @@ export class LowHFTracker {
   clear(): void {
     this.entries.clear();
     this.minHF = null;
+    this.extendedCount = 0;
   }
 }
