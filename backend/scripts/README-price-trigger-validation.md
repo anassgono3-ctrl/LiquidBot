@@ -11,12 +11,14 @@ This directory contains validation and testing scripts for the Chainlink price i
 Validates Chainlink price feed configuration and connectivity by querying `latestRoundData()` from each configured feed.
 
 **Purpose:**
+
 - Verify RPC connectivity to Chainlink aggregators
 - Validate feed addresses are correct
 - Check that prices are being reported and are non-negative
 - Display normalized price values for manual inspection
 
 **Usage:**
+
 ```bash
 # After building
 node -r dotenv/config dist/scripts/verify-chainlink-prices.js
@@ -26,12 +28,14 @@ npm run verify:chainlink
 ```
 
 **Required Environment Variables:**
+
 - `CHAINLINK_RPC_URL` or `RPC_URL`: RPC endpoint (e.g., `https://mainnet.base.org`)
 - `CHAINLINK_FEEDS`: Comma-separated list of `SYMBOL:ADDRESS` pairs
   - Example (Base mainnet): `ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B`
   - ⚠️ Note: The addresses above are examples for Base mainnet. Use addresses appropriate for your network.
 
 **Output:**
+
 ```
 verify-chainlink-prices: Starting verification...
 RPC: https://mainnet.base.org
@@ -45,6 +49,7 @@ All feeds verified successfully.
 ```
 
 **Exit Codes:**
+
 - `0`: All feeds verified successfully
 - `1`: One or more feeds failed verification or missing required environment variables
 
@@ -55,12 +60,14 @@ All feeds verified successfully.
 Synthetic unit test for price trigger logic including drop threshold and debounce behavior.
 
 **Purpose:**
+
 - Test price drop calculation (basis points)
 - Verify trigger fires when drop exceeds threshold
 - Verify debounce prevents rapid repeated triggers
 - Validate trigger fires again after debounce window expires
 
 **Usage:**
+
 ```bash
 # After building
 node dist/scripts/test-price-trigger-unit.js
@@ -72,6 +79,7 @@ npm run test:price-trigger-unit
 **No environment variables required.** This is a standalone synthetic test.
 
 **Output:**
+
 ```
 [unit] baseline set price=100000000
 [unit] update prev=100000000 current=99950000 dropBps=5
@@ -87,6 +95,7 @@ npm run test:price-trigger-unit
 ```
 
 **Exit Codes:**
+
 - `0`: Test completed successfully
 
 ---
@@ -96,12 +105,14 @@ npm run test:price-trigger-unit
 Integration simulation that exercises the complete price trigger path including configuration loading, price updates, emergency scan invocation, and debounce logic.
 
 **Purpose:**
+
 - Validate integration between config, price trigger logic, and emergency scan
 - Simulate multiple price updates with realistic drop scenarios
 - Verify debounce timing works as expected
 - Test emergency scan candidate selection and execution
 
 **Usage:**
+
 ```bash
 # After building
 node -r dotenv/config dist/scripts/simulate-price-trigger-integrated.js
@@ -111,10 +122,12 @@ npm run simulate:price-trigger
 ```
 
 **Required Environment Variables:**
+
 - `API_KEY`: API key for config validation (can be test value)
 - `JWT_SECRET`: JWT secret for config validation (can be test value)
 
 **Optional Environment Variables (simulation will use defaults if not set):**
+
 - `PRICE_TRIGGER_ENABLED`: Enable/disable (default: `true` for simulation)
 - `PRICE_TRIGGER_DROP_BPS`: Drop threshold in basis points (default: `10`)
 - `PRICE_TRIGGER_MAX_SCAN`: Max candidates to scan (default: `5`)
@@ -122,6 +135,7 @@ npm run simulate:price-trigger
 - `PRICE_TRIGGER_ASSETS`: Comma-separated asset list (default: `WETH,WBTC`)
 
 **Example:**
+
 ```bash
 # With custom configuration
 API_KEY=test-key JWT_SECRET=test-secret \
@@ -134,6 +148,7 @@ node -r dotenv/config dist/scripts/simulate-price-trigger-integrated.js
 ```
 
 **Output:**
+
 ```
 [price-trigger] enabled=true dropBps=10 maxScan=5 debounceSec=5 assets=WETH
 
@@ -161,6 +176,7 @@ node -r dotenv/config dist/scripts/simulate-price-trigger-integrated.js
 ```
 
 **Exit Codes:**
+
 - `0`: Simulation completed successfully
 - `1`: Error during simulation
 
@@ -176,8 +192,9 @@ The file `src/metrics/priceTriggerMetrics.ts` provides optional Prometheus metri
 These metrics are available for integration but are **not required**. The existing RealTimeHFService already uses similar metrics (`realtimePriceEmergencyScansTotal` and `emergencyScanLatency` from `src/metrics/index.ts`).
 
 To use the new metrics, import them in your service:
+
 ```typescript
-import { priceTriggerScansTotal, priceTriggerLatencyMs } from '../metrics/priceTriggerMetrics.js';
+import { priceTriggerScansTotal, priceTriggerLatencyMs } from "../metrics/priceTriggerMetrics.js";
 
 // Increment scan counter
 priceTriggerScansTotal.labels(asset).inc();
@@ -206,7 +223,7 @@ Compiled scripts are output to `dist/scripts/`.
 
 The price trigger logic validated by these scripts is integrated into `RealTimeHFService`:
 
-1. **Dual-Mode Price Updates**: 
+1. **Dual-Mode Price Updates**:
    - **Event Listening**: Subscribes to both Chainlink `AnswerUpdated` (legacy) and `NewTransmission` (OCR2) events via WebSocket
    - **Polling Fallback**: Queries `latestRoundData()` every `PRICE_TRIGGER_POLL_SEC` seconds (default: 15s) to detect price changes when events are sparse
 2. **Drop Calculation**: Basis points drop is calculated from consecutive price updates
@@ -228,34 +245,129 @@ When events are sparse or unavailable, the polling fallback ensures price drops 
 ## Troubleshooting
 
 **"Missing CHAINLINK_RPC_URL or CHAINLINK_FEEDS"**
+
 - Ensure environment variables are set
 - Check `.env` file exists and is loaded with `-r dotenv/config`
 
 **"JsonRpcProvider failed to detect network"**
+
 - Verify RPC URL is correct and accessible
 - Check network connectivity
 - Ensure RPC endpoint supports the required Chainlink aggregator interface
 
 **Simulation fails with ZodError**
+
 - Ensure `API_KEY` and `JWT_SECRET` are set (even test values work)
 - These are required for config validation, not actual authentication
 
 **No AnswerUpdated logs on Base (or other OCR2 networks)**
+
 - This is expected behavior. Base Chainlink feeds use OCR2 aggregators that emit `NewTransmission` events instead
 - The real-time service subscribes to both `AnswerUpdated` and `NewTransmission` events for maximum compatibility
 - The polling fallback ensures price drops are detected even when events are sparse (queries `latestRoundData()` every `PRICE_TRIGGER_POLL_SEC` seconds)
 - To verify polling is working, check logs for `[price-trigger] Poll update` messages
 
 **Dirty entries expiring before observation**
+
 - Ensure `DIRTY_TTL_SEC` is configured to be at least 2× `PRICE_TRIGGER_DEBOUNCE_SEC`
 - Example: if `PRICE_TRIGGER_DEBOUNCE_SEC=60`, set `DIRTY_TTL_SEC=600` (10 minutes)
 - This prevents dirty-first prioritization entries from expiring during the debounce window
 
 ---
 
+## Confirmation Script (Base OCR2)
+
+### 4. check-ocr2-feeds.mjs
+
+Lightweight, standalone confirmation script that validates Chainlink feed connectivity on Base and sanity-checks the OCR2 + polling fallback behavior.
+
+**Purpose:**
+
+- Quick validation that Chainlink feeds are reachable and returning fresh data
+- Confirm OCR2 aggregators are working even when events are sparse
+- Manual sanity check to complement the automated price-trigger service
+
+**When to use:**
+
+- After deploying to a new environment or network
+- When troubleshooting price feed issues
+- To verify feed configuration before enabling price triggers
+- For operational confirmation that feeds are up-to-date
+
+**Usage:**
+
+```bash
+# Check all configured feeds
+npm run check:feeds
+
+# Check a specific feed with custom lookback window
+FEED_SYMBOL=cbETH LOOKBACK_BLOCKS=5000 npm run check:feeds
+```
+
+**Required Environment Variables:**
+
+- `RPC_URL` or `HTTP_RPC_URL` or `BACKFILL_RPC_URL`: RPC endpoint for queries
+- `CHAINLINK_FEEDS`: Comma-separated list of `SYMBOL:ADDRESS` pairs
+  - Example: `ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B`
+
+**Optional Environment Variables:**
+
+- `LOOKBACK_BLOCKS`: Number of blocks to scan for logs (default: 3000)
+- `FEED_SYMBOL`: Filter to check only one specific symbol (e.g., `cbETH`)
+
+**Output Example:**
+
+```json
+{
+  "symbol": "CBETH",
+  "address": "0xd7818272B9e248357d13057AAb0B417aF31E817d",
+  "blockWindow": {
+    "from": 37999999,
+    "to": 38002999
+  },
+  "logsInWindow": 0,
+  "sampleTopics": [],
+  "latestRoundData": {
+    "roundId": "18446744073709579173",
+    "answer": "2456789012345",
+    "startedAt": 1731261234,
+    "updatedAt": 1731261234,
+    "answeredInRound": "18446744073709579173"
+  }
+}
+```
+
+**Expected Behavior on Base:**
+
+- `logsInWindow` may be **0 or very low** for `AnswerUpdated` events
+  - This is **normal** for OCR2 aggregators on Base
+  - OCR2 feeds emit `NewTransmission` events instead of `AnswerUpdated`
+  - Some feeds may not emit any events during the lookback window
+- `latestRoundData` should still return **fresh, valid data**
+  - `answer` should be non-zero and reasonable
+  - `updatedAt` timestamp should be recent (within minutes/hours, not days)
+  - This confirms the polling fallback path is working correctly
+
+**Important Notes:**
+
+- This script is **read-only** and performs no writes or state changes
+- It does **not** replace the production price-trigger service
+- The production service handles sparse events via:
+  1. Dual event subscriptions: `AnswerUpdated` (legacy) + `NewTransmission` (OCR2)
+  2. Polling fallback: queries `latestRoundData()` every `PRICE_TRIGGER_POLL_SEC` seconds
+  3. Debounce logic: prevents duplicate scans during rapid updates
+- This script is a **manual diagnostic tool** for operators to confirm feed health
+
+**Exit Codes:**
+
+- `0`: Check completed successfully (feeds may or may not have recent logs)
+- `1`: Configuration error or fatal RPC failure
+
+---
+
 ## Related Files
 
-- Script sources: [`scripts/verify-chainlink-prices.ts`](./verify-chainlink-prices.ts), [`scripts/test-price-trigger-unit.ts`](./test-price-trigger-unit.ts), [`scripts/simulate-price-trigger-integrated.ts`](./simulate-price-trigger-integrated.ts)
+- Script sources: [`scripts/verify-chainlink-prices.ts`](./verify-chainlink-prices.ts), [`scripts/test-price-trigger-unit.ts`](./test-price-trigger-unit.ts), [`scripts/simulate-price-trigger-integrated.ts`](./simulate-price-trigger-integrated.ts), [`scripts/check-ocr2-feeds.mjs`](./check-ocr2-feeds.mjs)
 - Metrics: [`src/metrics/priceTriggerMetrics.ts`](../src/metrics/priceTriggerMetrics.ts)
 - Real-time service: [`src/services/RealTimeHFService.ts`](../src/services/RealTimeHFService.ts)
 - Config: [`src/config/index.ts`](../src/config/index.ts), [`.env.example`](../.env.example)
