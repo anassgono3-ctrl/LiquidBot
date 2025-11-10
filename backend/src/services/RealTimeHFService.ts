@@ -49,7 +49,13 @@ const AAVE_POOL_ABI = [
 ];
 
 const CHAINLINK_AGG_ABI = [
-  'event AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)'
+  'event AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)',
+  'event NewTransmission(uint32 indexed aggregatorRoundId, int192 answer, address transmitter, int192[] observations, bytes observers, bytes32 rawReportContext)'
+];
+
+// Chainlink aggregator interface for latestRoundData polling
+const CHAINLINK_AGGREGATOR_ABI = [
+  'function latestRoundData() external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)'
 ];
 
 export interface RealTimeHFServiceOptions {
@@ -179,6 +185,17 @@ export class RealTimeHFService extends EventEmitter {
   private chainlinkFeedToSymbol: Map<string, string> = new Map(); // feedAddress -> symbol
   private priceMonitorAssets: Set<string> | null = null; // null = monitor all
   private lastPriceTriggerTime: Map<string, number> = new Map(); // symbol -> timestamp in ms
+  
+  // Per-asset state for polling fallback
+  private priceAssetState: Map<string, {
+    lastAnswer: bigint | null;
+    lastUpdatedAt: number | null;
+    lastTriggerTs: number;
+    baselineAnswer: bigint | null;
+  }> = new Map();
+  
+  // Polling timer
+  private pricePollingTimer?: NodeJS.Timeout;
 
   // Metrics
   private metrics = {
@@ -332,6 +349,7 @@ export class RealTimeHFService extends EventEmitter {
     if (this.pendingBlockTimer) clearInterval(this.pendingBlockTimer);
     if (this.runWatchdogTimer) clearTimeout(this.runWatchdogTimer);
     if (this.wsHeartbeatTimer) clearTimeout(this.wsHeartbeatTimer);
+    if (this.pricePollingTimer) clearInterval(this.pricePollingTimer);
 
     // Clear event batch timers
     for (const [, batch] of this.eventBatchQueue) {
@@ -528,36 +546,81 @@ export class RealTimeHFService extends EventEmitter {
           return entry && entry.name === 'AnswerUpdated';
         });
         
+        // Get NewTransmission topic (OCR2)
+        const iface = new Interface(CHAINLINK_AGG_ABI);
+        const newTransmissionTopic = iface.getEvent('NewTransmission')?.topicHash || '';
+        
+        const feedAddresses = Object.values(feeds);
+        // eslint-disable-next-line no-console
+        console.log(
+          `[price-trigger] Setting up listeners for ${feedAddresses.length} feed(s): ` +
+          `${Object.keys(feeds).join(',')} (events: AnswerUpdated + NewTransmission)`
+        );
+        
         for (const [token, feedAddress] of Object.entries(feeds)) {
           // Build reverse mapping for price trigger feature
           this.chainlinkFeedToSymbol.set(feedAddress.toLowerCase(), token);
           
+          // Initialize per-asset state for polling
+          this.priceAssetState.set(feedAddress.toLowerCase(), {
+            lastAnswer: null,
+            lastUpdatedAt: null,
+            lastTriggerTs: 0,
+            baselineAnswer: null
+          });
+          
           try {
-            const chainlinkFilter = {
+            // Subscribe to AnswerUpdated (legacy Chainlink event)
+            const answerUpdatedFilter = {
               address: feedAddress,
               topics: [
-                answerUpdatedTopic || new Interface(CHAINLINK_AGG_ABI).getEvent('AnswerUpdated')?.topicHash || ''
+                answerUpdatedTopic || iface.getEvent('AnswerUpdated')?.topicHash || ''
               ]
             };
             
-            this.provider.on(chainlinkFilter, (log: EventLog) => {
+            this.provider.on(answerUpdatedFilter, (log: EventLog) => {
               if (this.isShuttingDown) return;
               try {
                 this.handleLog(log).catch(err => {
                   // eslint-disable-next-line no-console
-                  console.error(`[realtime-hf] Error handling Chainlink log for ${token}:`, err);
+                  console.error(`[realtime-hf] Error handling AnswerUpdated for ${token}:`, err);
                 });
               } catch (err) {
                 // eslint-disable-next-line no-console
-                console.error(`[realtime-hf] Error in Chainlink listener for ${token}:`, err);
+                console.error(`[realtime-hf] Error in AnswerUpdated listener for ${token}:`, err);
               }
             });
+            
+            // Subscribe to NewTransmission (OCR2 Chainlink event)
+            const newTransmissionFilter = {
+              address: feedAddress,
+              topics: [newTransmissionTopic]
+            };
+            
+            this.provider.on(newTransmissionFilter, (log: EventLog) => {
+              if (this.isShuttingDown) return;
+              try {
+                this.handleLog(log).catch(err => {
+                  // eslint-disable-next-line no-console
+                  console.error(`[realtime-hf] Error handling NewTransmission for ${token}:`, err);
+                });
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error(`[realtime-hf] Error in NewTransmission listener for ${token}:`, err);
+              }
+            });
+            
             // eslint-disable-next-line no-console
-            console.log(`[realtime-hf] Subscribed (ethers) to Chainlink feed for ${token}`);
+            console.log(`[realtime-hf] Subscribed to Chainlink feed for ${token} (AnswerUpdated + NewTransmission)`);
           } catch (err) {
             // eslint-disable-next-line no-console
             console.warn(`[realtime-hf] Failed to subscribe to Chainlink feed for ${token}:`, err);
           }
+        }
+        
+        // Start polling fallback if price trigger is enabled
+        if (config.priceTriggerEnabled) {
+          this.startPricePolling(feeds);
         }
       }
 
@@ -975,14 +1038,33 @@ export class RealTimeHFService extends EventEmitter {
         : log.blockNumber;
       
       // Try to decode Chainlink event for better logging and price extraction
-      const decoded = eventRegistry.decode(log.topics as string[], log.data);
-      if (decoded && decoded.name === 'AnswerUpdated') {
+      let decoded = eventRegistry.decode(log.topics as string[], log.data);
+      
+      // If eventRegistry decode fails, try manual decode for NewTransmission
+      if (!decoded) {
+        try {
+          const iface = new Interface(CHAINLINK_AGG_ABI);
+          const parsed = iface.parseLog({ topics: log.topics as string[], data: log.data });
+          if (parsed) {
+            // Create a compatible DecodedEvent-like object
+            decoded = { 
+              name: parsed.name, 
+              args: parsed.args as Record<string, unknown>,
+              signature: parsed.signature
+            };
+          }
+        } catch {
+          // Ignore decode errors
+        }
+      }
+      
+      if (decoded && (decoded.name === 'AnswerUpdated' || decoded.name === 'NewTransmission')) {
         // eslint-disable-next-line no-console
-        console.log(`[realtime-hf] ${formatDecodedEvent(decoded)}`);
+        console.log(`[realtime-hf] Chainlink ${decoded.name} event (block=${currentBlock})`);
         
         // Handle price trigger logic if enabled
         if (config.priceTriggerEnabled) {
-          await this.handlePriceTrigger(feedAddress, decoded, currentBlock);
+          await this.handleChainlinkEvent(feedAddress, decoded, currentBlock);
         }
       } else {
         // eslint-disable-next-line no-console
@@ -1033,25 +1115,50 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Handle price trigger for emergency scans on sharp price drops
-   * Supports two modes:
-   * - Single-round delta mode (default): triggers on price drop between consecutive updates
-   * - Cumulative mode (PRICE_TRIGGER_CUMULATIVE=true): triggers on cumulative drop from baseline
+   * Handle Chainlink event (AnswerUpdated or NewTransmission)
+   * Extracts price and delegates to centralized price processing
    */
-  private async handlePriceTrigger(
+  private async handleChainlinkEvent(
     feedAddress: string,
     decoded: { name: string; args: Record<string, unknown> },
     blockNumber: number
   ): Promise<void> {
     try {
-      // Extract current price from AnswerUpdated event
-      const currentAnswer = decoded.args.current;
+      let currentAnswer: bigint | undefined;
+      
+      // Extract price based on event type
+      if (decoded.name === 'AnswerUpdated') {
+        // AnswerUpdated: int256 indexed current
+        currentAnswer = decoded.args.current as bigint | undefined;
+      } else if (decoded.name === 'NewTransmission') {
+        // NewTransmission: int192 answer (not indexed)
+        currentAnswer = decoded.args.answer as bigint | undefined;
+      }
+      
       if (!currentAnswer || typeof currentAnswer !== 'bigint') {
         return;
       }
       
-      // Convert bigint to number safely to avoid precision loss
-      // Most Chainlink feeds use 8 decimals, so this should be safe for typical price values
+      // Process price update through centralized method
+      await this.processPriceUpdate(feedAddress, currentAnswer, blockNumber, 'event');
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[price-trigger] Error handling Chainlink event:', err);
+    }
+  }
+
+  /**
+   * Centralized price-trigger handling for both events and polling
+   * Computes delta or cumulative drop vs baseline and triggers emergency scan when threshold crossed
+   */
+  private async processPriceUpdate(
+    feedAddress: string,
+    currentAnswer: bigint,
+    blockNumber: number,
+    source: 'event' | 'poll'
+  ): Promise<void> {
+    try {
+      // Convert bigint to number safely
       const currentPrice = parseFloat(currentAnswer.toString());
       const rawSymbol = this.chainlinkFeedToSymbol.get(feedAddress) || feedAddress;
       const symbol = this.normalizeAssetSymbol(rawSymbol);
@@ -1061,31 +1168,57 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
-      // Get last seen price and baseline price for this feed
-      const lastPrice = this.lastSeenPrices.get(feedAddress);
-      const baselinePrice = this.baselinePrices.get(feedAddress);
-      
-      // Update last seen price
-      this.lastSeenPrices.set(feedAddress, currentPrice);
+      // Get or initialize per-asset state
+      let state = this.priceAssetState.get(feedAddress);
+      if (!state) {
+        state = {
+          lastAnswer: null,
+          lastUpdatedAt: null,
+          lastTriggerTs: 0,
+          baselineAnswer: null
+        };
+        this.priceAssetState.set(feedAddress, state);
+      }
       
       // Initialize baseline on first update
-      if (baselinePrice === undefined) {
+      if (state.baselineAnswer === null) {
+        state.baselineAnswer = currentAnswer;
+        state.lastAnswer = currentAnswer;
+        state.lastUpdatedAt = Date.now();
+        
+        // Also update legacy maps for backward compatibility
         this.baselinePrices.set(feedAddress, currentPrice);
-        // eslint-disable-next-line no-console
-        console.log(
-          `[price-trigger] Initialized price tracking for ${symbol}: ` +
-          `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} baseline=${currentPrice}`
-        );
+        this.lastSeenPrices.set(feedAddress, currentPrice);
+        
+        if (source === 'poll') {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[price-trigger] Initialized price tracking for ${symbol} via polling: ` +
+            `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} baseline=${currentPrice}`
+          );
+        }
         return;
       }
       
-      // Skip trigger if this is the first time seeing this feed (for delta mode)
-      if (lastPrice === undefined) {
+      // Skip if no last answer (shouldn't happen after init, but guard)
+      if (state.lastAnswer === null) {
+        state.lastAnswer = currentAnswer;
+        state.lastUpdatedAt = Date.now();
+        this.lastSeenPrices.set(feedAddress, currentPrice);
         return;
       }
+      
+      // Calculate reference price based on mode
+      const lastPrice = parseFloat(state.lastAnswer.toString());
+      const baselinePrice = parseFloat(state.baselineAnswer.toString());
+      const referencePrice = config.priceTriggerCumulative ? baselinePrice : lastPrice;
+      
+      // Update state
+      state.lastAnswer = currentAnswer;
+      state.lastUpdatedAt = Date.now();
+      this.lastSeenPrices.set(feedAddress, currentPrice);
       
       // Guard against division by zero
-      const referencePrice = config.priceTriggerCumulative ? baselinePrice : lastPrice;
       if (referencePrice <= 0) {
         // eslint-disable-next-line no-console
         console.warn(`[price-trigger] Invalid reference price (${referencePrice}) for ${symbol}, skipping trigger`);
@@ -1096,6 +1229,15 @@ export class RealTimeHFService extends EventEmitter {
       const priceDiff = currentPrice - referencePrice;
       const priceDiffPct = (priceDiff / referencePrice) * 10000; // basis points
       
+      // Log price update at debug level
+      if (source === 'poll' && Math.abs(priceDiffPct) > 1) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[price-trigger] Poll update: ${symbol} ${lastPrice.toFixed(2)} → ${currentPrice.toFixed(2)} ` +
+          `(${priceDiffPct >= 0 ? '+' : ''}${priceDiffPct.toFixed(2)}bps)`
+        );
+      }
+      
       // Check if price dropped by threshold or more
       if (priceDiffPct >= -config.priceTriggerDropBps) {
         // Price increased or dropped less than threshold - no emergency scan
@@ -1104,14 +1246,13 @@ export class RealTimeHFService extends EventEmitter {
       
       // Check debounce: prevent repeated scans on rapid ticks
       const now = Date.now();
-      const lastTriggerTime = this.lastPriceTriggerTime.get(symbol);
       const debounceMs = config.priceTriggerDebounceSec * 1000;
       
-      if (lastTriggerTime && (now - lastTriggerTime) < debounceMs) {
-        const elapsedSec = Math.floor((now - lastTriggerTime) / 1000);
+      if (state.lastTriggerTs > 0 && (now - state.lastTriggerTs) < debounceMs) {
+        const elapsedSec = Math.floor((now - state.lastTriggerTs) / 1000);
         // eslint-disable-next-line no-console
         console.log(
-          `[price-trigger] Debounced: asset=${symbol} drop=${Math.abs(priceDiffPct).toFixed(2)}bps ` +
+          `[price-trigger] Debounced (${source}): asset=${symbol} drop=${Math.abs(priceDiffPct).toFixed(2)}bps ` +
           `elapsed=${elapsedSec}s debounce=${config.priceTriggerDebounceSec}s ` +
           `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'}`
         );
@@ -1119,10 +1260,12 @@ export class RealTimeHFService extends EventEmitter {
       }
       
       // Update last trigger time
+      state.lastTriggerTs = now;
       this.lastPriceTriggerTime.set(symbol, now);
       
       // Reset baseline to current price after trigger (for cumulative mode)
       if (config.priceTriggerCumulative) {
+        state.baselineAnswer = currentAnswer;
         this.baselinePrices.set(feedAddress, currentPrice);
       }
       
@@ -1130,11 +1273,11 @@ export class RealTimeHFService extends EventEmitter {
       const dropBps = Math.abs(priceDiffPct);
       // eslint-disable-next-line no-console
       console.log(
-        `[price-trigger] Sharp price drop detected: asset=${symbol} ` +
+        `[price-trigger] Sharp price drop detected (${source}): asset=${symbol} ` +
         `drop=${dropBps.toFixed(2)}bps threshold=${config.priceTriggerDropBps}bps ` +
         `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} ` +
-        `reference=${referencePrice} current=${currentPrice} ` +
-        `block=${blockNumber} trigger=price`
+        `reference=${referencePrice.toFixed(2)} current=${currentPrice.toFixed(2)} ` +
+        `block=${blockNumber}`
       );
       
       // Select candidates for emergency scan
@@ -1146,6 +1289,24 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
+      // Execute emergency scan
+      await this.executeEmergencyScan(symbol, affectedUsers, dropBps, blockNumber);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[price-trigger] Error processing price update:', err);
+    }
+  }
+
+  /**
+   * Execute emergency scan for affected users
+   */
+  private async executeEmergencyScan(
+    symbol: string,
+    affectedUsers: string[],
+    dropBps: number,
+    blockNumber: number
+  ): Promise<void> {
+    try {
       // Increment metric
       const { realtimePriceEmergencyScansTotal, emergencyScanLatency } = await import('../metrics/index.js');
       realtimePriceEmergencyScansTotal.inc({ asset: symbol });
@@ -1164,6 +1325,67 @@ export class RealTimeHFService extends EventEmitter {
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[price-trigger] Error handling price trigger:', err);
+    }
+  }
+
+  /**
+   * Start periodic polling fallback for Chainlink price feeds
+   * Runs even when events are active but respects debounce window
+   */
+  private startPricePolling(feeds: Record<string, string>): void {
+    const pollIntervalMs = config.priceTriggerPollSec * 1000;
+    
+    // eslint-disable-next-line no-console
+    console.log(
+      `[price-trigger] Starting polling fallback: interval=${config.priceTriggerPollSec}s ` +
+      `feeds=${Object.keys(feeds).length}`
+    );
+    
+    // Initial poll after a short delay
+    setTimeout(() => {
+      this.pollChainlinkFeeds(feeds).catch(err => {
+        // eslint-disable-next-line no-console
+        console.error('[price-trigger] Error in initial poll:', err);
+      });
+    }, 2000);
+    
+    // Periodic polling
+    this.pricePollingTimer = setInterval(() => {
+      if (this.isShuttingDown) return;
+      
+      this.pollChainlinkFeeds(feeds).catch(err => {
+        // eslint-disable-next-line no-console
+        console.error('[price-trigger] Error in polling:', err);
+      });
+    }, pollIntervalMs);
+  }
+
+  /**
+   * Poll latestRoundData for all configured feeds
+   */
+  private async pollChainlinkFeeds(feeds: Record<string, string>): Promise<void> {
+    if (!this.provider) return;
+    
+    const currentBlock = await this.provider.getBlockNumber().catch(() => null);
+    if (currentBlock === null) return;
+    
+    for (const [token, feedAddress] of Object.entries(feeds)) {
+      try {
+        // Create contract instance for this feed
+        const feedContract = new Contract(feedAddress, CHAINLINK_AGGREGATOR_ABI, this.provider);
+        
+        // Call latestRoundData
+        const result = await feedContract.latestRoundData();
+        const answer = result[1] as bigint; // answer is second return value
+        
+        if (answer && typeof answer === 'bigint') {
+          // Process through centralized price update handler
+          await this.processPriceUpdate(feedAddress.toLowerCase(), answer, currentBlock, 'poll');
+        }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error(`[price-trigger] Polling error for ${token}:`, err);
+      }
     }
   }
 

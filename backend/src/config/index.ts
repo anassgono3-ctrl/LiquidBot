@@ -133,6 +133,7 @@ export const config = {
   get priceTriggerAssets() { return env.priceTriggerAssets; },
   get priceTriggerDebounceSec() { return env.priceTriggerDebounceSec; },
   get priceTriggerCumulative() { return env.priceTriggerCumulative; },
+  get priceTriggerPollSec() { return env.priceTriggerPollSec; },
 
   // At-risk user scanning
   get atRiskScanLimit() { return env.atRiskScanLimit; },
