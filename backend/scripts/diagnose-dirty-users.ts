@@ -12,7 +12,7 @@
  */
 
 import 'dotenv/config';
-import { EventLog, Interface, WebSocketProvider } from 'ethers';
+import { EventLog, Interface, WebSocketProvider, JsonRpcProvider } from 'ethers';
 
 import { config } from '../src/config/index.js';
 import { RealTimeHFService } from '../src/services/RealTimeHFService.js';
@@ -147,14 +147,14 @@ async function phaseB_instrumentProvider(service: RealTimeHFService): Promise<vo
   
   try {
     // Extract provider URL from service (accessing private field for diagnostics)
-    const serviceAny = service as any;
+    const serviceAny = service as unknown as { provider?: WebSocketProvider | JsonRpcProvider };
     const provider = serviceAny.provider;
     
     if (provider) {
       // For WebSocketProvider, try to extract the connection URL
       if (provider instanceof WebSocketProvider) {
         // WebSocketProvider has _websocket property with url
-        const ws = (provider as any)._websocket;
+        const ws = (provider as unknown as { _websocket?: { url?: string } })._websocket;
         if (ws && ws.url) {
           result.providerUrl = ws.url;
           console.log(`Provider Type: WebSocketProvider`);
@@ -265,7 +265,10 @@ async function phaseC_syntheticChainlinkEvents(service: RealTimeHFService): Prom
     } as unknown as EventLog;
     
     // Inject logs via handleLog (accessing private method for testing)
-    const serviceAny = service as any;
+    const serviceAny = service as unknown as { 
+      handleLog: (log: EventLog) => Promise<void>;
+      dirtyUsers: Set<string>;
+    };
     
     console.log(`Injecting baseline price update: ${baselinePrice} (${Number(baselinePrice) / 1e8})`);
     await serviceAny.handleLog(syntheticLog1);
@@ -280,7 +283,7 @@ async function phaseC_syntheticChainlinkEvents(service: RealTimeHFService): Prom
     await sleep(200);
     
     // Check if dirty users were marked
-    const dirtyUsers = serviceAny.dirtyUsers as Set<string>;
+    const dirtyUsers = serviceAny.dirtyUsers;
     const dirtyCount = dirtyUsers.size;
     
     result.chainlinkEventsTest = {
@@ -361,8 +364,8 @@ async function phaseD_syntheticAaveEvents(service: RealTimeHFService): Promise<v
     console.log(`Injecting Borrow event for user: ${testUser}`);
     
     // Get initial dirty set size
-    const serviceAny = service as any;
-    const dirtyUsersBefore = new Set(serviceAny.dirtyUsers as Set<string>);
+    const serviceAny = service as unknown as { dirtyUsers: Set<string>; handleLog: (log: EventLog) => Promise<void> };
+    const dirtyUsersBefore = new Set(serviceAny.dirtyUsers);
     const sizeBefore = dirtyUsersBefore.size;
     
     // Inject log
@@ -372,7 +375,7 @@ async function phaseD_syntheticAaveEvents(service: RealTimeHFService): Promise<v
     await sleep(100);
     
     // Check if user was marked dirty
-    const dirtyUsersAfter = serviceAny.dirtyUsers as Set<string>;
+    const dirtyUsersAfter = serviceAny.dirtyUsers;
     const sizeAfter = dirtyUsersAfter.size;
     const userMarkedDirty = dirtyUsersAfter.has(testUser.toLowerCase());
     
@@ -428,7 +431,7 @@ async function phaseE_debounceTest(service: RealTimeHFService): Promise<void> {
       return;
     }
     
-    const [symbol, feedAddress] = feedEntries[0];
+    const [_symbolDebounce, feedAddress] = feedEntries[0];
     const answerUpdatedInterface = new Interface([
       'event AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)'
     ]);
@@ -456,7 +459,12 @@ async function phaseE_debounceTest(service: RealTimeHFService): Promise<void> {
       removed: false
     } as unknown as EventLog);
     
-    const serviceAny = service as any;
+    const serviceAny = service as unknown as { 
+      handleLog: (log: EventLog) => Promise<void>;
+      lastSeenPrices: Map<string, number>;
+      baselinePrices: Map<string, number>;
+      lastPriceTriggerTime: Map<string, number>;
+    };
     
     // Reset price tracking
     serviceAny.lastSeenPrices.clear();
@@ -545,7 +553,7 @@ async function phaseF_cumulativeTest(service: RealTimeHFService): Promise<void> 
         return;
       }
       
-      const [symbol, feedAddress] = feedEntries[0];
+      const [_symbolCumulative, feedAddress] = feedEntries[0];
       const answerUpdatedInterface = new Interface([
         'event AnswerUpdated(int256 indexed current, uint256 indexed roundId, uint256 updatedAt)'
       ]);
@@ -557,7 +565,12 @@ async function phaseF_cumulativeTest(service: RealTimeHFService): Promise<void> 
         BigInt(1990e8)  // another -25bps, total -50bps from baseline
       ];
       
-      const serviceAny = service as any;
+      const serviceAny = service as unknown as { 
+        handleLog: (log: EventLog) => Promise<void>;
+        lastSeenPrices: Map<string, number>;
+        baselinePrices: Map<string, number>;
+        lastPriceTriggerTime: Map<string, number>;
+      };
       serviceAny.lastSeenPrices.clear();
       serviceAny.baselinePrices.clear();
       serviceAny.lastPriceTriggerTime.clear();
@@ -622,8 +635,8 @@ async function phaseG_finalReport(service: RealTimeHFService): Promise<void> {
   printHeader('Phase G: Final Report');
   
   try {
-    const serviceAny = service as any;
-    const dirtyUsers = serviceAny.dirtyUsers as Set<string>;
+    const serviceAny = service as unknown as { dirtyUsers: Set<string> };
+    const dirtyUsers = serviceAny.dirtyUsers;
     const metrics = service.getMetrics();
     
     result.final.dirtyCount = dirtyUsers.size;

@@ -526,9 +526,12 @@ export class RealTimeHFService extends EventEmitter {
         
         // [DIAGNOSTICS] Log provider identity for Chainlink feeds
         const providerType = this.provider.constructor.name;
-        const providerUrl = this.provider instanceof WebSocketProvider 
-          ? ((this.provider as any)._websocket?.url || 'unknown')
-          : 'N/A (not WebSocket)';
+        let providerUrl = 'N/A (not WebSocket)';
+        if (this.provider instanceof WebSocketProvider) {
+          // Access internal _websocket property (exists in WebSocketProvider but not typed)
+          const wsProvider = this.provider as unknown as { _websocket?: { url?: string } };
+          providerUrl = wsProvider._websocket?.url || 'unknown';
+        }
         // eslint-disable-next-line no-console
         console.log(`[diagnostics] Chainlink feeds_provider=${providerType} url=${providerUrl} feed_count=${Object.keys(feeds).length}`);
         
