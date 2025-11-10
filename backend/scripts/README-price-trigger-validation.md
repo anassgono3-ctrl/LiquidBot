@@ -206,14 +206,22 @@ Compiled scripts are output to `dist/scripts/`.
 
 The price trigger logic validated by these scripts is integrated into `RealTimeHFService`:
 
-1. **Price Updates**: Chainlink `AnswerUpdated` events are monitored via WebSocket
+1. **Dual-Mode Price Updates**: 
+   - **Event Listening**: Subscribes to both Chainlink `AnswerUpdated` (legacy) and `NewTransmission` (OCR2) events via WebSocket
+   - **Polling Fallback**: Queries `latestRoundData()` every `PRICE_TRIGGER_POLL_SEC` seconds (default: 15s) to detect price changes when events are sparse
 2. **Drop Calculation**: Basis points drop is calculated from consecutive price updates
 3. **Threshold Check**: Triggers when drop ≥ `PRICE_TRIGGER_DROP_BPS`
-4. **Debounce**: Prevents repeated scans within `PRICE_TRIGGER_DEBOUNCE_SEC`
+4. **Debounce**: Prevents repeated scans within `PRICE_TRIGGER_DEBOUNCE_SEC` (applies to both events and polling)
 5. **Emergency Scan**: Invokes batch health check on affected candidates
 6. **Metrics**: Increments counters and records latency
 
 Configuration is loaded from environment variables (see `.env.example`).
+
+### OCR2 Aggregator Support (Base Network)
+
+On Base and other networks using OCR2 aggregators, Chainlink price feeds emit `NewTransmission` events instead of `AnswerUpdated`. The real-time service subscribes to both event types to ensure compatibility across networks.
+
+When events are sparse or unavailable, the polling fallback ensures price drops are detected by querying `latestRoundData()` at regular intervals.
 
 ---
 
@@ -231,6 +239,17 @@ Configuration is loaded from environment variables (see `.env.example`).
 **Simulation fails with ZodError**
 - Ensure `API_KEY` and `JWT_SECRET` are set (even test values work)
 - These are required for config validation, not actual authentication
+
+**No AnswerUpdated logs on Base (or other OCR2 networks)**
+- This is expected behavior. Base Chainlink feeds use OCR2 aggregators that emit `NewTransmission` events instead
+- The real-time service subscribes to both `AnswerUpdated` and `NewTransmission` events for maximum compatibility
+- The polling fallback ensures price drops are detected even when events are sparse (queries `latestRoundData()` every `PRICE_TRIGGER_POLL_SEC` seconds)
+- To verify polling is working, check logs for `[price-trigger] Poll update` messages
+
+**Dirty entries expiring before observation**
+- Ensure `DIRTY_TTL_SEC` is configured to be at least 2× `PRICE_TRIGGER_DEBOUNCE_SEC`
+- Example: if `PRICE_TRIGGER_DEBOUNCE_SEC=60`, set `DIRTY_TTL_SEC=600` (10 minutes)
+- This prevents dirty-first prioritization entries from expiring during the debounce window
 
 ---
 

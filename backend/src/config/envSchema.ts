@@ -89,6 +89,7 @@ export const rawEnvSchema = z.object({
   PRICE_TRIGGER_ASSETS: z.string().optional(),
   PRICE_TRIGGER_DEBOUNCE_SEC: z.string().optional(),
   PRICE_TRIGGER_CUMULATIVE: z.string().optional(),
+  PRICE_TRIGGER_POLL_SEC: z.string().optional(),
 
   // At-risk user scanning
   AT_RISK_SCAN_LIMIT: z.string().optional(),
@@ -287,6 +288,7 @@ export const env = (() => {
     priceTriggerAssets: parsed.PRICE_TRIGGER_ASSETS,
     priceTriggerDebounceSec: Number(parsed.PRICE_TRIGGER_DEBOUNCE_SEC || 60),
     priceTriggerCumulative: (parsed.PRICE_TRIGGER_CUMULATIVE || 'false').toLowerCase() === 'true',
+    priceTriggerPollSec: Number(parsed.PRICE_TRIGGER_POLL_SEC || 15),
 
     // At-risk user scanning
     atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),
