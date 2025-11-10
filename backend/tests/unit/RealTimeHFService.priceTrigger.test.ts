@@ -47,6 +47,8 @@ describe('RealTimeHFService - Price Trigger', () => {
       await service.start();
 
       const feedAddress = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
       
       // Manually set up the feed symbol mapping (normally done in setupRealtime)
@@ -71,6 +73,8 @@ describe('RealTimeHFService - Price Trigger', () => {
       await service.start();
 
       const feedAddress = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
       
       // Set up the feed symbol mapping
@@ -96,6 +100,8 @@ describe('RealTimeHFService - Price Trigger', () => {
       await service.start();
 
       const feedAddress = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
 
       // Initialize with baseline
@@ -123,6 +129,8 @@ describe('RealTimeHFService - Price Trigger', () => {
       await service.start();
 
       const feedAddress = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
 
       // Initialize with baseline
@@ -149,6 +157,8 @@ describe('RealTimeHFService - Price Trigger', () => {
       await service.start();
 
       const feedAddress = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
 
       // Initialize via polling
@@ -205,6 +215,8 @@ describe('RealTimeHFService - Price Trigger', () => {
       await service.start();
 
       const feedAddress = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
 
       // Initialize baseline at $1000
@@ -243,6 +255,8 @@ describe('RealTimeHFService - Price Trigger', () => {
       await service.start();
 
       const feedAddress = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
 
       // Initialize
@@ -286,6 +300,8 @@ describe('RealTimeHFService - Price Trigger', () => {
 
       const ethFeed = '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70';
       const usdcFeed = '0x7e860098F58bBFC8648a4311b374B1D669a2bc6B';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const serviceAny = service as any;
 
       // Initialize ETH feed
