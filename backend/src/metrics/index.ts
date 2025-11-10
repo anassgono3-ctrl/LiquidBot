@@ -171,6 +171,12 @@ export const realtimeMinHealthFactor = new Gauge({
   registers: [registry]
 });
 
+export const realtimeDirtyUserCount = new Gauge({
+  name: 'liquidbot_realtime_dirty_user_count',
+  help: 'Current number of users in the dirty set (marked for priority checking)',
+  registers: [registry]
+});
+
 // Real-time execution metrics
 export const realtimeLiquidationBonusBps = new Gauge({
   name: 'liquidbot_realtime_liquidation_bonus_bps',

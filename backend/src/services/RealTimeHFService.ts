@@ -21,6 +21,7 @@ import {
   realtimeReconnects,
   realtimeCandidateCount,
   realtimeMinHealthFactor,
+  realtimeDirtyUserCount,
   liquidatableEdgeTriggersTotal,
   chunkTimeoutsTotal,
   runAbortsTotal,
@@ -522,6 +523,15 @@ export class RealTimeHFService extends EventEmitter {
       // 3. Optional: Setup Chainlink price feed listeners
       if (config.chainlinkFeeds) {
         const feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+        
+        // [DIAGNOSTICS] Log provider identity for Chainlink feeds
+        const providerType = this.provider.constructor.name;
+        const providerUrl = this.provider instanceof WebSocketProvider 
+          ? ((this.provider as any)._websocket?.url || 'unknown')
+          : 'N/A (not WebSocket)';
+        // eslint-disable-next-line no-console
+        console.log(`[diagnostics] Chainlink feeds_provider=${providerType} url=${providerUrl} feed_count=${Object.keys(feeds).length}`);
+        
         // Get AnswerUpdated topic from event registry
         const answerUpdatedTopic = Array.from(eventRegistry.getAllTopics()).find(topic => {
           const entry = eventRegistry.get(topic);
@@ -835,8 +845,18 @@ export class RealTimeHFService extends EventEmitter {
     const metrics = await this.checkAllCandidates('head', blockNumber);
 
     // On success, clear dirty sets (users have been checked)
+    const dirtyCountBeforeClear = this.dirtyUsers.size;
     this.dirtyUsers.clear();
     this.dirtyReserves.clear();
+    
+    // Update dirty user count metric
+    realtimeDirtyUserCount.set(0);
+    
+    // [DIAGNOSTICS] Log when dirty set is cleared
+    if (dirtyCountBeforeClear > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[diagnostics] Dirty set cleared after head check: cleared_count=${dirtyCountBeforeClear} block=${blockNumber}`);
+    }
 
     // Record metrics for adaptive page sizing
     const elapsed = Date.now() - startTime;
@@ -909,15 +929,27 @@ export class RealTimeHFService extends EventEmitter {
         
         // Mark users and reserves as dirty for next head-check prioritization (Goal 2)
         for (const user of users) {
-          this.dirtyUsers.add(user.toLowerCase());
+          const userLower = user.toLowerCase();
+          const wasAlreadyDirty = this.dirtyUsers.has(userLower);
+          this.dirtyUsers.add(userLower);
+          
+          // [DIAGNOSTICS] Log when user is marked dirty
+          if (!wasAlreadyDirty) {
+            // eslint-disable-next-line no-console
+            console.log(`[diagnostics] User marked dirty: ${userLower} via_event=${decoded.name} dirty_set_size=${this.dirtyUsers.size}`);
+          }
+          
           // Track reserve association for price trigger targeting
           if (reserve) {
-            this.candidateManager.touchReserve(user.toLowerCase(), reserve);
+            this.candidateManager.touchReserve(userLower, reserve);
           }
         }
         if (reserve) {
           this.dirtyReserves.add(reserve.toLowerCase());
         }
+        
+        // Update dirty user count metric
+        realtimeDirtyUserCount.set(this.dirtyUsers.size);
         
         // Handle based on event type
         if (decoded.name === 'LiquidationCall') {
