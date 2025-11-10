@@ -338,7 +338,7 @@ export class ExecutionService {
     };
   } | {
     success: false;
-    skipReason: 'service_unavailable' | 'no_debt' | 'no_collateral' | 'below_min_repay_usd' | 'below_min_usd' | 'invalid_pair' | 'resolve_failed';
+    skipReason: 'service_unavailable' | 'no_debt' | 'no_collateral' | 'price_missing' | 'below_min_repay_usd' | 'below_min_usd' | 'invalid_pair' | 'resolve_failed';
     details?: string;
   }> {
     // Validate that AaveDataService is available
@@ -448,8 +448,46 @@ export class ExecutionService {
         debtToCover = selectedDebt.totalDebt / 2n;
       }
 
-      // Calculate USD value
+      // Validate prices before calculating USD values
+      // Ensure priceRaw > 0 for both debt and collateral to prevent silent zero-value bugs
+      if (selectedDebt.priceRaw <= 0n) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[execution] price_missing: debt asset ${selectedDebt.symbol} (${selectedDebt.asset}) ` +
+          `has invalid price: ${selectedDebt.priceRaw}`
+        );
+        return { 
+          success: false, 
+          skipReason: 'price_missing', 
+          details: `Debt asset ${selectedDebt.symbol} price unavailable (priceRaw=${selectedDebt.priceRaw})` 
+        };
+      }
+      
+      if (selectedCollateral.priceRaw <= 0n) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[execution] price_missing: collateral asset ${selectedCollateral.symbol} (${selectedCollateral.asset}) ` +
+          `has invalid price: ${selectedCollateral.priceRaw}`
+        );
+        return { 
+          success: false, 
+          skipReason: 'price_missing', 
+          details: `Collateral asset ${selectedCollateral.symbol} price unavailable (priceRaw=${selectedCollateral.priceRaw})` 
+        };
+      }
+
+      // Calculate USD value (now safe since prices are validated)
       const debtToCoverUsd = calculateUsdValue(debtToCover, selectedDebt.decimals, selectedDebt.priceRaw);
+      
+      // Log intermediate values for debugging
+      // eslint-disable-next-line no-console
+      console.log(
+        `[execution] Repay calculation: user=${userAddress} ` +
+        `debtAsset=${selectedDebt.symbol} totalDebt=${selectedDebt.totalDebt.toString()} ` +
+        `debtToCover=${debtToCover.toString()} decimals=${selectedDebt.decimals} ` +
+        `priceRaw=${selectedDebt.priceRaw.toString()} ` +
+        `debtToCoverUsd=${debtToCoverUsd.toFixed(6)} HF=${healthFactor.toFixed(4)}`
+      );
 
       // Gate by MIN_REPAY_USD (default 50, hardcoded with optional env override)
       const minRepayUsd = config.minRepayUsd;
