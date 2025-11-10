@@ -365,9 +365,152 @@ FEED_SYMBOL=cbETH LOOKBACK_BLOCKS=5000 npm run check:feeds
 
 ---
 
+### 5. audit-chainlink-aggregators.mjs
+
+Advanced diagnostic script that resolves the underlying aggregator contract behind each Chainlink proxy feed and enumerates recent OCR2/legacy events to confirm whether price updates are emitted at the aggregator level.
+
+**Purpose:**
+
+- Distinguish between "no events because proxy is quiet" vs "no events on underlying aggregator"
+- Identify which event signatures appear (OCR2 NewTransmission vs legacy AnswerUpdated) and their frequency
+- Validate updatedAt freshness vs event cadence
+- Compare latestRoundData between proxy and aggregator to detect divergence
+- Provide a comprehensive diagnostic view for troubleshooting price feed issues
+
+**When to use:**
+
+- When check-ocr2-feeds.mjs shows zero events but you want to verify aggregator-level activity
+- Troubleshooting discrepancies between expected and observed price update frequency
+- Investigating whether a feed is using OCR2 (NewTransmission) or legacy (AnswerUpdated) events
+- Comparing proxy vs aggregator latestRoundData for migration/upgrade scenarios
+- Building operational awareness of feed update patterns across multiple symbols
+
+**Usage:**
+
+```bash
+# Audit all configured feeds
+npm run audit:feeds
+
+# Audit a specific feed with custom lookback
+FEED_SYMBOL=cbETH LOOKBACK_BLOCKS=5000 npm run audit:feeds
+
+# Skip proxy logs to focus only on aggregator events
+INCLUDE_PROXY_LOGS=false npm run audit:feeds
+
+# Increase sample topic count for deeper inspection
+RAW_TOPICS_SAMPLE_COUNT=5 npm run audit:feeds
+```
+
+**Required Environment Variables:**
+
+- `RPC_URL` or `HTTP_RPC_URL` or `BACKFILL_RPC_URL`: RPC endpoint for queries
+- `CHAINLINK_FEEDS`: Comma-separated list of `SYMBOL:ADDRESS` pairs
+  - Example: `ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B`
+
+**Optional Environment Variables:**
+
+- `LOOKBACK_BLOCKS`: Number of blocks to scan for logs (default: 3000)
+- `FEED_SYMBOL`: Filter to check only one specific symbol (e.g., `cbETH`)
+- `INCLUDE_PROXY_LOGS`: Include proxy logs in analysis (default: true)
+- `RAW_TOPICS_SAMPLE_COUNT`: Number of sample topic0 hashes to include from aggregator logs (default: 3)
+
+**Output Format (NDJSON):**
+
+One JSON object per line (newline-delimited JSON), allowing easy piping to jq or other tools:
+
+```json
+{
+  "symbol": "CBETH",
+  "proxyAddress": "0xd7818272B9e248357d13057AAb0B417aF31E817d",
+  "aggregatorAddress": "0x1234567890abcdef1234567890abcdef12345678",
+  "aggregatorResolutionFailed": false,
+  "blockWindow": {
+    "from": 37999999,
+    "to": 38002999
+  },
+  "proxyLogs": 0,
+  "aggregatorLogs": 12,
+  "answerUpdatedCount": 0,
+  "newTransmissionCount": 12,
+  "latestRoundDataProxy": {
+    "roundId": "18446744073709579173",
+    "answer": "2456789012345",
+    "updatedAt": 1731261234,
+    "ageSeconds": 45
+  },
+  "latestRoundDataAggregator": {
+    "roundId": "18446744073709579173",
+    "answer": "2456789012345",
+    "updatedAt": 1731261234,
+    "ageSeconds": 45
+  },
+  "mismatch": {
+    "answerDiff": "0",
+    "updatedAtDiff": 0
+  },
+  "rawTopicsSample": [
+    "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f",
+    "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f",
+    "0x0559884fd3a460db3073b7fc896cc77986f16e378210ded43186175bf646fc5f"
+  ]
+}
+```
+
+**Interpreting Results:**
+
+1. **Zero events on proxy + non-zero NewTransmission on aggregator**:
+   - **Expected behavior** for OCR2 feeds on Base
+   - Events are emitted on the underlying aggregator, not the proxy
+   - latestRoundData should be fresh if updates are occurring
+
+2. **Zero events everywhere + fresh latestRoundData**:
+   - Updates are occurring but no events emitted in the lookback window
+   - May indicate longer update cadence than the window size
+   - Try increasing LOOKBACK_BLOCKS or check aggregator contract event history
+
+3. **aggregatorResolutionFailed=true**:
+   - Proxy does not implement aggregator() method
+   - May be a direct aggregator, not a proxy
+   - Check contract implementation manually
+
+4. **answerDiff or updatedAtDiff non-zero**:
+   - Divergence between proxy and aggregator latestRoundData
+   - May indicate aggregator upgrade in progress or migration
+   - Check proposedAggregator field in feed metadata
+
+5. **AnswerUpdated vs NewTransmission counts**:
+   - AnswerUpdated: legacy event signature
+   - NewTransmission: OCR2 event signature
+   - Base feeds typically use NewTransmission only
+
+**Important Notes:**
+
+- This script is **read-only** and performs no writes or state changes
+- Gracefully handles feeds that lack aggregator() method (marks aggregatorResolutionFailed=true)
+- NDJSON output can be piped to jq for filtering:
+  ```bash
+  npm run audit:feeds | jq 'select(.newTransmissionCount > 0)'
+  ```
+- rawTopicsSample helps identify unexpected event types for manual inspection
+- Best-effort: underlying aggregator ABI may differ; script uses common interfaces
+
+**Limitations:**
+
+- Cannot resolve aggregator for proxies that don't implement aggregator() method
+- Does not decode event parameters, only counts by signature
+- Does not handle all possible proxy patterns (e.g., transparent proxy with storage slots)
+- Lookback window may miss infrequent updates; increase LOOKBACK_BLOCKS if needed
+
+**Exit Codes:**
+
+- `0`: Processing completed (individual feed errors logged as JSON)
+- `1`: Configuration error or fatal RPC failure
+
+---
+
 ## Related Files
 
-- Script sources: [`scripts/verify-chainlink-prices.ts`](./verify-chainlink-prices.ts), [`scripts/test-price-trigger-unit.ts`](./test-price-trigger-unit.ts), [`scripts/simulate-price-trigger-integrated.ts`](./simulate-price-trigger-integrated.ts), [`scripts/check-ocr2-feeds.mjs`](./check-ocr2-feeds.mjs)
+- Script sources: [`scripts/verify-chainlink-prices.ts`](./verify-chainlink-prices.ts), [`scripts/test-price-trigger-unit.ts`](./test-price-trigger-unit.ts), [`scripts/simulate-price-trigger-integrated.ts`](./simulate-price-trigger-integrated.ts), [`scripts/check-ocr2-feeds.mjs`](./check-ocr2-feeds.mjs), [`scripts/audit-chainlink-aggregators.mjs`](./audit-chainlink-aggregators.mjs)
 - Metrics: [`src/metrics/priceTriggerMetrics.ts`](../src/metrics/priceTriggerMetrics.ts)
 - Real-time service: [`src/services/RealTimeHFService.ts`](../src/services/RealTimeHFService.ts)
 - Config: [`src/config/index.ts`](../src/config/index.ts), [`.env.example`](../.env.example)
