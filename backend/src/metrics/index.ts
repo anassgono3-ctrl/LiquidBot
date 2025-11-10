@@ -274,6 +274,27 @@ export const priceOracleStubFallbackTotal = new Counter({
   registers: [registry]
 });
 
+export const priceRatioComposedTotal = new Counter({
+  name: 'liquidbot_price_ratio_composed_total',
+  help: 'Total number of prices composed from ratio feeds',
+  labelNames: ['symbol', 'source'],
+  registers: [registry]
+});
+
+export const priceFallbackOracleTotal = new Counter({
+  name: 'liquidbot_price_fallback_oracle_total',
+  help: 'Total number of times price fell back to Aave oracle',
+  labelNames: ['symbol'],
+  registers: [registry]
+});
+
+export const priceMissingTotal = new Counter({
+  name: 'liquidbot_price_missing_total',
+  help: 'Total number of times price was missing during critical operations',
+  labelNames: ['symbol', 'stage'],
+  registers: [registry]
+});
+
 // Low HF Tracker metrics
 export const lowHfSnapshotTotal = new Counter({
   name: 'liquidbot_lowhf_snapshot_total',
