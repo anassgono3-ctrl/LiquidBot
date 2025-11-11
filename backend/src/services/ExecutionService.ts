@@ -57,7 +57,7 @@ export class ExecutionService {
     if (rpcUrl && privateKey) {
       this.provider = new ethers.JsonRpcProvider(rpcUrl);
       this.wallet = new ethers.Wallet(privateKey, this.provider);
-      this.aaveDataService = new AaveDataService(this.provider);
+      this.aaveDataService = new AaveDataService(this.provider, aaveMetadata);
       this.uniswapV3Service = new UniswapV3QuoteService(this.provider);
     }
     
@@ -71,6 +71,10 @@ export class ExecutionService {
    */
   setAaveMetadata(aaveMetadata: AaveMetadata): void {
     this.aaveMetadata = aaveMetadata;
+    // Also update AaveDataService with the metadata
+    if (this.aaveDataService) {
+      this.aaveDataService.setAaveMetadata(aaveMetadata);
+    }
   }
 
   /**

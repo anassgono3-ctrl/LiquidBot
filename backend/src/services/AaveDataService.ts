@@ -93,12 +93,21 @@ export class AaveDataService {
   private oracle: ethers.Contract | null = null;
   private pool: ethers.Contract | null = null;
   private uiPoolDataProvider: ethers.Contract | null = null;
+  private aaveMetadata: any | null = null; // AaveMetadata instance (optional, using any to avoid circular dependency)
 
-  constructor(provider?: ethers.JsonRpcProvider) {
+  constructor(provider?: ethers.JsonRpcProvider, aaveMetadata?: any) {
     if (provider) {
       this.provider = provider;
       this.initializeContracts();
     }
+    this.aaveMetadata = aaveMetadata || null;
+  }
+  
+  /**
+   * Set AaveMetadata instance for symbol resolution
+   */
+  setAaveMetadata(aaveMetadata: any): void {
+    this.aaveMetadata = aaveMetadata;
   }
 
   /**
@@ -397,9 +406,19 @@ export class AaveDataService {
   }
 
   /**
-   * Map asset address to symbol (Base mainnet)
+   * Map asset address to symbol
+   * Uses AaveMetadata if available, otherwise falls back to hardcoded mapping
    */
   private getSymbolForAsset(asset: string): string {
+    // Try to get symbol from AaveMetadata first
+    if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
+      const reserve = this.aaveMetadata.getReserve(asset);
+      if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
+        return reserve.symbol;
+      }
+    }
+    
+    // Fallback to hardcoded mapping (Base mainnet)
     const knownAssets: Record<string, string> = {
       '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
@@ -409,6 +428,14 @@ export class AaveDataService {
       '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': 'cbETH',
     };
 
-    return knownAssets[asset.toLowerCase()] || 'UNKNOWN';
+    const symbol = knownAssets[asset.toLowerCase()];
+    
+    // Log if symbol is missing for debugging
+    if (!symbol) {
+      // eslint-disable-next-line no-console
+      console.warn(`[aave-data] symbol_missing: ${asset} - consider adding to AaveMetadata`);
+    }
+    
+    return symbol || 'UNKNOWN';
   }
 }
