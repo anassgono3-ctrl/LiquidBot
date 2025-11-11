@@ -195,5 +195,129 @@ describe('AaveDataService', () => {
       const tolerance = BigInt('10');
       expect(totalDebt - expected).toBeLessThan(tolerance);
     });
+
+    it('should prefer currentVariableDebt when within 0.1% of reconstructed', async () => {
+      const scaledVariableDebt = BigInt('1000000000000000000'); // 1.0 scaled
+      const variableBorrowIndex = BigInt('1050000000000000000000000000'); // 1.05 * RAY
+      const currentVariableDebt = BigInt('1050100000000000000'); // 1.0501 (within 0.1% of reconstructed)
+      const currentStableDebt = BigInt('0');
+      
+      vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
+        currentATokenBalance: 0n,
+        currentStableDebt,
+        currentVariableDebt,
+        principalStableDebt: 0n,
+        scaledVariableDebt,
+        stableBorrowRate: 0n,
+        liquidityRate: 0n,
+        stableRateLastUpdated: 0n,
+        usageAsCollateralEnabled: false
+      });
+      
+      vi.spyOn(service, 'getReserveData').mockResolvedValue({
+        unbacked: 0n,
+        accruedToTreasuryScaled: 0n,
+        totalAToken: 0n,
+        totalStableDebt: 0n,
+        totalVariableDebt: 0n,
+        liquidityRate: 0n,
+        variableBorrowRate: 0n,
+        stableBorrowRate: 0n,
+        averageStableBorrowRate: 0n,
+        liquidityIndex: BigInt(10 ** 27),
+        variableBorrowIndex,
+        lastUpdateTimestamp: 0n
+      });
+      
+      const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
+      
+      // Should use currentVariableDebt to avoid rounding differences
+      expect(totalDebt).toBe(currentVariableDebt);
+    });
+
+    it('should use reconstructed value when difference exceeds 0.1%', async () => {
+      const scaledVariableDebt = BigInt('1000000000000000000'); // 1.0 scaled
+      const variableBorrowIndex = BigInt('1050000000000000000000000000'); // 1.05 * RAY
+      // currentVariableDebt is significantly different (more than 0.1%)
+      const currentVariableDebt = BigInt('1070000000000000000'); // 1.07 (too different)
+      const currentStableDebt = BigInt('0');
+      
+      vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
+        currentATokenBalance: 0n,
+        currentStableDebt,
+        currentVariableDebt,
+        principalStableDebt: 0n,
+        scaledVariableDebt,
+        stableBorrowRate: 0n,
+        liquidityRate: 0n,
+        stableRateLastUpdated: 0n,
+        usageAsCollateralEnabled: false
+      });
+      
+      vi.spyOn(service, 'getReserveData').mockResolvedValue({
+        unbacked: 0n,
+        accruedToTreasuryScaled: 0n,
+        totalAToken: 0n,
+        totalStableDebt: 0n,
+        totalVariableDebt: 0n,
+        liquidityRate: 0n,
+        variableBorrowRate: 0n,
+        stableBorrowRate: 0n,
+        averageStableBorrowRate: 0n,
+        liquidityIndex: BigInt(10 ** 27),
+        variableBorrowIndex,
+        lastUpdateTimestamp: 0n
+      });
+      
+      const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
+      
+      // Should use reconstructed value (1.05) not currentVariableDebt (1.07)
+      const RAY = BigInt(10 ** 27);
+      const expected = (scaledVariableDebt * variableBorrowIndex) / RAY;
+      expect(totalDebt).toBe(expected);
+    });
+
+    it('should use currentVariableDebt when scaledVariableDebt is zero', async () => {
+      const currentVariableDebt = BigInt('2000000000000000000'); // 2.0 already principal
+      const currentStableDebt = BigInt('500000000000000000'); // 0.5
+      
+      vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
+        currentATokenBalance: 0n,
+        currentStableDebt,
+        currentVariableDebt,
+        principalStableDebt: currentStableDebt,
+        scaledVariableDebt: 0n, // No scaled debt
+        stableBorrowRate: 0n,
+        liquidityRate: 0n,
+        stableRateLastUpdated: 0n,
+        usageAsCollateralEnabled: false
+      });
+      
+      const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
+      
+      // Should use currentVariableDebt directly (no reconstruction needed)
+      expect(totalDebt).toBe(currentVariableDebt + currentStableDebt);
+      expect(totalDebt).toBe(BigInt('2500000000000000000'));
+    });
+
+    it('should return zero when both scaled and current debt are zero', async () => {
+      const currentStableDebt = BigInt('0');
+      
+      vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
+        currentATokenBalance: 0n,
+        currentStableDebt,
+        currentVariableDebt: 0n,
+        principalStableDebt: 0n,
+        scaledVariableDebt: 0n,
+        stableBorrowRate: 0n,
+        liquidityRate: 0n,
+        stableRateLastUpdated: 0n,
+        usageAsCollateralEnabled: false
+      });
+      
+      const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
+      
+      expect(totalDebt).toBe(0n);
+    });
   });
 });

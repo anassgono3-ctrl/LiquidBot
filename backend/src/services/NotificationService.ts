@@ -4,6 +4,8 @@ import TelegramBot from 'node-telegram-bot-api';
 import { config } from '../config/index.js';
 import type { Opportunity } from '../types/index.js';
 
+import { PriceService } from './PriceService.js';
+
 export interface HealthBreachEvent {
   user: string;
   healthFactor: number;
@@ -19,10 +21,14 @@ export class NotificationService {
   private bot: TelegramBot | null = null;
   private chatId: string | null = null;
   private enabled = false;
+  private priceService: PriceService;
 
-  constructor() {
+  constructor(priceService?: PriceService) {
     const token = config.telegramBotToken;
     const chatId = config.telegramChatId;
+
+    // Initialize PriceService for price validation
+    this.priceService = priceService || new PriceService();
 
     if (token && chatId && token !== 'your_bot_token_here' && chatId !== 'your_chat_id_here') {
       try {
@@ -63,7 +69,7 @@ export class NotificationService {
 
     if (notifyOnlyWhenActionable) {
       // Validate opportunity is actionable before sending
-      const validation = this.validateOpportunityActionable(opportunity);
+      const validation = await this.validateOpportunityActionable(opportunity);
       if (!validation.valid) {
         // eslint-disable-next-line no-console
         console.log('[notification] Skipping non-actionable opportunity:', {
@@ -95,11 +101,11 @@ export class NotificationService {
    * Validate that an opportunity has all required data to be actionable
    * Returns validation result with reason if invalid
    */
-  private validateOpportunityActionable(opportunity: Opportunity): {
+  private async validateOpportunityActionable(opportunity: Opportunity): Promise<{
     valid: boolean;
     reason?: 'missing_reserve' | 'missing_decimals' | 'missing_symbol' | 'price_unavailable' | 'zero_debt_to_cover' | 'invalid_pair';
     details?: string;
-  } {
+  }> {
     // Check debt reserve
     if (!opportunity.principalReserve || !opportunity.principalReserve.id) {
       return {
@@ -157,28 +163,55 @@ export class NotificationService {
 
     // Check prices are available (for real-time opportunities)
     if (opportunity.triggerSource === 'realtime') {
-      if (!opportunity.principalValueUsd || opportunity.principalValueUsd <= 0) {
+      // Use PriceService to validate prices (supports ratio tokens like wstETH, weETH)
+      // This ensures the notification path uses the same pricing logic as execution
+      try {
+        // Validate debt asset price (relaxed mode - don't throw on missing)
+        const debtSymbol = opportunity.principalReserve.symbol;
+        const debtPrice = await this.priceService.getPrice(debtSymbol || 'UNKNOWN', false);
+        
+        if (!debtPrice || debtPrice <= 0) {
+          return {
+            valid: false,
+            reason: 'price_unavailable',
+            details: `Debt asset ${debtSymbol} price unavailable or zero`
+          };
+        }
+
+        // Validate collateral asset price (relaxed mode - don't throw on missing)
+        const collateralSymbol = opportunity.collateralReserve.symbol;
+        const collateralPrice = await this.priceService.getPrice(collateralSymbol || 'UNKNOWN', false);
+        
+        if (!collateralPrice || collateralPrice <= 0) {
+          return {
+            valid: false,
+            reason: 'price_unavailable',
+            details: `Collateral asset ${collateralSymbol} price unavailable or zero`
+          };
+        }
+
+        // Log successful price validation for ratio tokens
+        if (collateralSymbol === 'WSTETH' || collateralSymbol === 'WEETH') {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[notification] Ratio token price validated: ${collateralSymbol}=$${collateralPrice.toFixed(2)}`
+          );
+        }
+      } catch (error) {
+        // Price lookup failed
         return {
           valid: false,
           reason: 'price_unavailable',
-          details: 'Debt asset price unavailable or zero'
+          details: error instanceof Error ? error.message : 'Price lookup failed'
         };
       }
 
-      if (!opportunity.collateralValueUsd || opportunity.collateralValueUsd <= 0) {
-        return {
-          valid: false,
-          reason: 'price_unavailable',
-          details: 'Collateral asset price unavailable or zero'
-        };
-      }
-
-      // Check debtToCover is computed and non-zero
-      if (!opportunity.debtToCoverUsd || opportunity.debtToCoverUsd <= 0) {
+      // Check debtToCover is computed and non-zero (if provided)
+      if (opportunity.debtToCoverUsd !== undefined && opportunity.debtToCoverUsd !== null && opportunity.debtToCoverUsd <= 0) {
         return {
           valid: false,
           reason: 'zero_debt_to_cover',
-          details: `debtToCoverUsd is ${opportunity.debtToCoverUsd || 0}`
+          details: `debtToCoverUsd is ${opportunity.debtToCoverUsd}`
         };
       }
     }

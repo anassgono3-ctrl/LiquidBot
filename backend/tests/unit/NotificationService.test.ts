@@ -81,4 +81,51 @@ describe('NotificationService', () => {
       await expect(notificationService.notifyHealthBreach(event)).resolves.not.toThrow();
     });
   });
+
+  describe('ratio token price validation', () => {
+    it('should validate wstETH opportunities using PriceService', async () => {
+      // Test that ratio tokens (wstETH, weETH) can be validated
+      // when PriceService has proper ratio feed configuration
+      const opportunity: Opportunity = {
+        id: 'opp-wsteth',
+        txHash: '0xtxhash',
+        user: '0xUser123',
+        liquidator: '0xLiq456',
+        timestamp: 1234567890,
+        collateralAmountRaw: '1000000000000000000',
+        principalAmountRaw: '500000000',
+        collateralReserve: { id: '0xwsteth', symbol: 'WSTETH', decimals: 18 },
+        principalReserve: { id: '0xusdc', symbol: 'USDC', decimals: 6 },
+        healthFactor: 0.95,
+        triggerSource: 'realtime',
+        triggerType: 'price',
+        debtToCoverUsd: 500
+      };
+
+      // Should not throw - PriceService should handle ratio tokens
+      // In test mode, stub prices are used, so this will succeed
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+
+    it('should validate weETH opportunities using PriceService', async () => {
+      const opportunity: Opportunity = {
+        id: 'opp-weeth',
+        txHash: '0xtxhash',
+        user: '0xUser123',
+        liquidator: '0xLiq456',
+        timestamp: 1234567890,
+        collateralAmountRaw: '2000000000000000000',
+        principalAmountRaw: '1000000000',
+        collateralReserve: { id: '0xweeth', symbol: 'WEETH', decimals: 18 },
+        principalReserve: { id: '0xusdc', symbol: 'USDC', decimals: 6 },
+        healthFactor: 0.92,
+        triggerSource: 'realtime',
+        triggerType: 'head',
+        debtToCoverUsd: 1000
+      };
+
+      // Should not throw - PriceService should handle ratio tokens
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+  });
 });

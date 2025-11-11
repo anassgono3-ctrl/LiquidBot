@@ -1053,6 +1053,17 @@ export class ExecutionService {
         quickUsd: quickUsd.toFixed(6),
         diff: Math.abs(debtToCoverUsd - quickUsd).toFixed(6)
       });
+      
+      // Safety guard: warn if debtToCoverHuman is suspiciously large (possible scaling error)
+      const debtToCoverHuman = Number(debtToCover) / (10 ** debtDecimals);
+      if (debtToCoverHuman > 1e6) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[execution] SCALING WARNING: debtToCoverHuman=${debtToCoverHuman.toFixed(2)} > 1e6 tokens ` +
+          `(debtToCoverRaw=${debtToCover.toString()}, decimals=${debtDecimals}) - ` +
+          `possible scaling error! Review variable debt reconstruction.`
+        );
+      }
     } catch (error) {
       // eslint-disable-next-line no-console
       console.warn('[execution] Failed to calculate USD value, using zero:', error instanceof Error ? error.message : error);
