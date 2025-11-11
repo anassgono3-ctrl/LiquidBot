@@ -192,6 +192,15 @@ export const rawEnvSchema = z.object({
   EVENT_BATCH_COALESCE_MS: z.string().optional(),
   EVENT_BATCH_MAX_PER_BLOCK: z.string().optional(),
   MAX_PARALLEL_EVENT_BATCHES: z.string().optional(),
+  
+  // Adaptive event concurrency
+  ADAPTIVE_EVENT_CONCURRENCY: z.string().optional(),
+  MAX_PARALLEL_EVENT_BATCHES_HIGH: z.string().optional(),
+  EVENT_BACKLOG_THRESHOLD: z.string().optional(),
+  
+  // Dust threshold configuration
+  DUST_MIN_USD: z.string().optional(),
+  MIN_DEBT_USD: z.string().optional(),
 
   // Low HF Tracker for observability
   LOW_HF_TRACKER_ENABLED: z.string().optional(),
@@ -405,6 +414,15 @@ export const env = (() => {
     eventBatchCoalesceMs: Number(parsed.EVENT_BATCH_COALESCE_MS || 120),
     eventBatchMaxPerBlock: Number(parsed.EVENT_BATCH_MAX_PER_BLOCK || 2),
     maxParallelEventBatches: Number(parsed.MAX_PARALLEL_EVENT_BATCHES || 1),
+    
+    // Adaptive event concurrency
+    adaptiveEventConcurrency: (parsed.ADAPTIVE_EVENT_CONCURRENCY || 'false').toLowerCase() === 'true',
+    maxParallelEventBatchesHigh: Number(parsed.MAX_PARALLEL_EVENT_BATCHES_HIGH || 6),
+    eventBacklogThreshold: Number(parsed.EVENT_BACKLOG_THRESHOLD || 5),
+    
+    // Dust threshold configuration
+    dustMinUsd: parsed.DUST_MIN_USD ? Number(parsed.DUST_MIN_USD) : null,
+    minDebtUsd: Number(parsed.MIN_DEBT_USD || 1),
 
     // Low HF Tracker for observability
     lowHfTrackerEnabled: (parsed.LOW_HF_TRACKER_ENABLED || 'true').toLowerCase() === 'true',

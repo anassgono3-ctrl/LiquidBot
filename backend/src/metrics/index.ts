@@ -369,3 +369,48 @@ export const hotlistRevisitTotal = new Counter({
   labelNames: ['outcome'],
   registers: [registry]
 });
+
+// Candidate pruning metrics
+export const candidatesPrunedZeroDebt = new Counter({
+  name: 'liquidbot_candidates_pruned_zero_debt_total',
+  help: 'Total number of candidates pruned due to zero debt',
+  registers: [registry]
+});
+
+export const candidatesPrunedTinyDebt = new Counter({
+  name: 'liquidbot_candidates_pruned_tiny_debt_total',
+  help: 'Total number of candidates pruned due to tiny debt',
+  registers: [registry]
+});
+
+export const candidatesTotal = new Counter({
+  name: 'liquidbot_candidates_total',
+  help: 'Total number of candidates evaluated',
+  registers: [registry]
+});
+
+// Event batch metrics
+export const eventBatchesSkipped = new Counter({
+  name: 'liquidbot_event_batches_skipped_total',
+  help: 'Total number of event batches skipped due to concurrency limit',
+  registers: [registry]
+});
+
+export const eventBatchesExecuted = new Counter({
+  name: 'liquidbot_event_batches_executed_total',
+  help: 'Total number of event batches executed',
+  registers: [registry]
+});
+
+export const eventConcurrencyLevel = new Gauge({
+  name: 'liquidbot_event_concurrency_level',
+  help: 'Current event concurrency level (MAX_PARALLEL_EVENT_BATCHES)',
+  registers: [registry]
+});
+
+export const eventConcurrencyLevelHistogram = new Histogram({
+  name: 'liquidbot_event_concurrency_level_histogram',
+  help: 'Distribution of event concurrency levels over time',
+  buckets: [1, 2, 3, 4, 5, 6, 7, 8],
+  registers: [registry]
+});

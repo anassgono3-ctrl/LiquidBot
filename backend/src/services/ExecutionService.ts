@@ -43,6 +43,8 @@ export class ExecutionService {
   private executorAddress?: string;
   private aaveDataService?: AaveDataService;
   private aaveMetadata?: AaveMetadata;
+  
+  private static configLogged = false;
 
   constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService, aaveMetadata?: AaveMetadata) {
     this.gasEstimator = gasEstimator;
@@ -64,6 +66,20 @@ export class ExecutionService {
     // Set close factor mode metric
     const mode = config.closeFactorExecutionMode;
     realtimeCloseFactorMode.set(mode === 'full' ? 1 : 0);
+    
+    // Log config once at startup
+    if (!ExecutionService.configLogged) {
+      ExecutionService.configLogged = true;
+      const dustMinUsd = config.dustMinUsd;
+      const fallback = dustMinUsd === null;
+      // eslint-disable-next-line no-console
+      console.log(`[config] DUST_MIN_USD=${dustMinUsd !== null ? dustMinUsd : 'unset'} (fallback=${fallback ? 'raw' : 'usd'})`);
+      if (fallback) {
+        const legacyThreshold = process.env.EXECUTION_DUST_WEI || '1000000000000';
+        // eslint-disable-next-line no-console
+        console.warn(`[dust] USD threshold unset, using legacy raw threshold=${legacyThreshold}`);
+      }
+    }
   }
 
   /**
@@ -565,18 +581,44 @@ export class ExecutionService {
         };
       }
       
-      // Dust guard: check if both collateral and debt are below dust threshold
-      const DUST_THRESHOLD_WEI = BigInt(process.env.EXECUTION_DUST_WEI || '1000000000000'); // 1e12 wei by default
-      if (accountData.totalCollateralBase < DUST_THRESHOLD_WEI && accountData.totalDebtBase < DUST_THRESHOLD_WEI && healthFactor < 1.0) {
-        // eslint-disable-next-line no-console
-        console.log(
-          `[execution] dust_guard: both collateral and debt below threshold - SKIPPING`
+      // Dust guard: USD-based threshold with fallback to raw guard
+      const dustMinUsd = config.dustMinUsd;
+      
+      if (dustMinUsd !== null) {
+        // USD-based dust guard
+        // Calculate seized collateral USD value using liquidation bonus
+        const maxSeizableCollateral = (debtToCover * BigInt(Math.floor((1 + liquidationBonusPct) * 1e18))) / BigInt(1e18);
+        const seizedUsd = calculateUsdValue(
+          maxSeizableCollateral > selectedCollateral.aTokenBalance ? selectedCollateral.aTokenBalance : maxSeizableCollateral,
+          selectedCollateral.decimals,
+          selectedCollateral.priceRaw
         );
-        return {
-          success: false,
-          skipReason: 'resolve_failed',
-          details: `dust_guard: collateral=${accountData.totalCollateralBase.toString()}, debt=${accountData.totalDebtBase.toString()}, threshold=${DUST_THRESHOLD_WEI.toString()}`
-        };
+        
+        if (debtToCoverUsd < dustMinUsd || seizedUsd < dustMinUsd) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[execution] dust_guard: repayUSD=${debtToCoverUsd.toFixed(2)} seizedUSD=${seizedUsd.toFixed(2)} minUSD=${dustMinUsd}`
+          );
+          return {
+            success: false,
+            skipReason: 'resolve_failed',
+            details: `dust_guard: repayUSD=${debtToCoverUsd.toFixed(2)} seizedUSD=${seizedUsd.toFixed(2)} minUSD=${dustMinUsd}`
+          };
+        }
+      } else {
+        // Fallback to legacy raw threshold guard
+        const DUST_THRESHOLD_WEI = BigInt(process.env.EXECUTION_DUST_WEI || '1000000000000'); // 1e12 wei by default
+        if (accountData.totalCollateralBase < DUST_THRESHOLD_WEI && accountData.totalDebtBase < DUST_THRESHOLD_WEI && healthFactor < 1.0) {
+          // eslint-disable-next-line no-console
+          console.log(
+            `[execution] dust_guard: both collateral and debt below threshold - SKIPPING (legacy mode)`
+          );
+          return {
+            success: false,
+            skipReason: 'resolve_failed',
+            details: `dust_guard: collateral=${accountData.totalCollateralBase.toString()}, debt=${accountData.totalDebtBase.toString()}, threshold=${DUST_THRESHOLD_WEI.toString()}`
+          };
+        }
       }
       
       // Log intermediate values for debugging (using readable decimals)
