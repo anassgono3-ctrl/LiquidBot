@@ -39,7 +39,9 @@
     "test:price-trigger-unit": "node dist/scripts/test-price-trigger-unit.js",
     "simulate:price-trigger": "node -r dotenv/config dist/scripts/simulate-price-trigger-integrated.js",
     "check:feeds": "node -r dotenv/config scripts/check-ocr2-feeds.mjs",
-    "audit:feeds": "node -r dotenv/config scripts/audit-chainlink-aggregators.mjs"
+    "audit:feeds": "node -r dotenv/config scripts/audit-chainlink-aggregators.mjs",
+    "audit:wrapped": "node -r dotenv/config scripts/audit-wrapped-eth-prices.mjs",
+    "test:repay": "node -r dotenv/config scripts/e2e-repay-sanity.mjs"
   },
   "dependencies": {
     "@apollo/client": "^3.10.0",

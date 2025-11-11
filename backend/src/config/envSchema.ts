@@ -81,6 +81,8 @@ export const rawEnvSchema = z.object({
   // Chainlink price feeds
   CHAINLINK_RPC_URL: z.string().optional(),
   CHAINLINK_FEEDS: z.string().optional(),
+  PRICE_STALENESS_SEC: z.string().optional(),
+  RATIO_PRICE_ENABLED: z.string().optional(),
 
   // Price-triggered emergency scans
   PRICE_TRIGGER_ENABLED: z.string().optional(),
@@ -280,6 +282,8 @@ export const env = (() => {
     // Chainlink price feeds
     chainlinkRpcUrl: parsed.CHAINLINK_RPC_URL,
     chainlinkFeeds: parsed.CHAINLINK_FEEDS,
+    priceStalenessSeconds: Number(parsed.PRICE_STALENESS_SEC || 900), // 15 minutes default
+    ratioPriceEnabled: (parsed.RATIO_PRICE_ENABLED || 'true').toLowerCase() === 'true',
 
     // Price-triggered emergency scans
     priceTriggerEnabled: (parsed.PRICE_TRIGGER_ENABLED || 'false').toLowerCase() === 'true',

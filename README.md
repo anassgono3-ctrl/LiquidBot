@@ -90,6 +90,97 @@ All contracts include NatSpec documentation and event emission for off-chain ind
 - Gas budget per intervention: <$3 (Base L2 assumptions)
 - Uptime target: 99.9% (≤8.76h annual downtime)
 
+## Wrapped ETH Ratio Feeds
+
+The PriceService supports automatic composition of USD prices for wrapped/staked ETH assets (wstETH, weETH) using Chainlink ratio feeds. This ensures accurate pricing for positions that would otherwise report zero repay amounts.
+
+### How It Works
+
+1. **Ratio Feed Detection**: Feed symbols ending with `_ETH` are automatically detected as ratio feeds (e.g., `WSTETH_ETH`, `WEETH_ETH`)
+2. **Price Composition**: Token USD price = (Token/ETH ratio) × (ETH/USD price)
+3. **Fallback Chain**: Direct USD feed → Ratio composition → Aave oracle → Stub price
+4. **Staleness Check**: Both ratio and ETH feeds are validated for freshness (configurable threshold, default 15 minutes)
+
+### Configuration
+
+Add ratio feeds to your `.env` file:
+
+```bash
+# Chainlink price feeds with ratio composition
+CHAINLINK_FEEDS=WETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,WSTETH_ETH:0x43a5C292A453A3bF3606fa856197f09D7B74251a,WEETH_ETH:0xFC1415403EbB0c693f9a7844b92aD2Ff24775C65
+
+# Price staleness threshold (seconds)
+PRICE_STALENESS_SEC=900
+
+# Enable ratio feed composition (default: true)
+RATIO_PRICE_ENABLED=true
+```
+
+**Feed Addresses (Base Network)**:
+- `WETH`: `0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70` (ETH/USD)
+- `WSTETH_ETH`: `0x43a5C292A453A3bF3606fa856197f09D7B74251a` (wstETH/ETH ratio)
+- `WEETH_ETH`: `0xFC1415403EbB0c693f9a7844b92aD2Ff24775C65` (weETH/ETH ratio)
+
+### Validation Scripts
+
+#### Audit Wrapped ETH Prices
+Validates wrapped ETH pricing by comparing Chainlink composed prices to Aave oracle prices:
+
+```bash
+npm run audit:wrapped
+```
+
+Output includes:
+- Ratio feed value (TOKEN/ETH)
+- ETH/USD price
+- Composed USD price
+- Aave oracle price
+- Mismatch percentage
+- Pass/fail verdict (±1% threshold)
+
+#### E2E Repay Sanity Test
+Tests end-to-end repay calculation for a given debt position:
+
+```bash
+npm run test:repay -- --debtAsset=WSTETH --scaledDebt=1000000000000000000 \
+                      --borrowIndex=1050000000000000000000000000 --decimals=18 \
+                      --liquidationBonus=500 --closeFactor=5000
+```
+
+Or using environment variables:
+```bash
+DEBT_ASSET=WSTETH SCALED_DEBT=1e18 npm run test:repay
+```
+
+Validates:
+- Price fetching (ratio composition if needed)
+- Repay amount calculation
+- USD value computation
+- Expected profit calculation
+- Ensures repayUsd > 0 (critical for skip reason logic)
+
+### Metrics
+
+Monitor ratio feed health with Prometheus:
+
+- `liquidbot_price_ratio_composed_total{symbol, source}`: Successful ratio compositions
+- `liquidbot_price_fallback_oracle_total{symbol}`: Fallback to Aave oracle
+- `liquidbot_price_missing_total{symbol, stage}`: Missing price events
+- `liquidbot_price_oracle_chainlink_stale_total{symbol}`: Stale feed detections
+
+### Troubleshooting
+
+**Zero repay amount for wstETH/weETH positions:**
+1. Verify `CHAINLINK_FEEDS` includes both ratio feed and WETH feed
+2. Check `RATIO_PRICE_ENABLED=true`
+3. Run `npm run audit:wrapped` to diagnose pricing issues
+4. Review logs for `ratio_resolution_failed` or `stale_feed` messages
+
+**Price mismatch warnings:**
+- Small deviations (<1%) are normal due to update timing differences
+- Larger gaps may indicate stale feeds or oracle issues
+- Check feed staleness threshold (`PRICE_STALENESS_SEC`)
+
 ## RPC-only Tuning and Stability
 
 When operating in RPC-only mode (USE_SUBGRAPH=false), the real-time HF service relies on WebSocket events and periodic on-chain health checks. The following configuration options help optimize performance, reduce provider pressure, and improve stability under high load.

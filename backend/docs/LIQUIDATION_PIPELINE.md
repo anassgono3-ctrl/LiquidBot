@@ -196,12 +196,15 @@ Every skipped candidate includes a reason code:
 - `cooldown` - User in cooldown period
 - `zero_debt` - User has no debt
 - `below_min_debt_usd` - Debt below threshold
+- `price_missing` - Price unavailable for debt or collateral asset (critical failure)
 - `hf_ok` - Health factor ≥ 1.0
 - `no_valid_assets` - No liquidatable assets
 - `not_profitable` - Net profit < MIN_PROFIT_USD
 - `gas_too_high` - Gas price > ceiling
 - `execution_disabled` - EXECUTE=false
 - `tx_failed` - Transaction failed
+
+**Important**: `price_missing` is distinct from `below_min_debt_usd`. It indicates a critical pricing failure where the asset price could not be fetched from any source (Chainlink, ratio composition, Aave oracle, or stub). This prevents silent zero-value repay calculations.
 
 ### Metrics (Prometheus)
 

@@ -125,6 +125,8 @@ export const config = {
   // Chainlink price feeds
   get chainlinkRpcUrl() { return env.chainlinkRpcUrl; },
   get chainlinkFeeds() { return env.chainlinkFeeds; },
+  get priceStalenessSeconds() { return env.priceStalenessSeconds; },
+  get ratioPriceEnabled() { return env.ratioPriceEnabled; },
 
   // Price-triggered emergency scans
   get priceTriggerEnabled() { return env.priceTriggerEnabled; },
