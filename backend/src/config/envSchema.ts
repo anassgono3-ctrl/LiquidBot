@@ -199,7 +199,10 @@ export const rawEnvSchema = z.object({
   LOW_HF_RECORD_MODE: z.string().optional(),
   LOW_HF_DUMP_ON_SHUTDOWN: z.string().optional(),
   LOW_HF_SUMMARY_INTERVAL_SEC: z.string().optional(),
-  LOW_HF_EXTENDED_ENABLED: z.string().optional()
+  LOW_HF_EXTENDED_ENABLED: z.string().optional(),
+
+  // Liquidation close factor configuration
+  LIQUIDATION_CLOSE_FACTOR: z.string().optional()
 });
 
 export const env = (() => {
@@ -409,6 +412,9 @@ export const env = (() => {
     lowHfRecordMode: (parsed.LOW_HF_RECORD_MODE || 'all') as 'all' | 'min',
     lowHfDumpOnShutdown: (parsed.LOW_HF_DUMP_ON_SHUTDOWN || 'true').toLowerCase() === 'true',
     lowHfSummaryIntervalSec: Number(parsed.LOW_HF_SUMMARY_INTERVAL_SEC || 900),
-    lowHfExtendedEnabled: (parsed.LOW_HF_EXTENDED_ENABLED || 'true').toLowerCase() === 'true'
+    lowHfExtendedEnabled: (parsed.LOW_HF_EXTENDED_ENABLED || 'true').toLowerCase() === 'true',
+    
+    // Liquidation close factor (default 0.5 = 50%)
+    liquidationCloseFactor: Number(parsed.LIQUIDATION_CLOSE_FACTOR || 0.5)
   };
 })();

@@ -222,4 +222,7 @@ export const config = {
   get lowHfDumpOnShutdown() { return env.lowHfDumpOnShutdown; },
   get lowHfSummaryIntervalSec() { return env.lowHfSummaryIntervalSec; },
   get lowHfExtendedEnabled() { return env.lowHfExtendedEnabled; },
+
+  // Liquidation configuration
+  get liquidationCloseFactor() { return env.liquidationCloseFactor; },
 };
