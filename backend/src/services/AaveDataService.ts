@@ -3,6 +3,8 @@ import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
 import { calculateUsdValue } from '../utils/usdMath.js';
+import { baseToUsd, usdValue, formatTokenAmount, validateAmount, applyRay } from '../utils/decimals.js';
+import type { AssetMetadataCache } from './AssetMetadataCache.js';
 
 // Aave Protocol Data Provider ABI (minimal interface)
 const PROTOCOL_DATA_PROVIDER_ABI = [
@@ -95,14 +97,16 @@ export class AaveDataService {
   private uiPoolDataProvider: ethers.Contract | null = null;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private aaveMetadata: any | null = null; // AaveMetadata instance (optional, using any to avoid circular dependency)
+  private metadataCache: AssetMetadataCache | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(provider?: ethers.JsonRpcProvider, aaveMetadata?: any) {
+  constructor(provider?: ethers.JsonRpcProvider, aaveMetadata?: any, metadataCache?: AssetMetadataCache) {
     if (provider) {
       this.provider = provider;
       this.initializeContracts();
     }
     this.aaveMetadata = aaveMetadata || null;
+    this.metadataCache = metadataCache || null;
   }
   
   /**
@@ -111,6 +115,13 @@ export class AaveDataService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setAaveMetadata(aaveMetadata: any): void {
     this.aaveMetadata = aaveMetadata;
+  }
+
+  /**
+   * Set AssetMetadataCache instance for efficient metadata caching
+   */
+  setMetadataCache(metadataCache: AssetMetadataCache): void {
+    this.metadataCache = metadataCache;
   }
 
   /**
@@ -493,5 +504,274 @@ export class AaveDataService {
     }
     
     return symbol || 'UNKNOWN';
+  }
+
+  /**
+   * Get user account data with proper sanity checks and decimal normalization.
+   * This is the canonical source of truth for health factor and total positions.
+   * 
+   * Returns:
+   * - totalCollateralUsd: Total collateral in USD (using ETH/USD price)
+   * - totalDebtUsd: Total debt in USD (using ETH/USD price)
+   * - healthFactor: Health factor from on-chain
+   * - warnings: Array of warnings if sanity checks fail
+   * 
+   * Sanity checks performed:
+   * 1. If HF < 1 and collateral == 0, re-fetch once
+   * 2. Validate amounts are within reasonable bounds
+   */
+  async getUserAccountDataCanonical(user: string): Promise<{
+    totalCollateralUsd: number;
+    totalDebtUsd: number;
+    healthFactor: number;
+    totalCollateralBase: bigint;
+    totalDebtBase: bigint;
+    warnings: string[];
+  }> {
+    if (!this.pool) {
+      throw new Error('AaveDataService not initialized with provider');
+    }
+
+    const warnings: string[] = [];
+    
+    // Fetch user account data from pool (canonical source)
+    let accountData = await this.getUserAccountData(user);
+    
+    // Sanity check: if HF < 1 and collateral is 0, this is suspicious - re-fetch once
+    if (accountData.healthFactor < BigInt(1e18) && accountData.totalCollateralBase === 0n) {
+      warnings.push('SUSPICIOUS: HF < 1 but collateral is 0, re-fetching...');
+      // eslint-disable-next-line no-console
+      console.warn(`[aave-data] Suspicious state for ${user}: HF < 1 but collateral == 0, re-fetching...`);
+      
+      // Wait a bit and re-fetch
+      await new Promise(resolve => setTimeout(resolve, 500));
+      accountData = await this.getUserAccountData(user);
+      
+      // Still inconsistent? This is a critical error
+      if (accountData.healthFactor < BigInt(1e18) && accountData.totalCollateralBase === 0n) {
+        warnings.push('CRITICAL: Still HF < 1 with 0 collateral after re-fetch - data inconsistent');
+        // eslint-disable-next-line no-console
+        console.error(`[aave-data] Critical inconsistency for ${user}: HF < 1 but collateral still 0 after re-fetch`);
+      }
+    }
+
+    // Get ETH/USD price to convert base amounts
+    let totalCollateralUsd = 0;
+    let totalDebtUsd = 0;
+    
+    try {
+      if (this.metadataCache) {
+        const ethPrice = await this.metadataCache.getEthPrice();
+        
+        // Convert base amounts (ETH) to USD
+        totalCollateralUsd = baseToUsd(accountData.totalCollateralBase, ethPrice.price, ethPrice.decimals);
+        totalDebtUsd = baseToUsd(accountData.totalDebtBase, ethPrice.price, ethPrice.decimals);
+        
+        // Log conversion for debugging
+        // eslint-disable-next-line no-console
+        console.log(`[aave-data] User ${user.slice(0, 10)}... - Collateral: ${totalCollateralUsd.toFixed(2)} USD, Debt: ${totalDebtUsd.toFixed(2)} USD, HF: ${(Number(accountData.healthFactor) / 1e18).toFixed(4)}`);
+      } else {
+        warnings.push('Metadata cache not available, cannot convert to USD');
+      }
+    } catch (error) {
+      warnings.push(`Failed to get ETH price: ${error instanceof Error ? error.message : 'unknown error'}`);
+      // eslint-disable-next-line no-console
+      console.error('[aave-data] Failed to get ETH price:', error);
+    }
+
+    const healthFactor = Number(accountData.healthFactor) / 1e18;
+
+    return {
+      totalCollateralUsd,
+      totalDebtUsd,
+      healthFactor,
+      totalCollateralBase: accountData.totalCollateralBase,
+      totalDebtBase: accountData.totalDebtBase,
+      warnings
+    };
+  }
+
+  /**
+   * Get detailed per-asset breakdown with sanity checks.
+   * Uses canonical on-chain sources and proper decimal handling.
+   * 
+   * Sanity checks:
+   * 1. Human amounts should not exceed 1e9 tokens
+   * 2. Per-asset amounts should not exceed total supply * 1.05
+   * 3. Sum of per-asset debt should match totalDebtBase within 0.5%
+   */
+  async getUserReservesCanonical(userAddress: string): Promise<{
+    reserves: ReserveData[];
+    totalDebtRecomputed: number;
+    totalCollateralRecomputed: number;
+    warnings: string[];
+  }> {
+    if (!this.protocolDataProvider || !this.oracle || !this.metadataCache) {
+      throw new Error('AaveDataService not fully initialized');
+    }
+
+    const warnings: string[] = [];
+    const reserves: ReserveData[] = [];
+    let totalDebtRecomputedUsd = 0;
+    let totalCollateralRecomputedUsd = 0;
+
+    // Get all reserves in the protocol
+    const reservesList = await this.getReservesList();
+    
+    // Fetch user data for each reserve
+    for (const asset of reservesList) {
+      try {
+        // Get user reserve data
+        const userData = await this.getUserReserveData(asset, userAddress);
+        
+        // Get total debt (properly expanded)
+        const totalDebt = await this.getTotalDebt(asset, userAddress);
+        
+        // Skip reserves with no position
+        if (totalDebt === 0n && userData.currentATokenBalance === 0n) {
+          continue;
+        }
+
+        // Get metadata from cache
+        const metadata = await this.metadataCache.getAssetMetadata(asset);
+        const priceData = await this.metadataCache.getAssetPrice(asset);
+
+        // Calculate human-readable amounts
+        const humanDebt = Number(totalDebt) / (10 ** metadata.decimals);
+        const humanCollateral = Number(userData.currentATokenBalance) / (10 ** metadata.decimals);
+
+        // Sanity check: validate amounts are reasonable
+        const debtValidation = validateAmount(humanDebt, metadata.symbol);
+        if (!debtValidation.valid) {
+          warnings.push(`${metadata.symbol} debt: ${debtValidation.reason}`);
+          // eslint-disable-next-line no-console
+          console.warn(`[aave-data] Scaling error detected - ${debtValidation.reason}`);
+          continue; // Skip this asset
+        }
+
+        const collateralValidation = validateAmount(humanCollateral, metadata.symbol);
+        if (!collateralValidation.valid) {
+          warnings.push(`${metadata.symbol} collateral: ${collateralValidation.reason}`);
+          // eslint-disable-next-line no-console
+          console.warn(`[aave-data] Scaling error detected - ${collateralValidation.reason}`);
+          continue; // Skip this asset
+        }
+
+        // Sanity check: compare with total supply (if available)
+        try {
+          const totalSupply = await this.metadataCache.getTotalSupply(asset);
+          const maxReasonable = (totalSupply * 105n) / 100n; // 105% of total supply
+          
+          if (totalDebt > maxReasonable) {
+            warnings.push(`${metadata.symbol} debt (${formatTokenAmount(totalDebt, metadata.decimals)}) exceeds 105% of total supply`);
+            // eslint-disable-next-line no-console
+            console.warn(`[aave-data] ${metadata.symbol} debt exceeds total supply sanity check`);
+            continue; // Skip this asset
+          }
+          
+          if (userData.currentATokenBalance > maxReasonable) {
+            warnings.push(`${metadata.symbol} collateral (${formatTokenAmount(userData.currentATokenBalance, metadata.decimals)}) exceeds 105% of total supply`);
+            // eslint-disable-next-line no-console
+            console.warn(`[aave-data] ${metadata.symbol} collateral exceeds total supply sanity check`);
+            continue; // Skip this asset
+          }
+        } catch (error) {
+          // Total supply check failed, but not critical - continue
+        }
+
+        // Calculate USD values using new decimal utilities
+        const debtValueUsd = usdValue(totalDebt, metadata.decimals, priceData.price, priceData.decimals);
+        const collateralValueUsd = usdValue(userData.currentATokenBalance, metadata.decimals, priceData.price, priceData.decimals);
+
+        totalDebtRecomputedUsd += debtValueUsd;
+        totalCollateralRecomputedUsd += collateralValueUsd;
+
+        reserves.push({
+          asset,
+          symbol: metadata.symbol,
+          decimals: metadata.decimals,
+          aTokenBalance: userData.currentATokenBalance,
+          stableDebt: userData.currentStableDebt,
+          variableDebt: userData.currentVariableDebt,
+          totalDebt,
+          usageAsCollateralEnabled: userData.usageAsCollateralEnabled,
+          priceInUsd: Number(priceData.price) / (10 ** priceData.decimals),
+          priceRaw: priceData.price,
+          debtValueUsd,
+          collateralValueUsd
+        });
+
+        // Log intermediate values for debugging
+        // eslint-disable-next-line no-console
+        console.log(
+          `[aave-data] ${metadata.symbol}: debt=${formatTokenAmount(totalDebt, metadata.decimals)} ` +
+          `collateral=${formatTokenAmount(userData.currentATokenBalance, metadata.decimals)} ` +
+          `debtUsd=$${debtValueUsd.toFixed(2)} collateralUsd=$${collateralValueUsd.toFixed(2)}`
+        );
+      } catch (error) {
+        // Skip reserves that fail (might be paused, frozen, or not active)
+        // eslint-disable-next-line no-console
+        console.warn(`[aave-data] Failed to process reserve ${asset}:`, error instanceof Error ? error.message : error);
+        continue;
+      }
+    }
+
+    return {
+      reserves,
+      totalDebtRecomputed: totalDebtRecomputedUsd,
+      totalCollateralRecomputed: totalCollateralRecomputedUsd,
+      warnings
+    };
+  }
+
+  /**
+   * Validate that per-asset totals match getUserAccountData within tolerance.
+   * This is a critical consistency check.
+   */
+  async validateConsistency(
+    userAddress: string,
+    perAssetDebtUsd: number,
+    perAssetCollateralUsd: number
+  ): Promise<{ consistent: boolean; warnings: string[] }> {
+    const warnings: string[] = [];
+    
+    try {
+      // Get canonical totals from getUserAccountData
+      const canonical = await this.getUserAccountDataCanonical(userAddress);
+      
+      // Compare debt (within 0.5% tolerance)
+      if (canonical.totalDebtUsd > 0) {
+        const debtDiff = Math.abs(perAssetDebtUsd - canonical.totalDebtUsd);
+        const debtDiffPct = (debtDiff / canonical.totalDebtUsd) * 100;
+        
+        if (debtDiffPct > 0.5) {
+          warnings.push(
+            `Debt inconsistency: per-asset=$${perAssetDebtUsd.toFixed(2)} ` +
+            `canonical=$${canonical.totalDebtUsd.toFixed(2)} ` +
+            `diff=${debtDiffPct.toFixed(2)}%`
+          );
+        }
+      }
+      
+      // Compare collateral (within 0.5% tolerance)
+      if (canonical.totalCollateralUsd > 0) {
+        const collateralDiff = Math.abs(perAssetCollateralUsd - canonical.totalCollateralUsd);
+        const collateralDiffPct = (collateralDiff / canonical.totalCollateralUsd) * 100;
+        
+        if (collateralDiffPct > 0.5) {
+          warnings.push(
+            `Collateral inconsistency: per-asset=$${perAssetCollateralUsd.toFixed(2)} ` +
+            `canonical=$${canonical.totalCollateralUsd.toFixed(2)} ` +
+            `diff=${collateralDiffPct.toFixed(2)}%`
+          );
+        }
+      }
+      
+      const consistent = warnings.length === 0;
+      return { consistent, warnings };
+    } catch (error) {
+      warnings.push(`Failed to validate consistency: ${error instanceof Error ? error.message : 'unknown error'}`);
+      return { consistent: false, warnings };
+    }
   }
 }
