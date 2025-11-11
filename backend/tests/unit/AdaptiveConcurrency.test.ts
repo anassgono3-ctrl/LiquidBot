@@ -40,7 +40,6 @@ describe('Adaptive Event Concurrency', () => {
 
     it('should scale down when no backlog and head latency approaching target', () => {
       const minLevel = 1;
-      const maxLevel = 6;
       const headTargetMs = 900;
       const recentHeadLatency = 800; // 0.8 * 900 = 720, this is > 0.8 threshold
       const recentSkips = 0;
