@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { isZero } from '../../src/utils/bigint.js';
 
 describe('Zero-Debt Pruning', () => {
   describe('Candidate filtering logic', () => {
@@ -11,7 +12,7 @@ describe('Zero-Debt Pruning', () => {
       ];
       
       // Filter out zero debt users
-      const filtered = candidates.filter(c => c.totalDebtBase !== 0n);
+      const filtered = candidates.filter(c => !isZero(c.totalDebtBase));
       
       expect(filtered.length).toBe(2);
       expect(filtered.find(c => c.userAddress === '0xuser2')).toBeUndefined();
@@ -36,21 +37,21 @@ describe('Zero-Debt Pruning', () => {
 
   describe('Health Factor normalization', () => {
     it('should represent HF as Infinity for zero debt', () => {
-      const totalDebtBase = 0n;
+      const totalDebtBase: bigint = 0n;
       const healthFactor = Infinity;
       
       // Format HF display
-      const hfDisplay = totalDebtBase === 0n ? '∞' : healthFactor.toFixed(4);
+      const hfDisplay = isZero(totalDebtBase) ? '∞' : healthFactor.toFixed(4);
       
       expect(hfDisplay).toBe('∞');
     });
 
     it('should display numeric HF for users with debt', () => {
-      const totalDebtBase = 1000000000n;
+      const totalDebtBase: bigint = 1000000000n;
       const healthFactor = 0.9876;
       
       // Format HF display
-      const hfDisplay = totalDebtBase === 0n ? '∞' : healthFactor.toFixed(4);
+      const hfDisplay = isZero(totalDebtBase) ? '∞' : healthFactor.toFixed(4);
       
       expect(hfDisplay).toBe('0.9876');
     });
@@ -64,7 +65,7 @@ describe('Zero-Debt Pruning', () => {
       ];
       
       // Calculate minHF excluding zero-debt users
-      const withDebt = candidates.filter(c => c.totalDebtBase > 0n);
+      const withDebt = candidates.filter(c => !isZero(c.totalDebtBase));
       const minHF = Math.min(...withDebt.map(c => c.healthFactor));
       
       expect(minHF).toBe(0.95);
@@ -86,7 +87,7 @@ describe('Zero-Debt Pruning', () => {
       ];
       
       for (const candidate of candidates) {
-        if (candidate.totalDebtBase === 0n) {
+        if (isZero(candidate.totalDebtBase)) {
           zeroDebtCount++;
         } else if (candidate.totalDebtUsd < MIN_DEBT_USD) {
           tinyDebtCount++;

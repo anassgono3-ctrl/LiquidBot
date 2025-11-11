@@ -4,6 +4,7 @@
 import { JsonRpcProvider, Contract, Interface } from 'ethers';
 
 import { config } from '../config/index.js';
+import { isZero } from '../utils/bigint.js';
 
 const MULTICALL3_ABI = [
   'function aggregate3(tuple(address target, bool allowFailure, bytes callData)[] calls) external payable returns (tuple(bool success, bytes returnData)[] returnData)'
@@ -85,7 +86,7 @@ export class SameBlockVerifier {
       const healthFactor = decoded.healthFactor;
       
       // Check for zero debt
-      if (totalDebtBase === 0n) {
+      if (isZero(totalDebtBase)) {
         return {
           success: false,
           healthFactor,
@@ -161,7 +162,7 @@ export class SameBlockVerifier {
           const ltv = decoded.ltv;
           
           // Check for zero debt
-          if (totalDebtBase === 0n) {
+          if (isZero(totalDebtBase)) {
             return {
               success: false,
               healthFactor,

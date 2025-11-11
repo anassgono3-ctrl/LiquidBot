@@ -3,6 +3,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 import { ExecutionService } from '../../src/services/ExecutionService.js';
 import type { Opportunity } from '../../src/types/index.js';
+import { isZero } from '../../src/utils/bigint.js';
 
 // Mock environment variables
 const originalEnv = process.env;
@@ -138,28 +139,28 @@ describe('Execution Guards', () => {
 
   describe('Health factor formatting', () => {
     it('should display HF as "INF" when debt is zero', () => {
-      const totalDebtBase = 0n;
+      const totalDebtBase: bigint = 0n;
       const healthFactor = BigInt(2e18); // Max HF
       
-      const hfFormatted = totalDebtBase === 0n ? 'INF' : (Number(healthFactor) / 1e18).toFixed(4);
+      const hfFormatted = isZero(totalDebtBase) ? 'INF' : (Number(healthFactor) / 1e18).toFixed(4);
       
       expect(hfFormatted).toBe('INF');
     });
 
     it('should display HF as numeric when debt is non-zero', () => {
-      const totalDebtBase = BigInt(1e18);
+      const totalDebtBase: bigint = BigInt(1e18);
       const healthFactor = BigInt(95e16); // 0.95
       
-      const hfFormatted = totalDebtBase === 0n ? 'INF' : (Number(healthFactor) / 1e18).toFixed(4);
+      const hfFormatted = isZero(totalDebtBase) ? 'INF' : (Number(healthFactor) / 1e18).toFixed(4);
       
       expect(hfFormatted).toBe('0.9500');
     });
 
     it('should display HF below 1 correctly', () => {
-      const totalDebtBase = BigInt(1e18);
+      const totalDebtBase: bigint = BigInt(1e18);
       const healthFactor = BigInt(85e16); // 0.85
       
-      const hfFormatted = totalDebtBase === 0n ? 'INF' : (Number(healthFactor) / 1e18).toFixed(4);
+      const hfFormatted = isZero(totalDebtBase) ? 'INF' : (Number(healthFactor) / 1e18).toFixed(4);
       
       expect(hfFormatted).toBe('0.8500');
     });
