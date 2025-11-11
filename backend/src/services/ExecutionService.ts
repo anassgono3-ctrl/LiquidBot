@@ -1025,12 +1025,34 @@ export class ExecutionService {
       debtToCover = totalDebt / 2n;
     }
     
-    // Estimate USD value for metrics
-    if (opportunity.principalValueUsd && opportunity.principalAmountRaw) {
-      const principalRaw = BigInt(opportunity.principalAmountRaw);
-      if (principalRaw > 0n) {
-        debtToCoverUsd = (opportunity.principalValueUsd * Number(debtToCover)) / Number(principalRaw);
+    // Calculate USD value using canonical USD math (no proportional estimation)
+    // This ensures consistency with plan resolution and gating logic
+    try {
+      const debtDecimals = opportunity.principalReserve.decimals || 18;
+      
+      if (!this.aaveDataService) {
+        throw new Error('AaveDataService not initialized');
       }
+      
+      const debtPriceRaw = await this.aaveDataService.getAssetPrice(debtAsset);
+      
+      // Use canonical calculateUsdValue for precise USD computation
+      debtToCoverUsd = calculateUsdValue(debtToCover, debtDecimals, debtPriceRaw);
+      
+      // Debug: compute quick USD for consistency check
+      const quickUsd = (Number(debtToCover) / (10 ** debtDecimals)) * (Number(debtPriceRaw) / 1e8);
+      
+      // eslint-disable-next-line no-console
+      console.log('[execution] USD calculation:', {
+        debtToCover: debtToCover.toString(),
+        canonicalUsd: debtToCoverUsd.toFixed(6),
+        quickUsd: quickUsd.toFixed(6),
+        diff: Math.abs(debtToCoverUsd - quickUsd).toFixed(6)
+      });
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.warn('[execution] Failed to calculate USD value, using zero:', error instanceof Error ? error.message : error);
+      debtToCoverUsd = 0;
     }
     
     // Update metrics
