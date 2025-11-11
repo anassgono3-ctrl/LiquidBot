@@ -93,8 +93,10 @@ export class AaveDataService {
   private oracle: ethers.Contract | null = null;
   private pool: ethers.Contract | null = null;
   private uiPoolDataProvider: ethers.Contract | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private aaveMetadata: any | null = null; // AaveMetadata instance (optional, using any to avoid circular dependency)
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(provider?: ethers.JsonRpcProvider, aaveMetadata?: any) {
     if (provider) {
       this.provider = provider;
@@ -106,6 +108,7 @@ export class AaveDataService {
   /**
    * Set AaveMetadata instance for symbol resolution
    */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setAaveMetadata(aaveMetadata: any): void {
     this.aaveMetadata = aaveMetadata;
   }
@@ -262,12 +265,8 @@ export class AaveDataService {
         const RAY = BigInt(10 ** 27);
         principalVariableDebt = (userData.scaledVariableDebt * variableBorrowIndex) / RAY;
         
-        // If currentVariableDebt is also provided and differs significantly,
-        // prefer the expanded value as it's more accurate
-        if (userData.currentVariableDebt > 0n) {
-          // Use the expanded value as it accounts for accrued interest
-          principalVariableDebt = principalVariableDebt;
-        }
+        // Note: If currentVariableDebt is also provided, we prefer the expanded value
+        // as it accounts for accrued interest more accurately
       } catch (error) {
         // Fallback to currentVariableDebt if reserve data fetch fails
         principalVariableDebt = userData.currentVariableDebt;

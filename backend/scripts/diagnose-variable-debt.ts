@@ -15,7 +15,6 @@
 import dotenv from 'dotenv';
 import { ethers } from 'ethers';
 
-import { config } from '../src/config/index.js';
 import { AaveDataService } from '../src/services/AaveDataService.js';
 import { AaveMetadata } from '../src/aave/AaveMetadata.js';
 import { calculateUsdValue } from '../src/utils/usdMath.js';
