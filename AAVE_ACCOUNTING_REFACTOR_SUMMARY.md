@@ -226,3 +226,82 @@ This refactor provides:
 6. ✅ **Complete documentation**: Integration guides and troubleshooting
 
 All changes are minimal, surgical, backward-compatible, and thoroughly tested. The pipeline now correctly handles all decimal conversions and prevents the scaling errors that were causing impossible liquidation alerts.
+
+## Follow-Up Guard Behaviors (Post PR #93)
+
+### Execution Service Guards
+
+Additional pre-execution safety checks implemented in `ExecutionService.ts`:
+
+#### 1. Dust Position Guard
+- **Threshold**: Configurable via `EXECUTION_DUST_WEI` (default: 1e12 wei)
+- **Logic**: If `HF < 1` but `totalCollateralBase < dust_threshold`, abort execution
+- **Reason**: Micro dust positions with HF<1 are suspicious and not actionable
+- **Exit**: Returns `dust_position_not_actionable`
+
+#### 2. Zero Collateral Guard
+- **Logic**: If `collateralUsd == 0` while `HF < 1`, abort execution
+- **Reason**: Indicates likely data inconsistency or scaling issue
+- **Exit**: Returns `zero_collateral_hf_below_one`
+
+#### 3. Scaling Suspected Guard
+- **Logic**: If `debtToCoverHuman > 1e9` tokens, throw error in `calculateDebtToCover`
+- **Reason**: Prevents execution with impossibly large debt amounts (previous threshold was warning at 1e6)
+- **Exit**: Throws `Error('Scaling error suspected: debt amount exceeds 1e9 tokens')`
+- **Result**: No "REAL execution starting" log after scaling error detection
+
+#### 4. Reason for HF<1 Logging
+- **When**: If `HF < 1` and position passes guards
+- **Log**: `[execution] Reason for HF<1: collateralUSD=$X.XXXXXX, debtUSD=$Y.YYYYYY`
+- **Purpose**: Explicit context for actionable liquidations
+
+### Validator Script Enhancements
+
+Extended `validate-aave-scaling.ts` with:
+
+#### Multi-User Support
+```bash
+# Multiple users via repeated flag
+tsx scripts/validate-aave-scaling.ts --rpc <URL> --user 0x... --user 0x...
+
+# Multiple users via comma-separated list
+tsx scripts/validate-aave-scaling.ts --rpc <URL> --users 0x...,0x...
+```
+
+#### Adaptive Precision
+- USD values < $0.01: 6 decimal places
+- USD values >= $0.01: 2 decimal places
+- Prevents tiny amounts from displaying as $0.00
+
+#### Dust Handling
+- **Environment**: `VALIDATOR_DUST_WEI` (default: 1e12 wei)
+- **Behavior**: Assets below threshold tagged with "(dust)"
+- **Exit Code**: Non-zero only for real inconsistencies (not dust)
+
+#### Zero/Zero Consistency
+- **Old**: Division-by-zero when both canonical and recomputed are 0 → 100% diff → FAIL
+- **New**: Treats zero == zero as PASS
+
+#### Infinite Health Factor
+- **Old**: Displayed as `1.157920892373162e+59` (Aave's max uint)
+- **New**: Displayed as `INF` when debt == 0
+
+#### Raw Values
+- **Flag**: `--raw`
+- **Output**: Shows underlying bigint wei values for debugging
+
+#### Smallest Values Summary
+- Reports smallest non-zero debt and collateral detected
+- Helps identify dust thresholds and precision issues
+
+### Canonical Debt Retrieval
+
+The variable debt reconstruction already uses the canonical method:
+```typescript
+principalVariableDebt = scaledVariableDebt * variableBorrowIndex / RAY
+```
+
+This approach is used throughout:
+- `AaveDataService.getTotalDebt()` (existing implementation)
+- Validator script (uses `applyRay()` helper)
+- No old variable debt logic remains in execution path

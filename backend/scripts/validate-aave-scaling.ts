@@ -19,16 +19,20 @@ import { applyRay, usdValue, formatTokenAmount, baseToUsd, validateAmount } from
 // Parse command line arguments
 function parseArgs() {
   const args = process.argv.slice(2);
-  const result: { rpc?: string; user?: string } = {};
+  const result: { rpc?: string; users: string[]; raw?: boolean } = { users: [] };
   
-  for (let i = 0; i < args.length; i += 2) {
-    const key = args[i];
-    const value = args[i + 1];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     
-    if (key === '--rpc') {
-      result.rpc = value;
-    } else if (key === '--user') {
-      result.user = value;
+    if (arg === '--rpc' && i + 1 < args.length) {
+      result.rpc = args[++i];
+    } else if ((arg === '--user' || arg === '--users') && i + 1 < args.length) {
+      const value = args[++i];
+      // Support comma-separated addresses
+      const addresses = value.split(',').map(addr => addr.trim()).filter(addr => addr.length > 0);
+      result.users.push(...addresses);
+    } else if (arg === '--raw') {
+      result.raw = true;
     }
   }
   
@@ -81,45 +85,59 @@ const BASE_ADDRESSES = {
   ethUsdFeed: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70' // Chainlink ETH/USD on Base
 };
 
-async function main() {
-  const args = parseArgs();
-  
-  if (!args.rpc || !args.user) {
-    console.error('Usage: tsx scripts/validate-aave-scaling.ts --rpc <RPC_URL> --user <USER_ADDRESS>');
-    process.exit(1);
+// Get dust threshold from environment or use default
+const DUST_THRESHOLD_WEI = BigInt(process.env.VALIDATOR_DUST_WEI || '1000000000000'); // 1e12 wei by default
+
+// Format USD value with adaptive precision
+function formatUsdAdaptive(value: number): string {
+  if (value < 0.01) {
+    return value.toFixed(6);
   }
-  
+  return value.toFixed(2);
+}
+
+// Format ETH base amount without scientific notation
+function formatEthBase(value: bigint): string {
+  const valueStr = ethers.formatEther(value);
+  // Trim trailing zeros but keep at least one decimal place
+  return parseFloat(valueStr).toString();
+}
+
+async function validateUser(
+  userAddress: string,
+  pool: ethers.Contract,
+  protocolDataProvider: ethers.Contract,
+  oracle: ethers.Contract,
+  uiPoolDataProvider: ethers.Contract,
+  ethUsdFeed: ethers.Contract,
+  showRaw: boolean
+): Promise<{ success: boolean; realIssue: boolean }> {
   console.log('='.repeat(80));
-  console.log('Aave V3 Accounting Pipeline Validation');
+  console.log(`Validating User: ${userAddress}`);
   console.log('='.repeat(80));
-  console.log(`RPC URL: ${args.rpc}`);
-  console.log(`User Address: ${args.user}`);
   console.log('');
-  
-  // Initialize provider and contracts
-  const provider = new ethers.JsonRpcProvider(args.rpc);
-  const pool = new ethers.Contract(BASE_ADDRESSES.pool, POOL_ABI, provider);
-  const protocolDataProvider = new ethers.Contract(BASE_ADDRESSES.protocolDataProvider, PROTOCOL_DATA_PROVIDER_ABI, provider);
-  const oracle = new ethers.Contract(BASE_ADDRESSES.oracle, ORACLE_ABI, provider);
-  const uiPoolDataProvider = new ethers.Contract(BASE_ADDRESSES.uiPoolDataProvider, UI_POOL_DATA_PROVIDER_ABI, provider);
-  const ethUsdFeed = new ethers.Contract(BASE_ADDRESSES.ethUsdFeed, CHAINLINK_AGGREGATOR_ABI, provider);
   
   try {
     // Step 1: Get canonical user account data
     console.log('Step 1: Fetching canonical user account data...');
     console.log('-'.repeat(80));
     
-    const accountData = await pool.getUserAccountData(args.user);
+    const accountData = await pool.getUserAccountData(userAddress);
     const totalCollateralBase = accountData[0];
     const totalDebtBase = accountData[1];
-    // const availableBorrowsBase = accountData[2];
-    // const currentLiquidationThreshold = accountData[3];
-    // const ltv = accountData[4];
     const healthFactor = accountData[5];
     
-    console.log(`Total Collateral Base (ETH): ${ethers.formatEther(totalCollateralBase)} ETH`);
-    console.log(`Total Debt Base (ETH):       ${ethers.formatEther(totalDebtBase)} ETH`);
-    console.log(`Health Factor:               ${(Number(healthFactor) / 1e18).toFixed(6)}`);
+    console.log(`Total Collateral Base (ETH): ${formatEthBase(totalCollateralBase)} ETH`);
+    console.log(`Total Debt Base (ETH):       ${formatEthBase(totalDebtBase)} ETH`);
+    
+    // Display health factor as "INF" when debt == 0
+    let hfDisplay: string;
+    if (totalDebtBase === 0n) {
+      hfDisplay = 'INF';
+    } else {
+      hfDisplay = (Number(healthFactor) / 1e18).toFixed(6);
+    }
+    console.log(`Health Factor:               ${hfDisplay}`);
     console.log('');
     
     // Step 2: Get ETH/USD price
@@ -141,8 +159,14 @@ async function main() {
     const totalCollateralUsd = baseToUsd(totalCollateralBase, ethPrice, ethPriceDecimals);
     const totalDebtUsd = baseToUsd(totalDebtBase, ethPrice, ethPriceDecimals);
     
-    console.log(`Total Collateral USD: $${totalCollateralUsd.toFixed(2)}`);
-    console.log(`Total Debt USD:       $${totalDebtUsd.toFixed(2)}`);
+    console.log(`Total Collateral USD: $${formatUsdAdaptive(totalCollateralUsd)}`);
+    console.log(`Total Debt USD:       $${formatUsdAdaptive(totalDebtUsd)}`);
+    
+    // Add reason for HF < 1 if applicable
+    if (healthFactor < BigInt(1e18) && totalDebtBase > 0n) {
+      console.log('');
+      console.log(`⚠️  Reason for HF<1: collateralUSD=$${formatUsdAdaptive(totalCollateralUsd)}, debtUSD=$${formatUsdAdaptive(totalDebtUsd)}`);
+    }
     console.log('');
     
     // Step 4: Get all reserves and validate per-asset breakdown
@@ -153,10 +177,10 @@ async function main() {
     console.log(`Found ${reserves.length} reserves`);
     console.log('');
     
-    // let totalDebtRecomputed = 0n;
-    // let totalCollateralRecomputed = 0n;
     let totalDebtRecomputedUsd = 0;
     let totalCollateralRecomputedUsd = 0;
+    let smallestNonZeroDebt = Number.POSITIVE_INFINITY;
+    let smallestNonZeroCollateral = Number.POSITIVE_INFINITY;
     const validatedAssets: Array<{
       symbol: string;
       debt: string;
@@ -164,29 +188,35 @@ async function main() {
       debtUsd: number;
       collateralUsd: number;
       warnings: string[];
+      isDust: boolean;
+      rawDebt?: bigint;
+      rawCollateral?: bigint;
     }> = [];
     
     for (const asset of reserves) {
       try {
         // Get asset metadata
-        const token = new ethers.Contract(asset, ERC20_ABI, provider);
+        const token = new ethers.Contract(asset, ERC20_ABI, pool.runner);
         const symbol = await token.symbol();
         const decimals = Number(await token.decimals());
         const totalSupply = await token.totalSupply();
         
         // Get user reserve data
-        const userData = await protocolDataProvider.getUserReserveData(asset, args.user);
+        const userData = await protocolDataProvider.getUserReserveData(asset, userAddress);
         const aTokenBalance = userData[0];
         const currentStableDebt = userData[1];
         const currentVariableDebt = userData[2];
         const scaledVariableDebt = userData[4];
         
-        // Skip if no position
-        if (aTokenBalance === 0n && currentStableDebt === 0n && currentVariableDebt === 0n) {
+        // Check if position exists (include any non-zero raw values)
+        const hasPosition = aTokenBalance > 0n || currentStableDebt > 0n || currentVariableDebt > 0n || scaledVariableDebt > 0n;
+        
+        if (!hasPosition) {
           continue;
         }
         
         const warnings: string[] = [];
+        let isDust = false;
         
         // Get reserve data for borrow index
         const reserveData = await pool.getReserveData(asset);
@@ -240,19 +270,48 @@ async function main() {
         const debtUsd = usdValue(totalDebt, decimals, price, 8);
         const collateralUsd = usdValue(aTokenBalance, decimals, price, 8);
         
-        // totalDebtRecomputed += totalDebt;
-        // totalCollateralRecomputed += aTokenBalance;
+        // Check dust threshold
+        if (totalDebt < DUST_THRESHOLD_WEI && aTokenBalance < DUST_THRESHOLD_WEI) {
+          isDust = true;
+        }
+        
+        // Track smallest non-zero values
+        if (debtUsd > 0 && debtUsd < smallestNonZeroDebt) {
+          smallestNonZeroDebt = debtUsd;
+        }
+        if (collateralUsd > 0 && collateralUsd < smallestNonZeroCollateral) {
+          smallestNonZeroCollateral = collateralUsd;
+        }
+        
         totalDebtRecomputedUsd += debtUsd;
         totalCollateralRecomputedUsd += collateralUsd;
         
-        validatedAssets.push({
+        const assetInfo: {
+          symbol: string;
+          debt: string;
+          collateral: string;
+          debtUsd: number;
+          collateralUsd: number;
+          warnings: string[];
+          isDust: boolean;
+          rawDebt?: bigint;
+          rawCollateral?: bigint;
+        } = {
           symbol,
           debt: formatTokenAmount(totalDebt, decimals),
           collateral: formatTokenAmount(aTokenBalance, decimals),
           debtUsd,
           collateralUsd,
-          warnings
-        });
+          warnings,
+          isDust
+        };
+        
+        if (showRaw) {
+          assetInfo.rawDebt = totalDebt;
+          assetInfo.rawCollateral = aTokenBalance;
+        }
+        
+        validatedAssets.push(assetInfo);
         
       } catch (error) {
         // Skip assets that error
@@ -264,9 +323,14 @@ async function main() {
     console.log('Per-Asset Breakdown:');
     console.log('');
     for (const asset of validatedAssets) {
-      console.log(`${asset.symbol}:`);
-      console.log(`  Debt:       ${asset.debt} ($${asset.debtUsd.toFixed(2)})`);
-      console.log(`  Collateral: ${asset.collateral} ($${asset.collateralUsd.toFixed(2)})`);
+      const dustTag = asset.isDust ? ' (dust)' : '';
+      console.log(`${asset.symbol}${dustTag}:`);
+      console.log(`  Debt:       ${asset.debt} ($${formatUsdAdaptive(asset.debtUsd)})`);
+      console.log(`  Collateral: ${asset.collateral} ($${formatUsdAdaptive(asset.collateralUsd)})`);
+      if (showRaw) {
+        console.log(`  Raw Debt:       ${asset.rawDebt?.toString() || '0'} wei`);
+        console.log(`  Raw Collateral: ${asset.rawCollateral?.toString() || '0'} wei`);
+      }
       if (asset.warnings.length > 0) {
         console.log(`  ⚠️  Warnings:`);
         for (const warning of asset.warnings) {
@@ -278,35 +342,75 @@ async function main() {
       console.log('');
     }
     
+    // Summary line for smallest non-zero values
+    if (smallestNonZeroDebt !== Number.POSITIVE_INFINITY || smallestNonZeroCollateral !== Number.POSITIVE_INFINITY) {
+      console.log('Smallest Non-Zero Values:');
+      if (smallestNonZeroDebt !== Number.POSITIVE_INFINITY) {
+        console.log(`  Debt:       $${formatUsdAdaptive(smallestNonZeroDebt)}`);
+      }
+      if (smallestNonZeroCollateral !== Number.POSITIVE_INFINITY) {
+        console.log(`  Collateral: $${formatUsdAdaptive(smallestNonZeroCollateral)}`);
+      }
+      console.log('');
+    }
+    
     // Step 5: Validate consistency
     console.log('Step 5: Consistency Check');
     console.log('-'.repeat(80));
     
-    console.log(`Canonical Total Debt (USD):       $${totalDebtUsd.toFixed(2)}`);
-    console.log(`Recomputed Total Debt (USD):      $${totalDebtRecomputedUsd.toFixed(2)}`);
+    console.log(`Canonical Total Debt (USD):       $${formatUsdAdaptive(totalDebtUsd)}`);
+    console.log(`Recomputed Total Debt (USD):      $${formatUsdAdaptive(totalDebtRecomputedUsd)}`);
     
     const debtDiff = Math.abs(totalDebtUsd - totalDebtRecomputedUsd);
-    const debtDiffPct = totalDebtUsd > 0 ? (debtDiff / totalDebtUsd) * 100 : 0;
-    console.log(`Debt Difference:                  $${debtDiff.toFixed(2)} (${debtDiffPct.toFixed(2)}%)`);
+    let debtDiffPct: number;
+    let debtCheckPassed = false;
     
-    if (debtDiffPct > 0.5) {
-      console.log(`⚠️  WARNING: Debt difference exceeds 0.5% tolerance`);
+    // Handle zero/zero case properly
+    if (totalDebtUsd === 0 && totalDebtRecomputedUsd === 0) {
+      debtDiffPct = 0;
+      debtCheckPassed = true;
+    } else if (totalDebtUsd > 0) {
+      debtDiffPct = (debtDiff / totalDebtUsd) * 100;
+      debtCheckPassed = debtDiffPct <= 0.5;
     } else {
+      debtDiffPct = 100;
+      debtCheckPassed = false;
+    }
+    
+    console.log(`Debt Difference:                  $${formatUsdAdaptive(debtDiff)} (${debtDiffPct.toFixed(2)}%)`);
+    
+    if (debtCheckPassed) {
       console.log(`✓ Debt consistency check passed`);
+    } else {
+      console.log(`⚠️  WARNING: Debt difference exceeds 0.5% tolerance`);
     }
     console.log('');
     
-    console.log(`Canonical Total Collateral (USD): $${totalCollateralUsd.toFixed(2)}`);
-    console.log(`Recomputed Total Collateral (USD):$${totalCollateralRecomputedUsd.toFixed(2)}`);
+    console.log(`Canonical Total Collateral (USD): $${formatUsdAdaptive(totalCollateralUsd)}`);
+    console.log(`Recomputed Total Collateral (USD):$${formatUsdAdaptive(totalCollateralRecomputedUsd)}`);
     
     const collateralDiff = Math.abs(totalCollateralUsd - totalCollateralRecomputedUsd);
-    const collateralDiffPct = totalCollateralUsd > 0 ? (collateralDiff / totalCollateralUsd) * 100 : 0;
-    console.log(`Collateral Difference:            $${collateralDiff.toFixed(2)} (${collateralDiffPct.toFixed(2)}%)`);
+    let collateralDiffPct: number;
+    let collateralCheckPassed = false;
     
-    if (collateralDiffPct > 0.5) {
-      console.log(`⚠️  WARNING: Collateral difference exceeds 0.5% tolerance`);
+    // Handle zero/zero case properly
+    if (totalCollateralUsd === 0 && totalCollateralRecomputedUsd === 0) {
+      collateralDiffPct = 0;
+      collateralCheckPassed = true;
+    } else if (totalCollateralUsd > 0) {
+      collateralDiffPct = (collateralDiff / totalCollateralUsd) * 100;
+      collateralCheckPassed = collateralDiffPct <= 0.5;
     } else {
+      collateralDiffPct = 100;
+      collateralCheckPassed = false;
+    }
+    
+    console.log(`Collateral Difference:            $${formatUsdAdaptive(collateralDiff)} (${collateralDiffPct.toFixed(2)}%)`);
+    
+    if (collateralCheckPassed) {
       console.log(`✓ Collateral consistency check passed`);
+    } else {
+      console.log(`⚠️  WARNING: Collateral difference exceeds 0.5% tolerance`);
     }
     console.log('');
     
@@ -321,21 +425,97 @@ async function main() {
     console.log(`Assets Validated:     ${validatedAssets.length}`);
     console.log(`Assets with Issues:   ${assetsWithIssues}`);
     console.log(`Total Warnings:       ${totalWarnings}`);
-    console.log(`Debt Consistency:     ${debtDiffPct <= 0.5 ? '✓ PASS' : '⚠️  FAIL'}`);
-    console.log(`Collateral Consistency: ${collateralDiffPct <= 0.5 ? '✓ PASS' : '⚠️  FAIL'}`);
+    console.log(`Debt Consistency:     ${debtCheckPassed ? '✓ PASS' : '⚠️  FAIL'}`);
+    console.log(`Collateral Consistency: ${collateralCheckPassed ? '✓ PASS' : '⚠️  FAIL'}`);
     console.log('');
     
-    if (totalWarnings === 0 && debtDiffPct <= 0.5 && collateralDiffPct <= 0.5) {
+    // Determine if there's a real issue (not just dust)
+    const realIssue = (totalWarnings > 0 || !debtCheckPassed || !collateralCheckPassed) && 
+                      (totalDebtUsd > 0.01 || totalCollateralUsd > 0.01);
+    
+    if (totalWarnings === 0 && debtCheckPassed && collateralCheckPassed) {
       console.log('✓ All validation checks passed!');
-      process.exit(0);
+      return { success: true, realIssue: false };
+    } else if (!realIssue) {
+      console.log('✓ Only dust-level inconsistencies detected (not actionable)');
+      return { success: true, realIssue: false };
     } else {
       console.log('⚠️  Some validation checks failed. Review warnings above.');
-      process.exit(1);
+      return { success: false, realIssue: true };
     }
     
   } catch (error) {
     console.error('Error during validation:', error);
+    return { success: false, realIssue: true };
+  }
+}
+
+async function main() {
+  const args = parseArgs();
+  
+  if (!args.rpc || args.users.length === 0) {
+    console.error('Usage: tsx scripts/validate-aave-scaling.ts --rpc <RPC_URL> --user <USER_ADDRESS> [--user <USER_ADDRESS2>] [--raw]');
+    console.error('   or: tsx scripts/validate-aave-scaling.ts --rpc <RPC_URL> --users <ADDR1>,<ADDR2>,... [--raw]');
+    console.error('');
+    console.error('Options:');
+    console.error('  --rpc <URL>          RPC endpoint URL');
+    console.error('  --user <ADDRESS>     User address to validate (can be repeated)');
+    console.error('  --users <ADDRESSES>  Comma-separated list of user addresses');
+    console.error('  --raw                Show raw bigint values for debugging');
+    console.error('');
+    console.error('Environment Variables:');
+    console.error('  VALIDATOR_DUST_WEI   Dust threshold in wei (default: 1e12)');
     process.exit(1);
+  }
+  
+  console.log('='.repeat(80));
+  console.log('Aave V3 Accounting Pipeline Validation');
+  console.log('='.repeat(80));
+  console.log(`RPC URL: ${args.rpc}`);
+  console.log(`User Addresses: ${args.users.join(', ')}`);
+  console.log(`Dust Threshold: ${DUST_THRESHOLD_WEI.toString()} wei`);
+  if (args.raw) {
+    console.log('Raw values: enabled');
+  }
+  console.log('');
+  
+  // Initialize provider and contracts
+  const provider = new ethers.JsonRpcProvider(args.rpc);
+  const pool = new ethers.Contract(BASE_ADDRESSES.pool, POOL_ABI, provider);
+  const protocolDataProvider = new ethers.Contract(BASE_ADDRESSES.protocolDataProvider, PROTOCOL_DATA_PROVIDER_ABI, provider);
+  const oracle = new ethers.Contract(BASE_ADDRESSES.oracle, ORACLE_ABI, provider);
+  const uiPoolDataProvider = new ethers.Contract(BASE_ADDRESSES.uiPoolDataProvider, UI_POOL_DATA_PROVIDER_ABI, provider);
+  const ethUsdFeed = new ethers.Contract(BASE_ADDRESSES.ethUsdFeed, CHAINLINK_AGGREGATOR_ABI, provider);
+  
+  // Validate each user
+  let anyRealIssue = false;
+  for (let i = 0; i < args.users.length; i++) {
+    const user = args.users[i];
+    
+    if (i > 0) {
+      console.log('\n\n');
+    }
+    
+    const result = await validateUser(
+      user,
+      pool,
+      protocolDataProvider,
+      oracle,
+      uiPoolDataProvider,
+      ethUsdFeed,
+      args.raw || false
+    );
+    
+    if (result.realIssue) {
+      anyRealIssue = true;
+    }
+  }
+  
+  // Exit with appropriate code
+  if (anyRealIssue) {
+    process.exit(1);
+  } else {
+    process.exit(0);
   }
 }
 
