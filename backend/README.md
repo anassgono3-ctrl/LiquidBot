@@ -295,6 +295,82 @@ $$
 - `HF < 1.05`: Critical (emergency)
 - `HF < 1.0`: Liquidation eligible
 
+## Validation Scripts
+
+### Aave Accounting Validation
+
+The `validate-aave-scaling.ts` script validates Aave V3 accounting pipeline by comparing on-chain data with recomputed values.
+
+**Usage:**
+```bash
+# Validate a single user
+tsx scripts/validate-aave-scaling.ts \
+  --rpc https://mainnet.base.org \
+  --user 0x1234567890123456789012345678901234567890
+
+# Validate multiple users (comma-separated)
+tsx scripts/validate-aave-scaling.ts \
+  --rpc https://mainnet.base.org \
+  --users 0x1234...,0x5678...,0x9abc...
+
+# Validate multiple users (repeated --user flag)
+tsx scripts/validate-aave-scaling.ts \
+  --rpc https://mainnet.base.org \
+  --user 0x1234... \
+  --user 0x5678... \
+  --user 0x9abc...
+
+# Show raw bigint values for debugging
+tsx scripts/validate-aave-scaling.ts \
+  --rpc https://mainnet.base.org \
+  --user 0x1234... \
+  --raw
+```
+
+**Options:**
+- `--rpc <URL>`: RPC endpoint URL (required)
+- `--user <ADDRESS>`: User address to validate (can be repeated)
+- `--users <ADDRESSES>`: Comma-separated list of user addresses
+- `--raw`: Show raw bigint values for debugging
+
+**Environment Variables:**
+- `VALIDATOR_DUST_WEI`: Dust threshold in wei (default: 1e12). Positions below this threshold are tagged as "(dust)" and don't cause validation failures.
+
+**Features:**
+- **Per-asset breakdown**: Shows debt and collateral for each reserve with any non-zero position
+- **Adaptive USD precision**: Displays USD values with 6 decimals for amounts < $0.01, otherwise 2 decimals
+- **Dust detection**: Tags micro positions as "(dust)" to distinguish from real inconsistencies
+- **Zero/zero handling**: Treats both canonical and recomputed totals being zero as PASS (avoids false failures)
+- **Infinite health factor**: Displays health factor as "INF" when debt == 0 instead of scientific notation
+- **Smart exit codes**: Returns non-zero only for real inconsistencies (not dust-level differences)
+- **Smallest values summary**: Reports the smallest non-zero collateral and debt detected
+- **Reason for HF<1**: When actionable, displays explicit collateralUSD and debtUSD values
+
+**Output Example:**
+```
+Total Collateral Base (ETH): 0.001234 ETH
+Total Debt Base (ETH):       0.000567 ETH
+Health Factor:               INF
+
+Per-Asset Breakdown:
+
+USDC (dust):
+  Debt:       0.000001 ($0.000001)
+  Collateral: 0.000000 ($0.000000)
+  ✓ No issues detected
+
+ETH:
+  Debt:       0.00 ($0.00)
+  Collateral: 1.234567 ($3,456.78)
+  ✓ No issues detected
+
+Smallest Non-Zero Values:
+  Debt:       $0.000001
+  Collateral: $3,456.78
+
+✓ All validation checks passed!
+```
+
 ## Testing
 
 ```bash

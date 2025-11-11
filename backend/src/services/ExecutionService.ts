@@ -655,6 +655,70 @@ export class ExecutionService {
         totalDebt: hfCheck.totalDebt.toString()
       });
 
+      // Step 1a: Additional guards - check for dust-level positions
+      // Dust threshold: 1e12 wei base (configurable via EXECUTION_DUST_WEI env var)
+      const DUST_THRESHOLD_WEI = BigInt(process.env.EXECUTION_DUST_WEI || '1000000000000'); // 1e12 wei by default
+      
+      // Get collateral and debt from account data
+      const accountData = await this.aaveDataService!.getUserAccountData(opportunity.user);
+      const totalCollateralBase = accountData.totalCollateralBase;
+      const totalDebtBase = accountData.totalDebtBase;
+      
+      // Guard: If HF < 1 but totalCollateralBase < dust threshold, abort
+      if (totalCollateralBase < DUST_THRESHOLD_WEI && hfCheck.healthFactor < '1.0') {
+        // eslint-disable-next-line no-console
+        console.log('[execution] Skipping execution - collateral below dust threshold:', {
+          totalCollateralBase: totalCollateralBase.toString(),
+          dustThreshold: DUST_THRESHOLD_WEI.toString(),
+          healthFactor: hfCheck.healthFactor
+        });
+        return {
+          success: false,
+          simulated: false,
+          reason: 'dust_position_not_actionable'
+        };
+      }
+      
+      // Guard: If collateralUsd == 0 while HF < 1, abort (likely data issue)
+      // Get ETH/USD price for conversion
+      try {
+        const ethUsdFeed = new ethers.Contract(
+          '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', // ETH/USD on Base
+          ['function latestRoundData() external view returns (uint80, int256, uint256, uint256, uint80)', 'function decimals() external view returns (uint8)'],
+          this.provider
+        );
+        const roundData = await ethUsdFeed.latestRoundData();
+        const ethPrice = roundData[1];
+        const ethPriceDecimals = Number(await ethUsdFeed.decimals());
+        
+        // Convert collateral to USD
+        const collateralUsd = Number(totalCollateralBase) * Number(ethPrice) / (10 ** ethPriceDecimals) / 1e18;
+        
+        if (collateralUsd === 0 && hfCheck.healthFactor < '1.0') {
+          // eslint-disable-next-line no-console
+          console.log('[execution] Skipping execution - zero collateral USD with HF < 1:', {
+            totalCollateralBase: totalCollateralBase.toString(),
+            collateralUsd,
+            healthFactor: hfCheck.healthFactor
+          });
+          return {
+            success: false,
+            simulated: false,
+            reason: 'zero_collateral_hf_below_one'
+          };
+        }
+        
+        // Add reason for HF < 1
+        if (hfCheck.healthFactor < '1.0') {
+          const debtUsd = Number(totalDebtBase) * Number(ethPrice) / (10 ** ethPriceDecimals) / 1e18;
+          // eslint-disable-next-line no-console
+          console.log(`[execution] Reason for HF<1: collateralUSD=$${collateralUsd.toFixed(6)}, debtUSD=$${debtUsd.toFixed(6)}`);
+        }
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('[execution] Failed to check collateral USD:', error instanceof Error ? error.message : error);
+      }
+
       // Step 2: Determine debt asset to liquidate
       // For real-time opportunities, we need to query which assets the user has borrowed
       const debtAsset = opportunity.principalReserve.id;
@@ -672,7 +736,19 @@ export class ExecutionService {
       }
       
       // Step 3: Calculate debt to cover with dynamic data (respecting close factor)
-      const debtInfo = await this.calculateDebtToCover(opportunity, debtAsset, opportunity.user);
+      let debtInfo;
+      try {
+        debtInfo = await this.calculateDebtToCover(opportunity, debtAsset, opportunity.user);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.error('[execution] Failed to calculate debt to cover:', error instanceof Error ? error.message : error);
+        return {
+          success: false,
+          simulated: false,
+          reason: error instanceof Error ? error.message : 'calculate_debt_failed'
+        };
+      }
+      
       const { debtToCover, liquidationBonusPct, debtToCoverUsd } = debtInfo;
       
       // Safety check: skip if debtToCover is zero
@@ -688,7 +764,25 @@ export class ExecutionService {
       
       // Step 3a: Calculate proper USD value using 1e18 math (matching plan resolver)
       // Get decimals and price for debt asset
-      const debtDecimals = opportunity.principalReserve.decimals || 18;
+      // Verify decimals from metadata if available to ensure correctness
+      let debtDecimals = opportunity.principalReserve.decimals || 18;
+      if (this.aaveMetadata) {
+        try {
+          const debtMetadata = await this.aaveMetadata.getReserve(debtAsset);
+          if (debtMetadata && debtMetadata.decimals !== debtDecimals) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[execution] Decimals mismatch for ${opportunity.principalReserve.symbol}: ` +
+              `opportunity=${debtDecimals} metadata=${debtMetadata.decimals} - using metadata value`
+            );
+            debtDecimals = debtMetadata.decimals;
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Failed to verify debt decimals from metadata:', error instanceof Error ? error.message : error);
+        }
+      }
+      
       let debtPriceRaw: bigint;
       let debtToCoverUsdPrecise: number;
       
@@ -712,7 +806,25 @@ export class ExecutionService {
       // Calculate expected collateral amount with bonus
       // collateralAmount = debtToCover * (1 + liquidationBonus) * (priceDebt / priceCollateral)
       const collateralAsset = opportunity.collateralReserve.id;
-      const collateralDecimals = opportunity.collateralReserve.decimals || 18;
+      // Verify collateral decimals from metadata if available
+      let collateralDecimals = opportunity.collateralReserve.decimals || 18;
+      if (this.aaveMetadata) {
+        try {
+          const collateralMetadata = await this.aaveMetadata.getReserve(collateralAsset);
+          if (collateralMetadata && collateralMetadata.decimals !== collateralDecimals) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[execution] Decimals mismatch for ${opportunity.collateralReserve.symbol}: ` +
+              `opportunity=${collateralDecimals} metadata=${collateralMetadata.decimals} - using metadata value`
+            );
+            collateralDecimals = collateralMetadata.decimals;
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Failed to verify collateral decimals from metadata:', error instanceof Error ? error.message : error);
+        }
+      }
+      
       let expectedCollateralRaw: bigint;
       
       try {
@@ -1054,15 +1166,16 @@ export class ExecutionService {
         diff: Math.abs(debtToCoverUsd - quickUsd).toFixed(6)
       });
       
-      // Safety guard: warn if debtToCoverHuman is suspiciously large (possible scaling error)
+      // Safety guard: abort if debtToCoverHuman is suspiciously large (possible scaling error)
       const debtToCoverHuman = Number(debtToCover) / (10 ** debtDecimals);
-      if (debtToCoverHuman > 1e6) {
+      if (debtToCoverHuman > 1e9) {
         // eslint-disable-next-line no-console
-        console.warn(
-          `[execution] SCALING WARNING: debtToCoverHuman=${debtToCoverHuman.toFixed(2)} > 1e6 tokens ` +
+        console.error(
+          `[execution] SCALING SUSPECTED: debtToCoverHuman=${debtToCoverHuman.toFixed(2)} > 1e9 tokens ` +
           `(debtToCoverRaw=${debtToCover.toString()}, decimals=${debtDecimals}) - ` +
-          `possible scaling error! Review variable debt reconstruction.`
+          `ABORTING execution due to possible scaling error!`
         );
+        throw new Error('Scaling error suspected: debt amount exceeds 1e9 tokens');
       }
     } catch (error) {
       // eslint-disable-next-line no-console
