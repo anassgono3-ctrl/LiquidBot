@@ -1,6 +1,5 @@
 // Unit tests for execution guards and accuracy checks
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { ethers } from 'ethers';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 import { ExecutionService } from '../../src/services/ExecutionService.js';
 import type { Opportunity } from '../../src/types/index.js';

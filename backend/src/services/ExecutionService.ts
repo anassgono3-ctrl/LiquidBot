@@ -79,36 +79,23 @@ export class ExecutionService {
 
   /**
    * Check if Chainlink price feed is stale for an asset
-   * @param asset Asset address
-   * @param assetSymbol Asset symbol for logging
-   * @returns { isStale: boolean, age?: number, reason?: string }
+   * NOTE: This is a placeholder for future implementation. Currently, Aave oracle
+   * handles price staleness checks internally. See PRICE_STALENESS_SEC config.
+   * 
+   * Future: Query Chainlink feeds directly based on asset mapping
+   * 
+   * @returns { isStale: boolean } - Always returns false (placeholder)
    */
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   private async checkChainlinkPriceStaleness(
-    asset: string,
-    assetSymbol: string
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _asset: string,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    _assetSymbol: string
   ): Promise<{ isStale: boolean; age?: number; reason?: string }> {
-    if (!this.provider) {
-      return { isStale: false }; // Skip check if no provider
-    }
-
-    // Get max age from config (default 3600 seconds = 1 hour)
-    const maxAgeSec = config.priceStalenessSeconds || 3600;
-
-    try {
-      // For now, we're checking Aave oracle price staleness indirectly
-      // A more robust implementation would check specific Chainlink feeds
-      // This is a placeholder that always passes - actual implementation should query Chainlink feeds
-      // based on asset mapping
-      
-      // For this hotfix, we'll rely on Aave oracle's internal staleness checks
-      // which abort on their own if prices are too stale
-      
-      return { isStale: false };
-    } catch (error) {
-      // eslint-disable-next-line no-console
-      console.warn('[execution] Failed to check price staleness:', error instanceof Error ? error.message : error);
-      return { isStale: false }; // Don't block on staleness check failure
-    }
+    // For this hotfix, we rely on Aave oracle's internal staleness checks
+    // which abort on their own if prices are too stale
+    return { isStale: false };
   }
 
   /**
