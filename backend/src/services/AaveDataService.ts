@@ -247,36 +247,93 @@ export class AaveDataService {
   /**
    * Calculate total debt for a user's reserve (variable + stable)
    * Properly expands scaled variable debt using the reserve's variable borrow index
+   * 
+   * Canonical reconstruction logic:
+   * - If scaledVariableDebt > 0: expand using variableBorrowIndex / RAY
+   * - If only currentVariableDebt available (already principal): use directly
+   * - If both present: prefer reconstruction; if within 0.1% of currentVariableDebt, use currentVariableDebt
    */
   async getTotalDebt(asset: string, user: string): Promise<bigint> {
     const userData = await this.getUserReserveData(asset, user);
+    const RAY = BigInt(10 ** 27);
     
-    // Get the reserve's variable borrow index to expand scaled debt
     let principalVariableDebt: bigint;
     
-    // Check if we have scaledVariableDebt that needs expansion
+    // Case 1: scaledVariableDebt is available - perform canonical reconstruction
     if (userData.scaledVariableDebt > 0n) {
       try {
         // Fetch reserve data to get variableBorrowIndex
         const reserveData = await this.getReserveData(asset);
         const variableBorrowIndex = reserveData.variableBorrowIndex;
         
-        // Expand scaled debt: principalVariableDebt = scaledVariableDebt * variableBorrowIndex / RAY
-        const RAY = BigInt(10 ** 27);
-        principalVariableDebt = (userData.scaledVariableDebt * variableBorrowIndex) / RAY;
+        // Canonical reconstruction: principalVariableDebt = scaledVariableDebt * variableBorrowIndex / RAY
+        const reconstructed = (userData.scaledVariableDebt * variableBorrowIndex) / RAY;
         
-        // Note: If currentVariableDebt is also provided, we prefer the expanded value
-        // as it accounts for accrued interest more accurately
+        // If currentVariableDebt is also present, check consistency
+        if (userData.currentVariableDebt > 0n) {
+          // Calculate relative difference
+          const diff = reconstructed > userData.currentVariableDebt
+            ? reconstructed - userData.currentVariableDebt
+            : userData.currentVariableDebt - reconstructed;
+          
+          // If within 0.1% tolerance, prefer currentVariableDebt to avoid rounding differences
+          const tolerance = reconstructed / 1000n; // 0.1%
+          
+          if (diff <= tolerance) {
+            principalVariableDebt = userData.currentVariableDebt;
+          } else {
+            // Significant difference - use reconstructed value
+            principalVariableDebt = reconstructed;
+            
+            // Log warning if difference is substantial
+            if (diff > reconstructed / 100n) { // > 1% difference
+              // eslint-disable-next-line no-console
+              console.warn(
+                `[aave-data] Variable debt mismatch: reconstructed=${reconstructed.toString()} ` +
+                `current=${userData.currentVariableDebt.toString()} diff=${diff.toString()}`
+              );
+            }
+          }
+        } else {
+          // Only scaled available - use reconstructed
+          principalVariableDebt = reconstructed;
+        }
       } catch (error) {
         // Fallback to currentVariableDebt if reserve data fetch fails
+        // eslint-disable-next-line no-console
+        console.warn('[aave-data] Failed to fetch reserve data, using currentVariableDebt:', error instanceof Error ? error.message : error);
         principalVariableDebt = userData.currentVariableDebt;
       }
-    } else {
-      // No scaled debt, use current variable debt directly
+    } else if (userData.currentVariableDebt > 0n) {
+      // Case 2: Only currentVariableDebt available (already principal) - use directly without expansion
       principalVariableDebt = userData.currentVariableDebt;
+    } else {
+      // Case 3: No variable debt
+      principalVariableDebt = 0n;
     }
     
-    return principalVariableDebt + userData.currentStableDebt;
+    // Sanity check: log if principal debt is suspiciously large (possible scaling error)
+    // For context: 1e28 wei = 10,000,000,000 tokens with 18 decimals (10 billion)
+    if (principalVariableDebt > BigInt(10 ** 28)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[aave-data] Suspiciously large variable debt detected: ${principalVariableDebt.toString()} wei ` +
+        `(asset=${asset}, user=${user}) - possible scaling error`
+      );
+    }
+    
+    const totalDebt = principalVariableDebt + userData.currentStableDebt;
+    
+    // Sanity check total debt as well
+    if (totalDebt > BigInt(10 ** 28)) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[aave-data] Suspiciously large total debt detected: ${totalDebt.toString()} wei ` +
+        `(asset=${asset}, user=${user}) - possible scaling error`
+      );
+    }
+    
+    return totalDebt;
   }
   
   /**
