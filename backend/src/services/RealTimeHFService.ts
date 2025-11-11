@@ -25,7 +25,14 @@ import {
   chunkTimeoutsTotal,
   runAbortsTotal,
   wsReconnectsTotal,
-  chunkLatency
+  chunkLatency,
+  candidatesPrunedZeroDebt,
+  candidatesPrunedTinyDebt,
+  candidatesTotal,
+  eventBatchesSkipped,
+  eventBatchesExecuted,
+  eventConcurrencyLevel,
+  eventConcurrencyLevelHistogram
 } from '../metrics/index.js';
 
 import { CandidateManager } from './CandidateManager.js';
@@ -178,6 +185,11 @@ export class RealTimeHFService extends EventEmitter {
   }> = new Map();
   private eventBatchesPerBlock: Map<number, number> = new Map();
   private runningEventBatches = 0;
+  
+  // Adaptive event concurrency
+  private currentMaxEventBatches: number;
+  private eventBatchSkipHistory: number[] = []; // Rolling window of skipped batches (1 = skipped, 0 = executed)
+  private readonly EVENT_SKIP_WINDOW_SIZE = 20;
 
   // Price trigger tracking for emergency scans
   private lastSeenPrices: Map<string, number> = new Map(); // feedAddress -> last price (for single-round delta mode)
@@ -233,6 +245,9 @@ export class RealTimeHFService extends EventEmitter {
     
     // Initialize dynamic page size to current config value
     this.currentDynamicPageSize = config.headCheckPageSize;
+    
+    // Initialize adaptive event concurrency
+    this.currentMaxEventBatches = config.maxParallelEventBatches;
     
     // Initialize price monitoring asset filter if configured
     if (config.priceTriggerEnabled && config.priceTriggerAssets) {
@@ -299,6 +314,14 @@ export class RealTimeHFService extends EventEmitter {
       // eslint-disable-next-line no-console
       console.log('[price-trigger] enabled=false');
     }
+    
+    // Log adaptive event concurrency configuration
+    // eslint-disable-next-line no-console
+    console.log(
+      `[config] ADAPTIVE_EVENT_CONCURRENCY=${config.adaptiveEventConcurrency} ` +
+      `(base=${config.maxParallelEventBatches}, high=${config.maxParallelEventBatchesHigh}, ` +
+      `threshold=${config.eventBacklogThreshold})`
+    );
 
     if (!this.skipWsConnection) {
       await this.setupProvider();
@@ -1727,19 +1750,23 @@ export class RealTimeHFService extends EventEmitter {
     if (batchesThisBlock >= config.eventBatchMaxPerBlock) {
       // eslint-disable-next-line no-console
       console.log(`[event-coalesce] skipped batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount}) - per-block limit reached (${config.eventBatchMaxPerBlock})`);
+      this.recordEventBatchSkip();
       return;
     }
 
-    // Check concurrency limit
-    if (this.runningEventBatches >= config.maxParallelEventBatches) {
+    // Check concurrency limit (use adaptive limit if enabled)
+    const effectiveLimit = this.currentMaxEventBatches;
+    if (this.runningEventBatches >= effectiveLimit) {
       // eslint-disable-next-line no-console
-      console.log(`[event-coalesce] skipped batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount}) - concurrency limit reached (${config.maxParallelEventBatches})`);
+      console.log(`[event-coalesce] skipped batch (block=${blockNumber}, users=${userCount}, reserves=${reserveCount}) - concurrency limit reached (${effectiveLimit})`);
+      this.recordEventBatchSkip();
       return;
     }
 
     // Increment counters
     this.eventBatchesPerBlock.set(blockNumber, batchesThisBlock + 1);
     this.runningEventBatches++;
+    this.recordEventBatchExecuted();
 
     try {
       // eslint-disable-next-line no-console
@@ -1825,6 +1852,81 @@ export class RealTimeHFService extends EventEmitter {
         console.log(`[head-adapt] adjusted page size ${prevPageSize} -> ${newPageSize} (avg=${avgElapsed.toFixed(0)}ms, timeouts=${timeoutPct}%)`);
       }
     }
+  }
+
+  /**
+   * Record an event batch skip
+   */
+  private recordEventBatchSkip(): void {
+    eventBatchesSkipped.inc();
+    
+    // Track in rolling window for adaptive adjustment
+    if (config.adaptiveEventConcurrency) {
+      this.eventBatchSkipHistory.push(1);
+      if (this.eventBatchSkipHistory.length > this.EVENT_SKIP_WINDOW_SIZE) {
+        this.eventBatchSkipHistory.shift();
+      }
+      this.adjustEventConcurrency();
+    }
+  }
+  
+  /**
+   * Record an event batch execution
+   */
+  private recordEventBatchExecuted(): void {
+    eventBatchesExecuted.inc();
+    
+    // Track in rolling window for adaptive adjustment
+    if (config.adaptiveEventConcurrency) {
+      this.eventBatchSkipHistory.push(0);
+      if (this.eventBatchSkipHistory.length > this.EVENT_SKIP_WINDOW_SIZE) {
+        this.eventBatchSkipHistory.shift();
+      }
+      this.adjustEventConcurrency();
+    }
+  }
+  
+  /**
+   * Adjust event concurrency based on backlog and head latency
+   */
+  private adjustEventConcurrency(): void {
+    if (!config.adaptiveEventConcurrency) return;
+    
+    const minLevel = config.maxParallelEventBatches;
+    const maxLevel = config.maxParallelEventBatchesHigh;
+    
+    // Count skips in recent window
+    const recentSkips = this.eventBatchSkipHistory.reduce((sum, val) => sum + val, 0);
+    const backlogThreshold = config.eventBacklogThreshold;
+    
+    // Get head page latency from recent history
+    const recentHeadLatency = this.headRunHistory.length > 0
+      ? this.headRunHistory[this.headRunHistory.length - 1].elapsed
+      : 0;
+    const headTargetMs = config.headPageTargetMs;
+    
+    const prevLevel = this.currentMaxEventBatches;
+    
+    // Scale up if: backlog > threshold OR head latency < target
+    if (recentSkips > backlogThreshold || (recentHeadLatency > 0 && recentHeadLatency < headTargetMs)) {
+      this.currentMaxEventBatches = Math.min(maxLevel, this.currentMaxEventBatches + 1);
+    }
+    // Scale down if: no backlog and head latency approaching or exceeding target
+    else if (recentSkips === 0 && recentHeadLatency > headTargetMs * 0.8) {
+      this.currentMaxEventBatches = Math.max(minLevel, this.currentMaxEventBatches - 1);
+    }
+    
+    if (this.currentMaxEventBatches !== prevLevel) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[event-adapt] adjusted concurrency ${prevLevel} -> ${this.currentMaxEventBatches} ` +
+        `(recentSkips=${recentSkips}, headLatency=${recentHeadLatency.toFixed(0)}ms)`
+      );
+    }
+    
+    // Update metrics
+    eventConcurrencyLevel.set(this.currentMaxEventBatches);
+    eventConcurrencyLevelHistogram.observe(this.currentMaxEventBatches);
   }
 
   /**
@@ -2204,6 +2306,19 @@ export class RealTimeHFService extends EventEmitter {
             // Extract USD values (assuming 8 decimal base units)
             const totalCollateralUsd = parseFloat(formatUnits(totalCollateralBase, 8));
             const totalDebtUsd = parseFloat(formatUnits(totalDebtBase, 8));
+            
+            // Prune zero-debt users early
+            if (totalDebtBase === 0n) {
+              candidatesPrunedZeroDebt.inc();
+              continue;
+            }
+            
+            // Prune tiny-debt users
+            const minDebtUsd = config.minDebtUsd;
+            if (totalDebtUsd < minDebtUsd) {
+              candidatesPrunedTinyDebt.inc();
+              continue;
+            }
 
             this.candidateManager.updateHF(userAddress, healthFactor);
             this.metrics.healthChecksPerformed++;
@@ -2222,7 +2337,8 @@ export class RealTimeHFService extends EventEmitter {
               );
             }
 
-            // Track min HF
+            // Track min HF (only for users with debt > 0, excluding infinity HFs)
+            // Note: Zero-debt users are already filtered above, so no need to check again
             if (minHF === null || healthFactor < minHF) {
               minHF = healthFactor;
             }
@@ -2248,8 +2364,10 @@ export class RealTimeHFService extends EventEmitter {
               // Track that we've seen this user in this block
               this.seenUsersThisBlock.add(userAddress);
               
+              // Format HF with infinity symbol for zero debt (though zero debt should be filtered)
+              const hfDisplay = totalDebtBase === 0n ? '∞' : healthFactor.toFixed(4);
               // eslint-disable-next-line no-console
-              console.log(`[realtime-hf] emit liquidatable user=${userAddress} hf=${healthFactor.toFixed(4)} reason=${emitDecision.reason} block=${blockNumber}`);
+              console.log(`[realtime-hf] emit liquidatable user=${userAddress} hf=${hfDisplay} reason=${emitDecision.reason} block=${blockNumber}`);
 
               // Track last emit block
               this.lastEmitBlock.set(userAddress, blockNumber);

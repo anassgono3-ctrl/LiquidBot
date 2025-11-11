@@ -198,6 +198,11 @@ export const config = {
   get eventBatchCoalesceMs() { return env.eventBatchCoalesceMs; },
   get eventBatchMaxPerBlock() { return env.eventBatchMaxPerBlock; },
   get maxParallelEventBatches() { return env.maxParallelEventBatches; },
+  get adaptiveEventConcurrency() { return env.adaptiveEventConcurrency; },
+  get maxParallelEventBatchesHigh() { return env.maxParallelEventBatchesHigh; },
+  get eventBacklogThreshold() { return env.eventBacklogThreshold; },
+  get dustMinUsd() { return env.dustMinUsd; },
+  get minDebtUsd() { return env.minDebtUsd; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },
