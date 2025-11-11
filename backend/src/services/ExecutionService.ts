@@ -764,7 +764,25 @@ export class ExecutionService {
       
       // Step 3a: Calculate proper USD value using 1e18 math (matching plan resolver)
       // Get decimals and price for debt asset
-      const debtDecimals = opportunity.principalReserve.decimals || 18;
+      // Verify decimals from metadata if available to ensure correctness
+      let debtDecimals = opportunity.principalReserve.decimals || 18;
+      if (this.aaveMetadata) {
+        try {
+          const debtMetadata = await this.aaveMetadata.getReserve(debtAsset);
+          if (debtMetadata && debtMetadata.decimals !== debtDecimals) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[execution] Decimals mismatch for ${opportunity.principalReserve.symbol}: ` +
+              `opportunity=${debtDecimals} metadata=${debtMetadata.decimals} - using metadata value`
+            );
+            debtDecimals = debtMetadata.decimals;
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Failed to verify debt decimals from metadata:', error instanceof Error ? error.message : error);
+        }
+      }
+      
       let debtPriceRaw: bigint;
       let debtToCoverUsdPrecise: number;
       
@@ -788,7 +806,25 @@ export class ExecutionService {
       // Calculate expected collateral amount with bonus
       // collateralAmount = debtToCover * (1 + liquidationBonus) * (priceDebt / priceCollateral)
       const collateralAsset = opportunity.collateralReserve.id;
-      const collateralDecimals = opportunity.collateralReserve.decimals || 18;
+      // Verify collateral decimals from metadata if available
+      let collateralDecimals = opportunity.collateralReserve.decimals || 18;
+      if (this.aaveMetadata) {
+        try {
+          const collateralMetadata = await this.aaveMetadata.getReserve(collateralAsset);
+          if (collateralMetadata && collateralMetadata.decimals !== collateralDecimals) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              `[execution] Decimals mismatch for ${opportunity.collateralReserve.symbol}: ` +
+              `opportunity=${collateralDecimals} metadata=${collateralMetadata.decimals} - using metadata value`
+            );
+            collateralDecimals = collateralMetadata.decimals;
+          }
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn('[execution] Failed to verify collateral decimals from metadata:', error instanceof Error ? error.message : error);
+        }
+      }
+      
       let expectedCollateralRaw: bigint;
       
       try {
