@@ -11,6 +11,7 @@ import {
 } from '../metrics/index.js';
 import { calculateUsdValue, formatTokenAmount } from '../utils/usdMath.js';
 import { AaveMetadata } from '../aave/AaveMetadata.js';
+import { isZero } from '../utils/bigint.js';
 
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 import { AaveDataService } from './AaveDataService.js';
@@ -207,7 +208,7 @@ export class ExecutionService {
       const healthFactor = Number(accountData.healthFactor) / 1e18;
       
       // Check if user has any debt
-      if (accountData.totalDebtBase === 0n) {
+      if (isZero(accountData.totalDebtBase)) {
         return null;
       }
 
@@ -395,7 +396,7 @@ export class ExecutionService {
       const healthFactor = Number(accountData.healthFactor) / 1e18;
       
       // Check if user has any debt
-      if (accountData.totalDebtBase === 0n) {
+      if (isZero(accountData.totalDebtBase)) {
         return { success: false, skipReason: 'no_debt' };
       }
 

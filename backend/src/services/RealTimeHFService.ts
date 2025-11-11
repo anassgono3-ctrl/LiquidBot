@@ -41,6 +41,7 @@ import { OnChainBackfillService } from './OnChainBackfillService.js';
 import { SubgraphSeeder } from './SubgraphSeeder.js';
 import { BorrowersIndexService } from './BorrowersIndexService.js';
 import { LowHFTracker } from './LowHFTracker.js';
+import { isZero } from '../utils/bigint.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -2308,7 +2309,7 @@ export class RealTimeHFService extends EventEmitter {
             const totalDebtUsd = parseFloat(formatUnits(totalDebtBase, 8));
             
             // Prune zero-debt users early
-            if (totalDebtBase === 0n) {
+            if (isZero(totalDebtBase)) {
               candidatesPrunedZeroDebt.inc();
               continue;
             }
@@ -2365,7 +2366,7 @@ export class RealTimeHFService extends EventEmitter {
               this.seenUsersThisBlock.add(userAddress);
               
               // Format HF with infinity symbol for zero debt (though zero debt should be filtered)
-              const hfDisplay = totalDebtBase === 0n ? '∞' : healthFactor.toFixed(4);
+              const hfDisplay = isZero(totalDebtBase) ? '∞' : healthFactor.toFixed(4);
               // eslint-disable-next-line no-console
               console.log(`[realtime-hf] emit liquidatable user=${userAddress} hf=${hfDisplay} reason=${emitDecision.reason} block=${blockNumber}`);
 
