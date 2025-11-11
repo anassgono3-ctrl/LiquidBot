@@ -8,11 +8,9 @@ describe('RiskManager', () => {
   let riskManager: RiskManager;
   
   // Sample opportunity for testing
-  const createOpportunity = (overrides?: Partial<Opportunity>): Opportunity => ({
+  const createOpportunity = (overrides: Partial<Opportunity> = {}): Opportunity => ({
     id: 'opp-1',
-    txHash: null,
     user: '0x1234',
-    liquidator: '0x5678',
     timestamp: Date.now(),
     collateralAmountRaw: '1000000000000000000',
     principalAmountRaw: '500000000000000000',
@@ -23,7 +21,9 @@ describe('RiskManager', () => {
     principalValueUsd: 1800,
     profitEstimateUsd: 50,
     bonusPct: 0.05,
-    ...overrides
+    ...overrides,
+    txHash: overrides.txHash ?? null,
+    liquidator: overrides.liquidator ?? '0x5678'
   });
 
   beforeEach(() => {
