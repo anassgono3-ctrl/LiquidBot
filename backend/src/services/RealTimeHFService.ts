@@ -41,6 +41,9 @@ import { OnChainBackfillService } from './OnChainBackfillService.js';
 import { SubgraphSeeder } from './SubgraphSeeder.js';
 import { BorrowersIndexService } from './BorrowersIndexService.js';
 import { LowHFTracker } from './LowHFTracker.js';
+import { LiquidationAuditService } from './liquidationAudit.js';
+import { NotificationService } from './NotificationService.js';
+import { PriceService } from './PriceService.js';
 import { isZero } from '../utils/bigint.js';
 
 // ABIs
@@ -69,6 +72,8 @@ const CHAINLINK_AGGREGATOR_ABI = [
 export interface RealTimeHFServiceOptions {
   subgraphService?: SubgraphService;
   skipWsConnection?: boolean; // for testing
+  notificationService?: NotificationService;
+  priceService?: PriceService;
 }
 
 export interface LiquidatableEvent {
@@ -102,6 +107,7 @@ export class RealTimeHFService extends EventEmitter {
   private backfillService?: OnChainBackfillService;
   private borrowersIndex?: BorrowersIndexService;
   private lowHfTracker?: LowHFTracker;
+  private liquidationAuditService?: LiquidationAuditService;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -234,6 +240,17 @@ export class RealTimeHFService extends EventEmitter {
       console.log(
         `[lowhf-tracker] Enabled: mode=${config.lowHfRecordMode} ` +
         `max=${config.lowHfTrackerMax} dumpOnShutdown=${config.lowHfDumpOnShutdown}`
+      );
+    }
+    
+    // Initialize liquidation audit service if enabled
+    if (config.liquidationAuditEnabled) {
+      const priceService = options.priceService || new PriceService();
+      const notificationService = options.notificationService || new NotificationService(priceService);
+      this.liquidationAuditService = new LiquidationAuditService(
+        priceService,
+        notificationService,
+        this.provider as any // Will be set later in setupProvider
       );
     }
     
@@ -1021,8 +1038,23 @@ export class RealTimeHFService extends EventEmitter {
             `block=${blockNumber}`
           );
           
-          // TODO: Send Telegram notification with classification
-          // This will be implemented when TelegramService is integrated
+          // Audit liquidation event if audit service is enabled
+          if (this.liquidationAuditService) {
+            const txHash = log.transactionHash || '';
+            const candidatesTotal = this.candidateManager.size();
+            
+            // Async call - don't await to avoid blocking event processing
+            this.liquidationAuditService.onLiquidationCall(
+              decoded,
+              blockNumber,
+              txHash,
+              (user: string) => this.candidateManager.get(user) !== undefined,
+              candidatesTotal
+            ).catch(err => {
+              // eslint-disable-next-line no-console
+              console.error('[realtime-hf] Liquidation audit failed:', err);
+            });
+          }
         }
         
         // For all user-affecting events, enqueue with coalescing

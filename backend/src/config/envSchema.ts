@@ -211,7 +211,13 @@ export const rawEnvSchema = z.object({
   LOW_HF_EXTENDED_ENABLED: z.string().optional(),
 
   // Liquidation close factor configuration
-  LIQUIDATION_CLOSE_FACTOR: z.string().optional()
+  LIQUIDATION_CLOSE_FACTOR: z.string().optional(),
+
+  // Liquidation audit configuration
+  LIQUIDATION_AUDIT_ENABLED: z.string().optional(),
+  LIQUIDATION_AUDIT_NOTIFY: z.string().optional(),
+  LIQUIDATION_AUDIT_PRICE_MODE: z.string().optional(),
+  LIQUIDATION_AUDIT_SAMPLE_LIMIT: z.string().optional()
 });
 
 export const env = (() => {
@@ -433,6 +439,12 @@ export const env = (() => {
     lowHfExtendedEnabled: (parsed.LOW_HF_EXTENDED_ENABLED || 'true').toLowerCase() === 'true',
     
     // Liquidation close factor (default 0.5 = 50%)
-    liquidationCloseFactor: Number(parsed.LIQUIDATION_CLOSE_FACTOR || 0.5)
+    liquidationCloseFactor: Number(parsed.LIQUIDATION_CLOSE_FACTOR || 0.5),
+
+    // Liquidation audit configuration
+    liquidationAuditEnabled: (parsed.LIQUIDATION_AUDIT_ENABLED || 'true').toLowerCase() === 'true',
+    liquidationAuditNotify: (parsed.LIQUIDATION_AUDIT_NOTIFY || 'true').toLowerCase() === 'true',
+    liquidationAuditPriceMode: (parsed.LIQUIDATION_AUDIT_PRICE_MODE || 'block') as 'block' | 'current',
+    liquidationAuditSampleLimit: Number(parsed.LIQUIDATION_AUDIT_SAMPLE_LIMIT || 0)
   };
 })();
