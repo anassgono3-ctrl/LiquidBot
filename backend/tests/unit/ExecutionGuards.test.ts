@@ -18,7 +18,7 @@ describe('Execution Guards', () => {
     process.env = originalEnv;
   });
 
-  const createMockOpportunity = (overrides?: Partial<Opportunity>): Opportunity => ({
+  const createMockOpportunity = (overrides: Partial<Opportunity> = {}): Opportunity => ({
     id: 'test-opp-1',
     user: '0x1234567890123456789012345678901234567890',
     collateralReserve: {
@@ -37,7 +37,9 @@ describe('Execution Guards', () => {
     profitEstimateUsd: 10,
     timestamp: Date.now(),
     triggerSource: 'realtime',
-    ...overrides
+    ...overrides,
+    txHash: overrides.txHash ?? null,
+    liquidator: overrides.liquidator ?? '0x0000000000000000000000000000000000000000'
   });
 
   describe('EXECUTION_ENABLED gate', () => {
