@@ -94,11 +94,13 @@ export class ExecutionService {
       const healthFactor = accountData.healthFactor;
       const totalDebt = accountData.totalDebtBase;
       
+      // Format health factor: display as "INF" when totalDebtBase == 0
+      const hfFormatted = totalDebt === 0n ? 'INF' : (Number(healthFactor) / 1e18).toFixed(4);
+      
       // Health factor >= 1e18 means user is not liquidatable
       const threshold = BigInt('1000000000000000000'); // 1e18
       
       if (healthFactor >= threshold) {
-        const hfFormatted = (Number(healthFactor) / 1e18).toFixed(4);
         return {
           liquidatable: false,
           healthFactor: hfFormatted,
@@ -109,7 +111,7 @@ export class ExecutionService {
       
       return {
         liquidatable: true,
-        healthFactor: (Number(healthFactor) / 1e18).toFixed(4),
+        healthFactor: hfFormatted,
         totalDebt
       };
       
@@ -483,14 +485,57 @@ export class ExecutionService {
       // Calculate USD value (now safe since prices are validated)
       const debtToCoverUsd = calculateUsdValue(debtToCover, selectedDebt.decimals, selectedDebt.priceRaw);
       
-      // Log intermediate values for debugging
+      // Scaling detection: check if debtToCoverHuman or collateralHuman exceeds reasonable bounds
+      const debtToCoverHuman = Number(debtToCover) / (10 ** selectedDebt.decimals);
+      const collateralHuman = Number(selectedCollateral.aTokenBalance) / (10 ** selectedCollateral.decimals);
+      
+      if (debtToCoverHuman > 1e6) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[execution] scaling_guard: debtToCoverHuman=${debtToCoverHuman.toFixed(2)} > 1e6 tokens - ABORTING`
+        );
+        return {
+          success: false,
+          skipReason: 'resolve_failed',
+          details: `scaling_guard: debt amount ${debtToCoverHuman.toFixed(2)} exceeds 1e6 tokens`
+        };
+      }
+      
+      if (collateralHuman > 1e6) {
+        // eslint-disable-next-line no-console
+        console.error(
+          `[execution] scaling_guard: collateralHuman=${collateralHuman.toFixed(2)} > 1e6 tokens - ABORTING`
+        );
+        return {
+          success: false,
+          skipReason: 'resolve_failed',
+          details: `scaling_guard: collateral amount ${collateralHuman.toFixed(2)} exceeds 1e6 tokens`
+        };
+      }
+      
+      // Dust guard: check if both collateral and debt are below dust threshold
+      const DUST_THRESHOLD_WEI = BigInt(process.env.EXECUTION_DUST_WEI || '1000000000000'); // 1e12 wei by default
+      if (accountData.totalCollateralBase < DUST_THRESHOLD_WEI && accountData.totalDebtBase < DUST_THRESHOLD_WEI && healthFactor < 1.0) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[execution] dust_guard: both collateral and debt below threshold - SKIPPING`
+        );
+        return {
+          success: false,
+          skipReason: 'resolve_failed',
+          details: `dust_guard: collateral=${accountData.totalCollateralBase.toString()}, debt=${accountData.totalDebtBase.toString()}, threshold=${DUST_THRESHOLD_WEI.toString()}`
+        };
+      }
+      
+      // Log intermediate values for debugging (using readable decimals)
       // eslint-disable-next-line no-console
       console.log(
         `[execution] Repay calculation: user=${userAddress} ` +
         `debtAsset=${selectedDebt.symbol} totalDebt=${selectedDebt.totalDebt.toString()} ` +
         `debtToCover=${debtToCover.toString()} decimals=${selectedDebt.decimals} ` +
         `priceRaw=${selectedDebt.priceRaw.toString()} ` +
-        `debtToCoverUsd=${debtToCoverUsd.toFixed(6)} HF=${healthFactor.toFixed(4)}`
+        `debtToCoverUsd=${debtToCoverUsd.toFixed(6)} debtToCoverHuman=${debtToCoverHuman.toFixed(6)} ` +
+        `HF=${healthFactor.toFixed(4)}`
       );
 
       // Gate by MIN_REPAY_USD (default 50, hardcoded with optional env override)
@@ -600,6 +645,20 @@ export class ExecutionService {
    * Orchestrates flash loan, liquidation, and swap
    */
   private async executeReal(opportunity: Opportunity): Promise<ExecutionResult> {
+    // GUARD 0: Check EXECUTION_ENABLED flag BEFORE any processing
+    if (!executionConfig.executionEnabled) {
+      // eslint-disable-next-line no-console
+      console.log('[execution] Execution disabled via EXECUTION_ENABLED=false:', {
+        opportunityId: opportunity.id,
+        user: opportunity.user
+      });
+      return {
+        success: false,
+        simulated: false,
+        reason: 'execution_disabled'
+      };
+    }
+
     // Validate configuration
     if (!this.provider || !this.wallet || !this.executorAddress) {
       return {
@@ -617,14 +676,6 @@ export class ExecutionService {
     }
 
     try {
-      // eslint-disable-next-line no-console
-      console.log('[execution] REAL execution starting:', {
-        opportunityId: opportunity.id,
-        user: opportunity.user,
-        collateral: opportunity.collateralReserve.symbol,
-        debt: opportunity.principalReserve.symbol
-      });
-
       // Step 1: Preflight check - verify user is currently liquidatable at latest block
       const hfCheck = await this.checkAaveHealthFactor(opportunity.user);
       
@@ -659,27 +710,32 @@ export class ExecutionService {
       // Dust threshold: 1e12 wei base (configurable via EXECUTION_DUST_WEI env var)
       const DUST_THRESHOLD_WEI = BigInt(process.env.EXECUTION_DUST_WEI || '1000000000000'); // 1e12 wei by default
       
-      // Get collateral and debt from account data
+      // Get collateral and debt from account data (canonical source)
       const accountData = await this.aaveDataService!.getUserAccountData(opportunity.user);
       const totalCollateralBase = accountData.totalCollateralBase;
       const totalDebtBase = accountData.totalDebtBase;
+      const healthFactorRaw = accountData.healthFactor;
+      const healthFactorNum = Number(healthFactorRaw) / 1e18;
       
-      // Guard: If HF < 1 but totalCollateralBase < dust threshold, abort
-      if (totalCollateralBase < DUST_THRESHOLD_WEI && hfCheck.healthFactor < '1.0') {
+      // GUARD 1: Dust guard - both collateral AND debt below threshold
+      if (totalCollateralBase < DUST_THRESHOLD_WEI && totalDebtBase < DUST_THRESHOLD_WEI && healthFactorNum < 1.0) {
         // eslint-disable-next-line no-console
-        console.log('[execution] Skipping execution - collateral below dust threshold:', {
+        console.log('[execution] GUARD: dust_guard - both collateral and debt below threshold:', {
+          opportunityId: opportunity.id,
+          user: opportunity.user,
           totalCollateralBase: totalCollateralBase.toString(),
+          totalDebtBase: totalDebtBase.toString(),
           dustThreshold: DUST_THRESHOLD_WEI.toString(),
-          healthFactor: hfCheck.healthFactor
+          healthFactor: healthFactorNum.toFixed(4)
         });
         return {
           success: false,
           simulated: false,
-          reason: 'dust_position_not_actionable'
+          reason: 'dust_guard'
         };
       }
       
-      // Guard: If collateralUsd == 0 while HF < 1, abort (likely data issue)
+      // GUARD 2: Inconsistent zero collateral - If collateralUsd == 0 while HF < 1, abort (likely data issue)
       // Get ETH/USD price for conversion
       try {
         const ethUsdFeed = new ethers.Contract(
@@ -694,25 +750,27 @@ export class ExecutionService {
         // Convert collateral to USD
         const collateralUsd = Number(totalCollateralBase) * Number(ethPrice) / (10 ** ethPriceDecimals) / 1e18;
         
-        if (collateralUsd === 0 && hfCheck.healthFactor < '1.0') {
+        if (collateralUsd === 0 && healthFactorNum < 1.0) {
           // eslint-disable-next-line no-console
-          console.log('[execution] Skipping execution - zero collateral USD with HF < 1:', {
+          console.log('[execution] GUARD: inconsistent_zero_collateral - zero collateral USD with HF < 1:', {
+            opportunityId: opportunity.id,
+            user: opportunity.user,
             totalCollateralBase: totalCollateralBase.toString(),
             collateralUsd,
-            healthFactor: hfCheck.healthFactor
+            healthFactor: healthFactorNum.toFixed(4)
           });
           return {
             success: false,
             simulated: false,
-            reason: 'zero_collateral_hf_below_one'
+            reason: 'inconsistent_zero_collateral'
           };
         }
         
-        // Add reason for HF < 1
-        if (hfCheck.healthFactor < '1.0') {
+        // Log reason for HF < 1
+        if (healthFactorNum < 1.0) {
           const debtUsd = Number(totalDebtBase) * Number(ethPrice) / (10 ** ethPriceDecimals) / 1e18;
           // eslint-disable-next-line no-console
-          console.log(`[execution] Reason for HF<1: collateralUSD=$${collateralUsd.toFixed(6)}, debtUSD=$${debtUsd.toFixed(6)}`);
+          console.log(`[execution] Position details: collateralUSD=$${collateralUsd.toFixed(6)}, debtUSD=$${debtUsd.toFixed(6)}, HF=${healthFactorNum.toFixed(4)}`);
         }
       } catch (error) {
         // eslint-disable-next-line no-console
@@ -802,6 +860,25 @@ export class ExecutionService {
 
       // Format human-readable amount
       const debtToCoverHuman = formatTokenAmount(debtToCover, debtDecimals);
+      
+      // GUARD 3: Scaling anomaly guard - check if debtToCoverHuman exceeds reasonable bounds
+      const debtToCoverHumanNum = Number(debtToCoverHuman);
+      if (debtToCoverHumanNum > 1e6) {
+        // eslint-disable-next-line no-console
+        console.log('[execution] GUARD: scaling_guard - debt amount exceeds 1e6 tokens:', {
+          opportunityId: opportunity.id,
+          user: opportunity.user,
+          debtAsset: opportunity.principalReserve.symbol,
+          debtToCoverHuman: debtToCoverHumanNum.toFixed(2),
+          debtToCoverRaw: debtToCover.toString(),
+          decimals: debtDecimals
+        });
+        return {
+          success: false,
+          simulated: false,
+          reason: 'scaling_guard'
+        };
+      }
 
       // Calculate expected collateral amount with bonus
       // collateralAmount = debtToCover * (1 + liquidationBonus) * (priceDebt / priceCollateral)
@@ -865,17 +942,82 @@ export class ExecutionService {
         expectedCollateralRaw = BigInt(opportunity.collateralAmountRaw || '0');
       }
 
-      // Pre-quote diagnostics: log exact inputs before calling quote service
+      const expectedCollateralHuman = formatTokenAmount(expectedCollateralRaw, collateralDecimals);
+      const expectedCollateralHumanNum = Number(expectedCollateralHuman);
+      
+      // GUARD 4: Scaling anomaly guard - check if seizedCollateralHuman exceeds reasonable bounds
+      if (expectedCollateralHumanNum > 1e6) {
+        // eslint-disable-next-line no-console
+        console.log('[execution] GUARD: scaling_guard - seized collateral amount exceeds 1e6 tokens:', {
+          opportunityId: opportunity.id,
+          user: opportunity.user,
+          collateralAsset: opportunity.collateralReserve.symbol,
+          expectedCollateralHuman: expectedCollateralHumanNum.toFixed(2),
+          expectedCollateralRaw: expectedCollateralRaw.toString(),
+          decimals: collateralDecimals
+        });
+        return {
+          success: false,
+          simulated: false,
+          reason: 'scaling_guard'
+        };
+      }
+      
+      // Decimals verification log
+      // eslint-disable-next-line no-console
+      console.log('[execution] Decimals check:', {
+        debt: `${opportunity.principalReserve.symbol}=${debtDecimals}`,
+        collateral: `${opportunity.collateralReserve.symbol}=${collateralDecimals}`
+      });
+      
+      // Calculate seized collateral USD value
+      let seizedUsd = 0;
+      try {
+        const aave = this.aaveDataService;
+        if (!aave) {
+          throw new Error('AaveDataService not initialized - cannot fetch asset price');
+        }
+        const collateralPriceRaw = await aave.getAssetPrice(collateralAsset);
+        seizedUsd = calculateUsdValue(expectedCollateralRaw, collateralDecimals, collateralPriceRaw);
+      } catch (error) {
+        // eslint-disable-next-line no-console
+        console.warn('[execution] Failed to calculate seized USD:', error instanceof Error ? error.message : error);
+      }
+      
+      // GUARD 5: Profit reasonability check - ensure seizedUSD - repayUSD >= PROFIT_MIN_USD
+      const grossProfit = seizedUsd - debtToCoverUsdPrecise;
+      const profitMinUsd = config.profitMinUsd;
+      
+      if (grossProfit < profitMinUsd) {
+        // eslint-disable-next-line no-console
+        console.log('[execution] GUARD: unprofitable - gross profit below threshold:', {
+          opportunityId: opportunity.id,
+          user: opportunity.user,
+          seizedUsd: seizedUsd.toFixed(6),
+          repayUsd: debtToCoverUsdPrecise.toFixed(6),
+          grossProfit: grossProfit.toFixed(6),
+          profitMinUsd: profitMinUsd.toFixed(6)
+        });
+        return {
+          success: false,
+          simulated: false,
+          reason: 'unprofitable'
+        };
+      }
+      
+      // Pre-quote diagnostics: log exact inputs before calling quote service (using readable decimals)
       // eslint-disable-next-line no-console
       console.log('[execution] Pre-quote diagnostics:', {
         debtToCoverRaw: debtToCover.toString(),
-        debtToCoverHuman,
+        debtToCoverHuman: debtToCoverHuman,
         debtToCoverUsd: debtToCoverUsdPrecise.toFixed(6),
         expectedCollateralRaw: expectedCollateralRaw.toString(),
-        expectedCollateralHuman: formatTokenAmount(expectedCollateralRaw, collateralDecimals),
-        debtAsset,
-        collateralAsset,
-        liquidationBonusPct,
+        expectedCollateralHuman: expectedCollateralHuman,
+        seizedUsd: seizedUsd.toFixed(6),
+        grossProfit: grossProfit.toFixed(6),
+        debtAsset: `${opportunity.principalReserve.symbol} (${debtAsset})`,
+        collateralAsset: `${opportunity.collateralReserve.symbol} (${collateralAsset})`,
+        liquidationBonusPct: (liquidationBonusPct * 100).toFixed(2) + '%',
         bonusBps: Math.round(liquidationBonusPct * 10000),
         closeFactorMode: config.closeFactorExecutionMode
       });
@@ -1100,8 +1242,41 @@ export class ExecutionService {
     
     if (this.aaveDataService && this.aaveDataService.isInitialized() && opportunity.triggerSource === 'realtime') {
       try {
-        // Fetch live debt from Protocol Data Provider
+        // Fetch canonical user reserve data from Protocol Data Provider
+        const userReserveData = await this.aaveDataService.getUserReserveData(debtAsset, userAddress);
+        
+        // Get total debt using canonical reconstruction (handles variable debt scaling properly)
         totalDebt = await this.aaveDataService.getTotalDebt(debtAsset, userAddress);
+        
+        // Cross-check: if scaledVariableDebt > 0, verify reconstruction
+        if (userReserveData.scaledVariableDebt > 0n) {
+          const RAY = BigInt(10 ** 27);
+          const reserveData = await this.aaveDataService.getReserveData(debtAsset);
+          const variableBorrowIndex = reserveData.variableBorrowIndex;
+          
+          // Reconstruct variable debt: scaledVariableDebt * variableBorrowIndex / RAY
+          const reconstructed = (userReserveData.scaledVariableDebt * variableBorrowIndex) / RAY;
+          
+          // Compare with currentVariableDebt from getUserReserveData
+          if (userReserveData.currentVariableDebt > 0n) {
+            const diff = reconstructed > userReserveData.currentVariableDebt
+              ? reconstructed - userReserveData.currentVariableDebt
+              : userReserveData.currentVariableDebt - reconstructed;
+            
+            // Tolerance: 0.5% (more lenient than the 0.1% in getTotalDebt)
+            const tolerance = reconstructed / 200n;
+            
+            if (diff > tolerance) {
+              // eslint-disable-next-line no-console
+              console.error(
+                `[execution] SCALING SUSPECTED: Variable debt inconsistency detected: ` +
+                `reconstructed=${reconstructed.toString()} vs current=${userReserveData.currentVariableDebt.toString()} ` +
+                `diff=${diff.toString()} (>${tolerance.toString()} tolerance) - ABORTING`
+              );
+              throw new Error('scaling_guard: Variable debt reconstruction inconsistent with canonical values');
+            }
+          }
+        }
         
         // Fetch liquidation bonus for this reserve
         const collateralAsset = opportunity.collateralReserve.id;
@@ -1111,8 +1286,12 @@ export class ExecutionService {
         realtimeLiquidationBonusBps.set(liquidationBonusPct * 10000);
         
         // eslint-disable-next-line no-console
-        console.log('[execution] Fetched live debt data:', {
+        console.log('[execution] Fetched live debt data with canonical accounting:', {
           totalDebt: totalDebt.toString(),
+          currentATokenBalance: userReserveData.currentATokenBalance.toString(),
+          currentVariableDebt: userReserveData.currentVariableDebt.toString(),
+          currentStableDebt: userReserveData.currentStableDebt.toString(),
+          scaledVariableDebt: userReserveData.scaledVariableDebt.toString(),
           liquidationBonusPct,
           mode
         });
