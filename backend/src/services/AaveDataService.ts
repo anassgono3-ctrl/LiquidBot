@@ -16,9 +16,10 @@ const ORACLE_ABI = [
   'function getAssetPrice(address asset) external view returns (uint256)'
 ];
 
-// Aave Pool ABI (for getUserAccountData)
+// Aave Pool ABI (for getUserAccountData and getReserveData)
 const POOL_ABI = [
-  'function getUserAccountData(address user) external view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)'
+  'function getUserAccountData(address user) external view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)',
+  'function getReserveData(address asset) external view returns (uint256 unbacked, uint256 accruedToTreasuryScaled, uint256 totalAToken, uint256 totalStableDebt, uint256 totalVariableDebt, uint256 liquidityRate, uint256 variableBorrowRate, uint256 stableBorrowRate, uint256 averageStableBorrowRate, uint256 liquidityIndex, uint256 variableBorrowIndex, uint40 lastUpdateTimestamp)'
 ];
 
 // Aave UI Pool Data Provider ABI (for getting all reserves list)
@@ -92,12 +93,24 @@ export class AaveDataService {
   private oracle: ethers.Contract | null = null;
   private pool: ethers.Contract | null = null;
   private uiPoolDataProvider: ethers.Contract | null = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private aaveMetadata: any | null = null; // AaveMetadata instance (optional, using any to avoid circular dependency)
 
-  constructor(provider?: ethers.JsonRpcProvider) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  constructor(provider?: ethers.JsonRpcProvider, aaveMetadata?: any) {
     if (provider) {
       this.provider = provider;
       this.initializeContracts();
     }
+    this.aaveMetadata = aaveMetadata || null;
+  }
+  
+  /**
+   * Set AaveMetadata instance for symbol resolution
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setAaveMetadata(aaveMetadata: any): void {
+    this.aaveMetadata = aaveMetadata;
   }
 
   /**
@@ -233,10 +246,75 @@ export class AaveDataService {
 
   /**
    * Calculate total debt for a user's reserve (variable + stable)
+   * Properly expands scaled variable debt using the reserve's variable borrow index
    */
   async getTotalDebt(asset: string, user: string): Promise<bigint> {
     const userData = await this.getUserReserveData(asset, user);
-    return userData.currentVariableDebt + userData.currentStableDebt;
+    
+    // Get the reserve's variable borrow index to expand scaled debt
+    let principalVariableDebt: bigint;
+    
+    // Check if we have scaledVariableDebt that needs expansion
+    if (userData.scaledVariableDebt > 0n) {
+      try {
+        // Fetch reserve data to get variableBorrowIndex
+        const reserveData = await this.getReserveData(asset);
+        const variableBorrowIndex = reserveData.variableBorrowIndex;
+        
+        // Expand scaled debt: principalVariableDebt = scaledVariableDebt * variableBorrowIndex / RAY
+        const RAY = BigInt(10 ** 27);
+        principalVariableDebt = (userData.scaledVariableDebt * variableBorrowIndex) / RAY;
+        
+        // Note: If currentVariableDebt is also provided, we prefer the expanded value
+        // as it accounts for accrued interest more accurately
+      } catch (error) {
+        // Fallback to currentVariableDebt if reserve data fetch fails
+        principalVariableDebt = userData.currentVariableDebt;
+      }
+    } else {
+      // No scaled debt, use current variable debt directly
+      principalVariableDebt = userData.currentVariableDebt;
+    }
+    
+    return principalVariableDebt + userData.currentStableDebt;
+  }
+  
+  /**
+   * Get reserve data including indices and rates
+   */
+  async getReserveData(asset: string): Promise<{
+    unbacked: bigint;
+    accruedToTreasuryScaled: bigint;
+    totalAToken: bigint;
+    totalStableDebt: bigint;
+    totalVariableDebt: bigint;
+    liquidityRate: bigint;
+    variableBorrowRate: bigint;
+    stableBorrowRate: bigint;
+    averageStableBorrowRate: bigint;
+    liquidityIndex: bigint;
+    variableBorrowIndex: bigint;
+    lastUpdateTimestamp: bigint;
+  }> {
+    if (!this.pool) {
+      throw new Error('AaveDataService not initialized with provider');
+    }
+
+    const result = await this.pool.getReserveData(asset);
+    return {
+      unbacked: result.unbacked,
+      accruedToTreasuryScaled: result.accruedToTreasuryScaled,
+      totalAToken: result.totalAToken,
+      totalStableDebt: result.totalStableDebt,
+      totalVariableDebt: result.totalVariableDebt,
+      liquidityRate: result.liquidityRate,
+      variableBorrowRate: result.variableBorrowRate,
+      stableBorrowRate: result.stableBorrowRate,
+      averageStableBorrowRate: result.averageStableBorrowRate,
+      liquidityIndex: result.liquidityIndex,
+      variableBorrowIndex: result.variableBorrowIndex,
+      lastUpdateTimestamp: result.lastUpdateTimestamp
+    };
   }
 
   /**
@@ -280,7 +358,8 @@ export class AaveDataService {
       try {
         // Get user reserve data
         const userData = await this.getUserReserveData(asset, userAddress);
-        const totalDebt = userData.currentStableDebt + userData.currentVariableDebt;
+        // Use getTotalDebt which properly expands scaled variable debt
+        const totalDebt = await this.getTotalDebt(asset, userAddress);
         
         // Skip reserves with no position (no debt and no collateral)
         if (totalDebt === 0n && userData.currentATokenBalance === 0n) {
@@ -326,9 +405,19 @@ export class AaveDataService {
   }
 
   /**
-   * Map asset address to symbol (Base mainnet)
+   * Map asset address to symbol
+   * Uses AaveMetadata if available, otherwise falls back to hardcoded mapping
    */
   private getSymbolForAsset(asset: string): string {
+    // Try to get symbol from AaveMetadata first
+    if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
+      const reserve = this.aaveMetadata.getReserve(asset);
+      if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
+        return reserve.symbol;
+      }
+    }
+    
+    // Fallback to hardcoded mapping (Base mainnet)
     const knownAssets: Record<string, string> = {
       '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
@@ -338,6 +427,14 @@ export class AaveDataService {
       '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': 'cbETH',
     };
 
-    return knownAssets[asset.toLowerCase()] || 'UNKNOWN';
+    const symbol = knownAssets[asset.toLowerCase()];
+    
+    // Log if symbol is missing for debugging
+    if (!symbol) {
+      // eslint-disable-next-line no-console
+      console.warn(`[aave-data] symbol_missing: ${asset} - consider adding to AaveMetadata`);
+    }
+    
+    return symbol || 'UNKNOWN';
   }
 }
