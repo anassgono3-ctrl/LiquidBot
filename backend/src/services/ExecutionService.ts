@@ -510,27 +510,58 @@ export class ExecutionService {
       const debtToCoverHuman = Number(debtToCover) / (10 ** selectedDebt.decimals);
       const collateralHuman = Number(selectedCollateral.aTokenBalance) / (10 ** selectedCollateral.decimals);
       
-      if (debtToCoverHuman > 1e6) {
+      // Get per-asset maximum token bounds from env (REALISTIC_MAX_TOKEN_{SYMBOL})
+      const getMaxTokenBound = (symbol: string): number => {
+        const envKey = `REALISTIC_MAX_TOKEN_${symbol.toUpperCase()}`;
+        const envValue = process.env[envKey];
+        if (envValue) {
+          const parsed = parseFloat(envValue);
+          if (!isNaN(parsed) && parsed > 0) {
+            return parsed;
+          }
+        }
+        // Fallback to default 1e6
+        return 1e6;
+      };
+      
+      const debtMaxBound = getMaxTokenBound(selectedDebt.symbol);
+      const collateralMaxBound = getMaxTokenBound(selectedCollateral.symbol);
+      
+      // Log resolve success with raw/human amounts
+      // eslint-disable-next-line no-console
+      console.log(
+        `[resolve][ok] debt: asset=${selectedDebt.symbol} raw=${selectedDebt.totalDebt.toString()} human=${(Number(selectedDebt.totalDebt) / (10 ** selectedDebt.decimals)).toFixed(9)}`
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        `[resolve][ok] collateral: asset=${selectedCollateral.symbol} raw=${selectedCollateral.aTokenBalance.toString()} human=${collateralHuman.toFixed(9)}`
+      );
+      // eslint-disable-next-line no-console
+      console.log(
+        `[decimals check] debt=${selectedDebt.decimals} collateral=${selectedCollateral.decimals}`
+      );
+      
+      if (debtToCoverHuman > debtMaxBound) {
         // eslint-disable-next-line no-console
         console.error(
-          `[execution] scaling_guard: debtToCoverHuman=${debtToCoverHuman.toFixed(2)} > 1e6 tokens - ABORTING`
+          `[execution] scaling_guard: debtToCoverHuman=${debtToCoverHuman.toFixed(2)} > ${debtMaxBound} tokens (${selectedDebt.symbol}) - ABORTING`
         );
         return {
           success: false,
           skipReason: 'resolve_failed',
-          details: `scaling_guard: debt amount ${debtToCoverHuman.toFixed(2)} exceeds 1e6 tokens`
+          details: `scaling_guard: debt amount ${debtToCoverHuman.toFixed(2)} ${selectedDebt.symbol} exceeds ${debtMaxBound} tokens`
         };
       }
       
-      if (collateralHuman > 1e6) {
+      if (collateralHuman > collateralMaxBound) {
         // eslint-disable-next-line no-console
         console.error(
-          `[execution] scaling_guard: collateralHuman=${collateralHuman.toFixed(2)} > 1e6 tokens - ABORTING`
+          `[execution] scaling_guard: collateralHuman=${collateralHuman.toFixed(2)} > ${collateralMaxBound} tokens (${selectedCollateral.symbol}) - ABORTING`
         );
         return {
           success: false,
           skipReason: 'resolve_failed',
-          details: `scaling_guard: collateral amount ${collateralHuman.toFixed(2)} exceeds 1e6 tokens`
+          details: `scaling_guard: collateral amount ${collateralHuman.toFixed(2)} ${selectedCollateral.symbol} exceeds ${collateralMaxBound} tokens`
         };
       }
       
@@ -883,16 +914,33 @@ export class ExecutionService {
       const debtToCoverHuman = formatTokenAmount(debtToCover, debtDecimals);
       
       // GUARD 3: Scaling anomaly guard - check if debtToCoverHuman exceeds reasonable bounds
+      // Get per-asset maximum token bound from env (REALISTIC_MAX_TOKEN_{SYMBOL})
+      const getMaxTokenBound = (symbol: string): number => {
+        const envKey = `REALISTIC_MAX_TOKEN_${symbol.toUpperCase()}`;
+        const envValue = process.env[envKey];
+        if (envValue) {
+          const parsed = parseFloat(envValue);
+          if (!isNaN(parsed) && parsed > 0) {
+            return parsed;
+          }
+        }
+        // Fallback to default 1e6
+        return 1e6;
+      };
+      
       const debtToCoverHumanNum = Number(debtToCoverHuman);
-      if (debtToCoverHumanNum > 1e6) {
+      const debtMaxBound = getMaxTokenBound(opportunity.principalReserve.symbol || 'UNKNOWN');
+      
+      if (debtToCoverHumanNum > debtMaxBound) {
         // eslint-disable-next-line no-console
-        console.log('[execution] GUARD: scaling_guard - debt amount exceeds 1e6 tokens:', {
+        console.log('[execution] GUARD: scaling_guard - debt amount exceeds threshold:', {
           opportunityId: opportunity.id,
           user: opportunity.user,
           debtAsset: opportunity.principalReserve.symbol,
           debtToCoverHuman: debtToCoverHumanNum.toFixed(2),
           debtToCoverRaw: debtToCover.toString(),
-          decimals: debtDecimals
+          decimals: debtDecimals,
+          threshold: debtMaxBound
         });
         return {
           success: false,
@@ -967,15 +1015,18 @@ export class ExecutionService {
       const expectedCollateralHumanNum = Number(expectedCollateralHuman);
       
       // GUARD 4: Scaling anomaly guard - check if seizedCollateralHuman exceeds reasonable bounds
-      if (expectedCollateralHumanNum > 1e6) {
+      const collateralMaxBound = getMaxTokenBound(opportunity.collateralReserve.symbol || 'UNKNOWN');
+      
+      if (expectedCollateralHumanNum > collateralMaxBound) {
         // eslint-disable-next-line no-console
-        console.log('[execution] GUARD: scaling_guard - seized collateral amount exceeds 1e6 tokens:', {
+        console.log('[execution] GUARD: scaling_guard - seized collateral amount exceeds threshold:', {
           opportunityId: opportunity.id,
           user: opportunity.user,
           collateralAsset: opportunity.collateralReserve.symbol,
           expectedCollateralHuman: expectedCollateralHumanNum.toFixed(2),
           expectedCollateralRaw: expectedCollateralRaw.toString(),
-          decimals: collateralDecimals
+          decimals: collateralDecimals,
+          threshold: collateralMaxBound
         });
         return {
           success: false,
@@ -1266,38 +1317,8 @@ export class ExecutionService {
         // Fetch canonical user reserve data from Protocol Data Provider
         const userReserveData = await this.aaveDataService.getUserReserveData(debtAsset, userAddress);
         
-        // Get total debt using canonical reconstruction (handles variable debt scaling properly)
+        // Get total debt using canonical values (currentVariableDebt + currentStableDebt)
         totalDebt = await this.aaveDataService.getTotalDebt(debtAsset, userAddress);
-        
-        // Cross-check: if scaledVariableDebt > 0, verify reconstruction
-        if (userReserveData.scaledVariableDebt > 0n) {
-          const RAY = BigInt(10 ** 27);
-          const reserveData = await this.aaveDataService.getReserveData(debtAsset);
-          const variableBorrowIndex = reserveData.variableBorrowIndex;
-          
-          // Reconstruct variable debt: scaledVariableDebt * variableBorrowIndex / RAY
-          const reconstructed = (userReserveData.scaledVariableDebt * variableBorrowIndex) / RAY;
-          
-          // Compare with currentVariableDebt from getUserReserveData
-          if (userReserveData.currentVariableDebt > 0n) {
-            const diff = reconstructed > userReserveData.currentVariableDebt
-              ? reconstructed - userReserveData.currentVariableDebt
-              : userReserveData.currentVariableDebt - reconstructed;
-            
-            // Tolerance: 0.5% (more lenient than the 0.1% in getTotalDebt)
-            const tolerance = reconstructed / 200n;
-            
-            if (diff > tolerance) {
-              // eslint-disable-next-line no-console
-              console.error(
-                `[execution] SCALING SUSPECTED: Variable debt inconsistency detected: ` +
-                `reconstructed=${reconstructed.toString()} vs current=${userReserveData.currentVariableDebt.toString()} ` +
-                `diff=${diff.toString()} (>${tolerance.toString()} tolerance) - ABORTING`
-              );
-              throw new Error('scaling_guard: Variable debt reconstruction inconsistent with canonical values');
-            }
-          }
-        }
         
         // Fetch liquidation bonus for this reserve
         const collateralAsset = opportunity.collateralReserve.id;
@@ -1312,7 +1333,6 @@ export class ExecutionService {
           currentATokenBalance: userReserveData.currentATokenBalance.toString(),
           currentVariableDebt: userReserveData.currentVariableDebt.toString(),
           currentStableDebt: userReserveData.currentStableDebt.toString(),
-          scaledVariableDebt: userReserveData.scaledVariableDebt.toString(),
           liquidationBonusPct,
           mode
         });

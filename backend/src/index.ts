@@ -62,6 +62,13 @@ const healthMonitor = new HealthMonitor(subgraphService || SubgraphService.creat
 // Initialize execution scaffold
 const executionService = new ExecutionService();
 
+// Log execution configuration prominently at startup
+if (config.executionEnabled) {
+  logger.info('[config] EXECUTION_ENABLED=true (live execution active)');
+} else {
+  logger.info('[config] EXECUTION_ENABLED=false (execution disabled)');
+}
+
 // Initialize AaveMetadata if RPC is configured (async initialization deferred)
 // Use async IIFE to initialize AaveMetadata
 (async () => {

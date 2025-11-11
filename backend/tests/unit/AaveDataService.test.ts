@@ -1,4 +1,4 @@
-// AaveDataService.test.ts - Unit tests for variable debt expansion
+// AaveDataService.test.ts - Unit tests for canonical debt values
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ethers } from 'ethers';
 
@@ -18,83 +18,47 @@ describe('AaveDataService', () => {
       service = new AaveDataService(mockProvider);
     });
 
-    it('should expand scaled variable debt using variableBorrowIndex', async () => {
-      // Mock getUserReserveData to return scaled debt
-      const scaledVariableDebt = BigInt('1000000000000000000'); // 1.0 scaled
-      const currentStableDebt = BigInt('500000000000000000'); // 0.5 stable
-      const variableBorrowIndex = BigInt('1050000000000000000000000000'); // 1.05 * RAY
+    it('should use canonical currentVariableDebt and currentStableDebt directly', async () => {
+      // Mock getUserReserveData to return canonical debt values
+      const currentVariableDebt = BigInt('1050000000000000000'); // 1.05 variable debt (already scaled by protocol)
+      const currentStableDebt = BigInt('500000000000000000'); // 0.5 stable debt
       
       vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
         currentATokenBalance: 0n,
         currentStableDebt,
-        currentVariableDebt: 0n, // Not provided initially
+        currentVariableDebt, // Canonical value from Protocol Data Provider
         principalStableDebt: currentStableDebt,
-        scaledVariableDebt,
+        scaledVariableDebt: BigInt('1000000000000000000'), // Not used in new implementation
         stableBorrowRate: 0n,
         liquidityRate: 0n,
         stableRateLastUpdated: 0n,
         usageAsCollateralEnabled: false
-      });
-      
-      vi.spyOn(service, 'getReserveData').mockResolvedValue({
-        unbacked: 0n,
-        accruedToTreasuryScaled: 0n,
-        totalAToken: 0n,
-        totalStableDebt: 0n,
-        totalVariableDebt: 0n,
-        liquidityRate: 0n,
-        variableBorrowRate: 0n,
-        stableBorrowRate: 0n,
-        averageStableBorrowRate: 0n,
-        liquidityIndex: BigInt(10 ** 27),
-        variableBorrowIndex,
-        lastUpdateTimestamp: 0n
       });
       
       const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
       
-      // Expected: scaledVariableDebt * variableBorrowIndex / RAY + stableDebt
-      // = 1.0 * 1.05 + 0.5 = 1.55
-      const RAY = BigInt(10 ** 27);
-      const expectedVariableDebt = (scaledVariableDebt * variableBorrowIndex) / RAY;
-      const expectedTotal = expectedVariableDebt + currentStableDebt;
+      // Expected: currentVariableDebt + currentStableDebt (canonical values)
+      // = 1.05 + 0.5 = 1.55
+      const expectedTotal = currentVariableDebt + currentStableDebt;
       
       expect(totalDebt).toBe(expectedTotal);
-      // Allow for minor rounding due to BigInt division
-      const tolerance = BigInt('100'); // Within 100 wei
-      expect(totalDebt - BigInt('1550000000000000000')).toBeLessThan(tolerance);
+      expect(totalDebt).toBe(BigInt('1550000000000000000'));
     });
 
-    it('should handle different variableBorrowIndex values', async () => {
-      const scaledVariableDebt = BigInt('2000000000000000000'); // 2.0 scaled
+    it('should handle zero stable debt correctly', async () => {
+      const currentVariableDebt = BigInt('2400000000000000000'); // 2.4 variable debt (canonical)
       const currentStableDebt = BigInt('0'); // No stable debt
-      const variableBorrowIndex = BigInt('1200000000000000000000000000'); // 1.2 * RAY
       
       vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
         currentATokenBalance: 0n,
         currentStableDebt,
-        currentVariableDebt: 0n,
+        currentVariableDebt,
         principalStableDebt: 0n,
-        scaledVariableDebt,
+        scaledVariableDebt: BigInt('2000000000000000000'), // Not used in new implementation
         stableBorrowRate: 0n,
         liquidityRate: 0n,
         stableRateLastUpdated: 0n,
         usageAsCollateralEnabled: false
-      });
-      
-      vi.spyOn(service, 'getReserveData').mockResolvedValue({
-        unbacked: 0n,
-        accruedToTreasuryScaled: 0n,
-        totalAToken: 0n,
-        totalStableDebt: 0n,
-        totalVariableDebt: 0n,
-        liquidityRate: 0n,
-        variableBorrowRate: 0n,
-        stableBorrowRate: 0n,
-        averageStableBorrowRate: 0n,
-        liquidityIndex: BigInt(10 ** 27),
-        variableBorrowIndex,
-        lastUpdateTimestamp: 0n
       });
       
       const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
@@ -155,51 +119,9 @@ describe('AaveDataService', () => {
       expect(totalDebt).toBe(BigInt('1500000000000000000'));
     });
 
-    it('should handle high borrow index (long-term accrued interest)', async () => {
-      const scaledVariableDebt = BigInt('1000000000'); // 1000 in small token (e.g., USDC with 6 decimals)
-      const currentStableDebt = BigInt('0');
-      // Index after significant time: 1.5 * RAY (50% accrued interest)
-      const variableBorrowIndex = BigInt('1500000000000000000000000000');
-      
-      vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
-        currentATokenBalance: 0n,
-        currentStableDebt,
-        currentVariableDebt: 0n,
-        principalStableDebt: 0n,
-        scaledVariableDebt,
-        stableBorrowRate: 0n,
-        liquidityRate: 0n,
-        stableRateLastUpdated: 0n,
-        usageAsCollateralEnabled: false
-      });
-      
-      vi.spyOn(service, 'getReserveData').mockResolvedValue({
-        unbacked: 0n,
-        accruedToTreasuryScaled: 0n,
-        totalAToken: 0n,
-        totalStableDebt: 0n,
-        totalVariableDebt: 0n,
-        liquidityRate: 0n,
-        variableBorrowRate: 0n,
-        stableBorrowRate: 0n,
-        averageStableBorrowRate: 0n,
-        liquidityIndex: BigInt(10 ** 27),
-        variableBorrowIndex,
-        lastUpdateTimestamp: 0n
-      });
-      
-      const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
-      
-      // Expected: 1000 * 1.5 = 1500 (with minor rounding tolerance)
-      const expected = BigInt('1500000000');
-      const tolerance = BigInt('10');
-      expect(totalDebt - expected).toBeLessThan(tolerance);
-    });
-
-    it('should prefer currentVariableDebt when within 0.1% of reconstructed', async () => {
-      const scaledVariableDebt = BigInt('1000000000000000000'); // 1.0 scaled
-      const variableBorrowIndex = BigInt('1050000000000000000000000000'); // 1.05 * RAY
-      const currentVariableDebt = BigInt('1050100000000000000'); // 1.0501 (within 0.1% of reconstructed)
+    it('should handle USDC-sized debt correctly (6 decimals)', async () => {
+      // USDC-sized debt with 6 decimals - canonical value already scaled by protocol
+      const currentVariableDebt = BigInt('1500000000'); // 1500 USDC (canonical)
       const currentStableDebt = BigInt('0');
       
       vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
@@ -207,86 +129,31 @@ describe('AaveDataService', () => {
         currentStableDebt,
         currentVariableDebt,
         principalStableDebt: 0n,
-        scaledVariableDebt,
+        scaledVariableDebt: BigInt('1000000000'), // Not used in new implementation
         stableBorrowRate: 0n,
         liquidityRate: 0n,
         stableRateLastUpdated: 0n,
         usageAsCollateralEnabled: false
       });
       
-      vi.spyOn(service, 'getReserveData').mockResolvedValue({
-        unbacked: 0n,
-        accruedToTreasuryScaled: 0n,
-        totalAToken: 0n,
-        totalStableDebt: 0n,
-        totalVariableDebt: 0n,
-        liquidityRate: 0n,
-        variableBorrowRate: 0n,
-        stableBorrowRate: 0n,
-        averageStableBorrowRate: 0n,
-        liquidityIndex: BigInt(10 ** 27),
-        variableBorrowIndex,
-        lastUpdateTimestamp: 0n
-      });
-      
       const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
       
-      // Should use currentVariableDebt to avoid rounding differences
+      // Expected: canonical currentVariableDebt = 1500 USDC
       expect(totalDebt).toBe(currentVariableDebt);
+      expect(totalDebt).toBe(BigInt('1500000000'));
     });
 
-    it('should use reconstructed value when difference exceeds 0.1%', async () => {
-      const scaledVariableDebt = BigInt('1000000000000000000'); // 1.0 scaled
-      const variableBorrowIndex = BigInt('1050000000000000000000000000'); // 1.05 * RAY
-      // currentVariableDebt is significantly different (more than 0.1%)
-      const currentVariableDebt = BigInt('1070000000000000000'); // 1.07 (too different)
-      const currentStableDebt = BigInt('0');
-      
-      vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
-        currentATokenBalance: 0n,
-        currentStableDebt,
-        currentVariableDebt,
-        principalStableDebt: 0n,
-        scaledVariableDebt,
-        stableBorrowRate: 0n,
-        liquidityRate: 0n,
-        stableRateLastUpdated: 0n,
-        usageAsCollateralEnabled: false
-      });
-      
-      vi.spyOn(service, 'getReserveData').mockResolvedValue({
-        unbacked: 0n,
-        accruedToTreasuryScaled: 0n,
-        totalAToken: 0n,
-        totalStableDebt: 0n,
-        totalVariableDebt: 0n,
-        liquidityRate: 0n,
-        variableBorrowRate: 0n,
-        stableBorrowRate: 0n,
-        averageStableBorrowRate: 0n,
-        liquidityIndex: BigInt(10 ** 27),
-        variableBorrowIndex,
-        lastUpdateTimestamp: 0n
-      });
-      
-      const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
-      
-      // Should use reconstructed value (1.05) not currentVariableDebt (1.07)
-      const RAY = BigInt(10 ** 27);
-      const expected = (scaledVariableDebt * variableBorrowIndex) / RAY;
-      expect(totalDebt).toBe(expected);
-    });
-
-    it('should use currentVariableDebt when scaledVariableDebt is zero', async () => {
-      const currentVariableDebt = BigInt('2000000000000000000'); // 2.0 already principal
-      const currentStableDebt = BigInt('500000000000000000'); // 0.5
+    it('should handle mix of variable and stable debt', async () => {
+      // Both variable and stable debt present - use canonical values
+      const currentVariableDebt = BigInt('2000000000000000000'); // 2.0 variable (canonical)
+      const currentStableDebt = BigInt('500000000000000000'); // 0.5 stable
       
       vi.spyOn(service, 'getUserReserveData').mockResolvedValue({
         currentATokenBalance: 0n,
         currentStableDebt,
         currentVariableDebt,
         principalStableDebt: currentStableDebt,
-        scaledVariableDebt: 0n, // No scaled debt
+        scaledVariableDebt: BigInt('1666666666666666666'), // Not used in new implementation
         stableBorrowRate: 0n,
         liquidityRate: 0n,
         stableRateLastUpdated: 0n,
@@ -295,7 +162,7 @@ describe('AaveDataService', () => {
       
       const totalDebt = await service.getTotalDebt('0xasset', '0xuser');
       
-      // Should use currentVariableDebt directly (no reconstruction needed)
+      // Should use canonical values directly: currentVariableDebt + currentStableDebt
       expect(totalDebt).toBe(currentVariableDebt + currentStableDebt);
       expect(totalDebt).toBe(BigInt('2500000000000000000'));
     });
