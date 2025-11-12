@@ -117,11 +117,15 @@ export class LiquidationAuditService {
     this.ourBotAddress = ourBotAddress;
     
     // Initialize Aave oracle helper if provider available
-    this.useAaveOracle = config.liquidationAuditPriceMode === 'aave_oracle' || false;
+    // Use pricesUseAaveOracle flag or fallback to liquidationAuditPriceMode
+    this.useAaveOracle = config.pricesUseAaveOracle || config.liquidationAuditPriceMode === 'aave_oracle';
     if (this.provider && this.useAaveOracle) {
       this.aaveOracleHelper = new AaveOracleHelper(this.provider);
       // Initialize asynchronously
-      this.aaveOracleHelper.initialize().catch((error) => {
+      this.aaveOracleHelper.initialize().then(() => {
+        // eslint-disable-next-line no-console
+        console.log(`[oracle] AaveOracleHelper initialized for audit (address=${this.aaveOracleHelper?.getOracleAddress() || 'unknown'})`);
+      }).catch((error) => {
         // eslint-disable-next-line no-console
         console.error('[liquidation-audit] Failed to initialize AaveOracleHelper:', error);
         this.aaveOracleHelper = null;

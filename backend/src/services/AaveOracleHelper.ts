@@ -97,6 +97,13 @@ export class AaveOracleHelper {
   }
 
   /**
+   * Get the resolved oracle address
+   */
+  getOracleAddress(): string | null {
+    return this.oracleAddress;
+  }
+
+  /**
    * Get token decimals from ERC20 contract (with caching)
    */
   async getDecimals(tokenAddress: string): Promise<number | null> {

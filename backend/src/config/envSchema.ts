@@ -219,9 +219,22 @@ export const rawEnvSchema = z.object({
   LIQUIDATION_AUDIT_PRICE_MODE: z.string().optional(),
   LIQUIDATION_AUDIT_SAMPLE_LIMIT: z.string().optional(),
   
-  // Hot/Warm/Cold set tracking
+  // Decision trace and classifier (defaults to true when LIQUIDATION_AUDIT_ENABLED=true)
+  DECISION_TRACE_ENABLED: z.string().optional(),
+  AUDIT_CLASSIFIER_ENABLED: z.string().optional(),
+  
+  // Prices via Aave Oracle
+  PRICES_USE_AAVE_ORACLE: z.string().optional(),
+  
+  // Hot/Warm/Cold set tracking (aka Hotlist)
   HOT_SET_ENABLED: z.string().optional(),
+  HOTLIST_ENABLED: z.string().optional(), // Alias for HOT_SET_ENABLED
   HOT_SET_HF_MAX: z.string().optional(),
+  HOTLIST_MIN_HF: z.string().optional(), // Min HF for hotlist inclusion (default: 0.99)
+  HOTLIST_MAX_HF: z.string().optional(), // Max HF for hotlist inclusion (default: 1.03)
+  HOTLIST_MIN_DEBT_USD: z.string().optional(), // Min debt USD for hotlist inclusion (default: 5)
+  HOTLIST_MAX: z.string().optional(), // Max hotlist size (default: 2000)
+  HOTLIST_REVISIT_SEC: z.string().optional(), // Hotlist refresh interval in seconds (default: 5)
   WARM_SET_HF_MAX: z.string().optional(),
   MAX_HOT_SIZE: z.string().optional(),
   MAX_WARM_SIZE: z.string().optional(),
@@ -230,6 +243,7 @@ export const rawEnvSchema = z.object({
   PRECOMPUTE_ENABLED: z.string().optional(),
   PRECOMPUTE_TOP_K: z.string().optional(),
   PRECOMPUTE_CLOSE_FACTOR_PCT: z.string().optional(),
+  PRECOMPUTE_RECEIVE_A_TOKEN: z.string().optional(), // Whether to receive aToken (default: false)
   
   // Price fastpath (Chainlink events)
   PRICE_FASTPATH_ENABLED: z.string().optional(),
@@ -257,8 +271,7 @@ export const rawEnvSchema = z.object({
   PRIORITY_SWEEP_METRICS_ENABLED: z.string().optional(),
   PRIORITY_SWEEP_TIMEOUT_MS: z.string().optional(),
   PRIORITY_SWEEP_PAGE_SIZE: z.string().optional(),
-  PRIORITY_SWEEP_INTER_REQUEST_MS: z.string().optional(),
-  HOTLIST_MAX_HF: z.string().optional()
+  PRIORITY_SWEEP_INTER_REQUEST_MS: z.string().optional()
 });
 
 export const env = (() => {
@@ -487,6 +500,25 @@ export const env = (() => {
     liquidationAuditNotify: (parsed.LIQUIDATION_AUDIT_NOTIFY || 'true').toLowerCase() === 'true',
     liquidationAuditPriceMode: (parsed.LIQUIDATION_AUDIT_PRICE_MODE || 'aave_oracle') as 'block' | 'current' | 'aave_oracle',
     liquidationAuditSampleLimit: Number(parsed.LIQUIDATION_AUDIT_SAMPLE_LIMIT || 0),
+    
+    // Decision trace and classifier (default to true when audit is enabled)
+    decisionTraceEnabled: (() => {
+      const auditEnabled = (parsed.LIQUIDATION_AUDIT_ENABLED || 'true').toLowerCase() === 'true';
+      if (parsed.DECISION_TRACE_ENABLED !== undefined) {
+        return parsed.DECISION_TRACE_ENABLED.toLowerCase() === 'true';
+      }
+      return auditEnabled; // default to true if audit enabled
+    })(),
+    auditClassifierEnabled: (() => {
+      const auditEnabled = (parsed.LIQUIDATION_AUDIT_ENABLED || 'true').toLowerCase() === 'true';
+      if (parsed.AUDIT_CLASSIFIER_ENABLED !== undefined) {
+        return parsed.AUDIT_CLASSIFIER_ENABLED.toLowerCase() === 'true';
+      }
+      return auditEnabled; // default to true if audit enabled
+    })(),
+    
+    // Prices via Aave Oracle
+    pricesUseAaveOracle: (parsed.PRICES_USE_AAVE_ORACLE || 'false').toLowerCase() === 'true',
 
     // Priority Sweep configuration
     prioritySweepEnabled: (parsed.PRIORITY_SWEEP_ENABLED || 'false').toLowerCase() === 'true',
@@ -507,8 +539,18 @@ export const env = (() => {
     prioritySweepInterRequestMs: Number(parsed.PRIORITY_SWEEP_INTER_REQUEST_MS || 100),
     hotlistMaxHf: Number(parsed.HOTLIST_MAX_HF || 1.05),
     
-    // Hot/Warm/Cold set tracking
-    hotSetEnabled: (parsed.HOT_SET_ENABLED || 'true').toLowerCase() === 'true',
+    // Hot/Warm/Cold set tracking (Hotlist)
+    hotSetEnabled: (() => {
+      // HOTLIST_ENABLED takes precedence over HOT_SET_ENABLED
+      if (parsed.HOTLIST_ENABLED !== undefined) {
+        return parsed.HOTLIST_ENABLED.toLowerCase() === 'true';
+      }
+      return (parsed.HOT_SET_ENABLED || 'true').toLowerCase() === 'true';
+    })(),
+    hotlistMinHf: Number(parsed.HOTLIST_MIN_HF || 0.99),
+    hotlistMinDebtUsd: Number(parsed.HOTLIST_MIN_DEBT_USD || 5),
+    hotlistMax: Number(parsed.HOTLIST_MAX || parsed.MAX_HOT_SIZE || 2000),
+    hotlistRevisitSec: Number(parsed.HOTLIST_REVISIT_SEC || 5),
     hotSetHfMax: Number(parsed.HOT_SET_HF_MAX || 1.03),
     warmSetHfMax: Number(parsed.WARM_SET_HF_MAX || 1.10),
     maxHotSize: Number(parsed.MAX_HOT_SIZE || 1000),
@@ -518,6 +560,7 @@ export const env = (() => {
     precomputeEnabled: (parsed.PRECOMPUTE_ENABLED || 'true').toLowerCase() === 'true',
     precomputeTopK: Number(parsed.PRECOMPUTE_TOP_K || 500),
     precomputeCloseFactorPct: Number(parsed.PRECOMPUTE_CLOSE_FACTOR_PCT || 50),
+    precomputeReceiveAToken: (parsed.PRECOMPUTE_RECEIVE_A_TOKEN || 'false').toLowerCase() === 'true',
     
     // Price fastpath (Chainlink events)
     priceFastpathEnabled: (parsed.PRICE_FASTPATH_ENABLED || 'true').toLowerCase() === 'true',
