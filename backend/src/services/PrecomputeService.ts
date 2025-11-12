@@ -151,8 +151,8 @@ export class PrecomputeService {
       const closeFactor = BigInt(this.config.closeFactorPct);
       const maxDebtToCover = (totalDebt * closeFactor) / 100n;
 
-      // Get collateral balance
-      const totalCollateral = await getUserCollateral(entry.address, collateralAsset);
+      // Get collateral balance (for future validation logic)
+      // const totalCollateral = await getUserCollateral(entry.address, collateralAsset);
 
       // Estimate seized collateral (simplified - would need liquidation bonus calculation)
       // For now, assume 1:1 ratio (in production, query Aave reserve data for bonus)

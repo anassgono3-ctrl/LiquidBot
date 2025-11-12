@@ -4,7 +4,7 @@
  * Maps decision traces to reason codes for audit and reporting.
  */
 
-import type { DecisionTrace, DecisionAction, SkipReason } from './DecisionTraceStore.js';
+import type { DecisionTrace } from './DecisionTraceStore.js';
 import type { DecisionTraceStore } from './DecisionTraceStore.js';
 
 export type ClassifiedReason =
