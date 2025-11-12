@@ -44,6 +44,9 @@ import { LowHFTracker } from './LowHFTracker.js';
 import { LiquidationAuditService } from './liquidationAudit.js';
 import { NotificationService } from './NotificationService.js';
 import { PriceService } from './PriceService.js';
+import { HotSetTracker } from './HotSetTracker.js';
+import { PrecomputeService } from './PrecomputeService.js';
+import { DecisionTraceStore } from './DecisionTraceStore.js';
 import { isZero } from '../utils/bigint.js';
 
 // ABIs
@@ -108,6 +111,9 @@ export class RealTimeHFService extends EventEmitter {
   private borrowersIndex?: BorrowersIndexService;
   private lowHfTracker?: LowHFTracker;
   private liquidationAuditService?: LiquidationAuditService;
+  private hotSetTracker?: HotSetTracker;
+  private precomputeService?: PrecomputeService;
+  private decisionTraceStore?: DecisionTraceStore;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -243,6 +249,32 @@ export class RealTimeHFService extends EventEmitter {
       );
     }
     
+    // Initialize hot-set tracker if enabled
+    if (config.hotSetEnabled) {
+      this.hotSetTracker = new HotSetTracker({
+        hotSetHfMax: config.hotSetHfMax,
+        warmSetHfMax: config.warmSetHfMax,
+        maxHotSize: config.maxHotSize,
+        maxWarmSize: config.maxWarmSize
+      });
+    }
+    
+    // Initialize precompute service if enabled
+    if (config.precomputeEnabled) {
+      this.precomputeService = new PrecomputeService({
+        topK: config.precomputeTopK,
+        enabled: config.precomputeEnabled,
+        closeFactorPct: config.precomputeCloseFactorPct
+      });
+    }
+    
+    // Initialize decision trace store if enabled
+    if (config.decisionTraceEnabled) {
+      this.decisionTraceStore = new DecisionTraceStore();
+      // eslint-disable-next-line no-console
+      console.log('[decision-trace] Store initialized');
+    }
+    
     // Initialize liquidation audit service if enabled
     if (config.liquidationAuditEnabled) {
       const priceService = options.priceService || new PriceService();
@@ -250,7 +282,8 @@ export class RealTimeHFService extends EventEmitter {
       this.liquidationAuditService = new LiquidationAuditService(
         priceService,
         notificationService,
-        this.provider as any // Will be set later in setupProvider
+        this.provider as any, // Will be set later in setupProvider
+        this.decisionTraceStore
       );
     }
     
