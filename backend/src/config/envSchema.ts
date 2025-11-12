@@ -217,7 +217,26 @@ export const rawEnvSchema = z.object({
   LIQUIDATION_AUDIT_ENABLED: z.string().optional(),
   LIQUIDATION_AUDIT_NOTIFY: z.string().optional(),
   LIQUIDATION_AUDIT_PRICE_MODE: z.string().optional(),
-  LIQUIDATION_AUDIT_SAMPLE_LIMIT: z.string().optional()
+  LIQUIDATION_AUDIT_SAMPLE_LIMIT: z.string().optional(),
+
+  // Priority Sweep configuration
+  PRIORITY_SWEEP_ENABLED: z.string().optional(),
+  PRIORITY_SWEEP_INTERVAL_MIN: z.string().optional(),
+  PRIORITY_MIN_DEBT_USD: z.string().optional(),
+  PRIORITY_MIN_COLLATERAL_USD: z.string().optional(),
+  PRIORITY_TARGET_SIZE: z.string().optional(),
+  PRIORITY_MAX_SCAN_USERS: z.string().optional(),
+  PRIORITY_SCORE_DEBT_WEIGHT: z.string().optional(),
+  PRIORITY_SCORE_COLLATERAL_WEIGHT: z.string().optional(),
+  PRIORITY_SCORE_HF_PENALTY: z.string().optional(),
+  PRIORITY_SCORE_HF_CEILING: z.string().optional(),
+  PRIORITY_SCORE_LOW_HF_BOOST: z.string().optional(),
+  PRIORITY_SWEEP_LOG_SUMMARY: z.string().optional(),
+  PRIORITY_SWEEP_METRICS_ENABLED: z.string().optional(),
+  PRIORITY_SWEEP_TIMEOUT_MS: z.string().optional(),
+  PRIORITY_SWEEP_PAGE_SIZE: z.string().optional(),
+  PRIORITY_SWEEP_INTER_REQUEST_MS: z.string().optional(),
+  HOTLIST_MAX_HF: z.string().optional()
 });
 
 export const env = (() => {
@@ -445,6 +464,25 @@ export const env = (() => {
     liquidationAuditEnabled: (parsed.LIQUIDATION_AUDIT_ENABLED || 'true').toLowerCase() === 'true',
     liquidationAuditNotify: (parsed.LIQUIDATION_AUDIT_NOTIFY || 'true').toLowerCase() === 'true',
     liquidationAuditPriceMode: (parsed.LIQUIDATION_AUDIT_PRICE_MODE || 'block') as 'block' | 'current',
-    liquidationAuditSampleLimit: Number(parsed.LIQUIDATION_AUDIT_SAMPLE_LIMIT || 0)
+    liquidationAuditSampleLimit: Number(parsed.LIQUIDATION_AUDIT_SAMPLE_LIMIT || 0),
+
+    // Priority Sweep configuration
+    prioritySweepEnabled: (parsed.PRIORITY_SWEEP_ENABLED || 'false').toLowerCase() === 'true',
+    prioritySweepIntervalMin: Number(parsed.PRIORITY_SWEEP_INTERVAL_MIN || 60),
+    priorityMinDebtUsd: Number(parsed.PRIORITY_MIN_DEBT_USD || 500),
+    priorityMinCollateralUsd: Number(parsed.PRIORITY_MIN_COLLATERAL_USD || 1500),
+    priorityTargetSize: Number(parsed.PRIORITY_TARGET_SIZE || 12000),
+    priorityMaxScanUsers: Number(parsed.PRIORITY_MAX_SCAN_USERS || 120000),
+    priorityScoreDebtWeight: Number(parsed.PRIORITY_SCORE_DEBT_WEIGHT || 1.0),
+    priorityScoreCollateralWeight: Number(parsed.PRIORITY_SCORE_COLLATERAL_WEIGHT || 0.8),
+    priorityScoreHfPenalty: Number(parsed.PRIORITY_SCORE_HF_PENALTY || 2.5),
+    priorityScoreHfCeiling: Number(parsed.PRIORITY_SCORE_HF_CEILING || 1.20),
+    priorityScoreLowHfBoost: Number(parsed.PRIORITY_SCORE_LOW_HF_BOOST || 1.1),
+    prioritySweepLogSummary: (parsed.PRIORITY_SWEEP_LOG_SUMMARY || 'true').toLowerCase() === 'true',
+    prioritySweepMetricsEnabled: (parsed.PRIORITY_SWEEP_METRICS_ENABLED || 'true').toLowerCase() === 'true',
+    prioritySweepTimeoutMs: Number(parsed.PRIORITY_SWEEP_TIMEOUT_MS || 240000),
+    prioritySweepPageSize: Number(parsed.PRIORITY_SWEEP_PAGE_SIZE || 1000),
+    prioritySweepInterRequestMs: Number(parsed.PRIORITY_SWEEP_INTER_REQUEST_MS || 100),
+    hotlistMaxHf: Number(parsed.HOTLIST_MAX_HF || 1.05)
   };
 })();

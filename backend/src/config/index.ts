@@ -236,4 +236,23 @@ export const config = {
   get liquidationAuditNotify() { return env.liquidationAuditNotify; },
   get liquidationAuditPriceMode() { return env.liquidationAuditPriceMode; },
   get liquidationAuditSampleLimit() { return env.liquidationAuditSampleLimit; },
+
+  // Priority Sweep configuration
+  get prioritySweepEnabled() { return env.prioritySweepEnabled; },
+  get prioritySweepIntervalMin() { return env.prioritySweepIntervalMin; },
+  get priorityMinDebtUsd() { return env.priorityMinDebtUsd; },
+  get priorityMinCollateralUsd() { return env.priorityMinCollateralUsd; },
+  get priorityTargetSize() { return env.priorityTargetSize; },
+  get priorityMaxScanUsers() { return env.priorityMaxScanUsers; },
+  get priorityScoreDebtWeight() { return env.priorityScoreDebtWeight; },
+  get priorityScoreCollateralWeight() { return env.priorityScoreCollateralWeight; },
+  get priorityScoreHfPenalty() { return env.priorityScoreHfPenalty; },
+  get priorityScoreHfCeiling() { return env.priorityScoreHfCeiling; },
+  get priorityScoreLowHfBoost() { return env.priorityScoreLowHfBoost; },
+  get prioritySweepLogSummary() { return env.prioritySweepLogSummary; },
+  get prioritySweepMetricsEnabled() { return env.prioritySweepMetricsEnabled; },
+  get prioritySweepTimeoutMs() { return env.prioritySweepTimeoutMs; },
+  get prioritySweepPageSize() { return env.prioritySweepPageSize; },
+  get prioritySweepInterRequestMs() { return env.prioritySweepInterRequestMs; },
+  get hotlistMaxHf() { return env.hotlistMaxHf; },
 };
