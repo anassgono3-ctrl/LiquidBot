@@ -218,6 +218,28 @@ export const rawEnvSchema = z.object({
   LIQUIDATION_AUDIT_NOTIFY: z.string().optional(),
   LIQUIDATION_AUDIT_PRICE_MODE: z.string().optional(),
   LIQUIDATION_AUDIT_SAMPLE_LIMIT: z.string().optional(),
+  
+  // Hot/Warm/Cold set tracking
+  HOT_SET_ENABLED: z.string().optional(),
+  HOT_SET_HF_MAX: z.string().optional(),
+  WARM_SET_HF_MAX: z.string().optional(),
+  MAX_HOT_SIZE: z.string().optional(),
+  MAX_WARM_SIZE: z.string().optional(),
+  
+  // Precompute configuration
+  PRECOMPUTE_ENABLED: z.string().optional(),
+  PRECOMPUTE_TOP_K: z.string().optional(),
+  PRECOMPUTE_CLOSE_FACTOR_PCT: z.string().optional(),
+  
+  // Price fastpath (Chainlink events)
+  PRICE_FASTPATH_ENABLED: z.string().optional(),
+  PRICE_FASTPATH_ASSETS: z.string().optional(),
+  
+  // Gas strategy
+  GAS_STRATEGY: z.string().optional(),
+  GAS_MAX_FEE_MULTIPLIER: z.string().optional(),
+  GAS_MIN_PRIORITY_GWEI: z.string().optional(),
+  USE_PRIVATE_TX: z.string().optional(),
 
   // Priority Sweep configuration
   PRIORITY_SWEEP_ENABLED: z.string().optional(),
@@ -463,7 +485,7 @@ export const env = (() => {
     // Liquidation audit configuration
     liquidationAuditEnabled: (parsed.LIQUIDATION_AUDIT_ENABLED || 'true').toLowerCase() === 'true',
     liquidationAuditNotify: (parsed.LIQUIDATION_AUDIT_NOTIFY || 'true').toLowerCase() === 'true',
-    liquidationAuditPriceMode: (parsed.LIQUIDATION_AUDIT_PRICE_MODE || 'block') as 'block' | 'current',
+    liquidationAuditPriceMode: (parsed.LIQUIDATION_AUDIT_PRICE_MODE || 'aave_oracle') as 'block' | 'current' | 'aave_oracle',
     liquidationAuditSampleLimit: Number(parsed.LIQUIDATION_AUDIT_SAMPLE_LIMIT || 0),
 
     // Priority Sweep configuration
@@ -483,6 +505,28 @@ export const env = (() => {
     prioritySweepTimeoutMs: Number(parsed.PRIORITY_SWEEP_TIMEOUT_MS || 240000),
     prioritySweepPageSize: Number(parsed.PRIORITY_SWEEP_PAGE_SIZE || 1000),
     prioritySweepInterRequestMs: Number(parsed.PRIORITY_SWEEP_INTER_REQUEST_MS || 100),
-    hotlistMaxHf: Number(parsed.HOTLIST_MAX_HF || 1.05)
+    hotlistMaxHf: Number(parsed.HOTLIST_MAX_HF || 1.05),
+    
+    // Hot/Warm/Cold set tracking
+    hotSetEnabled: (parsed.HOT_SET_ENABLED || 'true').toLowerCase() === 'true',
+    hotSetHfMax: Number(parsed.HOT_SET_HF_MAX || 1.03),
+    warmSetHfMax: Number(parsed.WARM_SET_HF_MAX || 1.10),
+    maxHotSize: Number(parsed.MAX_HOT_SIZE || 1000),
+    maxWarmSize: Number(parsed.MAX_WARM_SIZE || 5000),
+    
+    // Precompute configuration
+    precomputeEnabled: (parsed.PRECOMPUTE_ENABLED || 'true').toLowerCase() === 'true',
+    precomputeTopK: Number(parsed.PRECOMPUTE_TOP_K || 500),
+    precomputeCloseFactorPct: Number(parsed.PRECOMPUTE_CLOSE_FACTOR_PCT || 50),
+    
+    // Price fastpath (Chainlink events)
+    priceFastpathEnabled: (parsed.PRICE_FASTPATH_ENABLED || 'true').toLowerCase() === 'true',
+    priceFastpathAssets: parsed.PRICE_FASTPATH_ASSETS || 'WETH,WBTC,cbETH,USDC,AAVE',
+    
+    // Gas strategy
+    gasStrategy: parsed.GAS_STRATEGY || 'dynamic_v1',
+    gasMaxFeeMultiplier: Number(parsed.GAS_MAX_FEE_MULTIPLIER || 1.3),
+    gasMinPriorityGwei: Number(parsed.GAS_MIN_PRIORITY_GWEI || 0.05),
+    usePrivateTx: (parsed.USE_PRIVATE_TX || 'false').toLowerCase() === 'true'
   };
 })();

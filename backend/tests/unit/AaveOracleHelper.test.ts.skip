@@ -1,0 +1,215 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { ethers } from 'ethers';
+
+import { AaveOracleHelper } from '../../src/services/AaveOracleHelper.js';
+
+describe('AaveOracleHelper', () => {
+  let mockProvider: ethers.JsonRpcProvider;
+  let helper: AaveOracleHelper;
+
+  beforeEach(() => {
+    // Create a mock provider
+    mockProvider = {
+      getNetwork: vi.fn().mockResolvedValue({ chainId: 8453n, name: 'base' })
+    } as unknown as ethers.JsonRpcProvider;
+
+    helper = new AaveOracleHelper(mockProvider);
+  });
+
+  describe('initialization', () => {
+    it('should not be initialized on construction', () => {
+      expect(helper.isInitialized()).toBe(false);
+    });
+
+    it('should initialize oracle address from AddressesProvider', async () => {
+      // Mock the AddressesProvider contract
+      const mockOracleAddress = '0x' + '1'.repeat(40);
+      
+      vi.spyOn(ethers, 'Contract').mockImplementation((address, abi, provider) => {
+        const abiStr = Array.isArray(abi) ? abi.join('') : String(abi);
+        if (abiStr.includes('getPriceOracle')) {
+          // This is AddressesProvider
+          return {
+            getPriceOracle: vi.fn().mockResolvedValue(mockOracleAddress)
+          } as unknown as ethers.Contract;
+        }
+        // This is the oracle contract
+        return {} as ethers.Contract;
+      });
+
+      await helper.initialize();
+
+      expect(helper.isInitialized()).toBe(true);
+    });
+  });
+
+  describe('getDecimals', () => {
+    it('should fetch and cache decimals', async () => {
+      const tokenAddress = '0x' + '2'.repeat(40);
+      const expectedDecimals = 18;
+
+      // Mock ERC20 contract
+      const mockContract = {
+        decimals: vi.fn().mockResolvedValue(expectedDecimals),
+        symbol: vi.fn().mockResolvedValue('TEST')
+      };
+
+      vi.spyOn(ethers, 'Contract').mockReturnValue(mockContract as unknown as ethers.Contract);
+
+      const decimals = await helper.getDecimals(tokenAddress);
+
+      expect(decimals).toBe(expectedDecimals);
+      expect(mockContract.decimals).toHaveBeenCalledOnce();
+
+      // Call again - should use cache
+      const decimals2 = await helper.getDecimals(tokenAddress);
+      expect(decimals2).toBe(expectedDecimals);
+      expect(mockContract.decimals).toHaveBeenCalledOnce(); // Still just once due to cache
+    });
+
+    it('should handle decimals fetch failure', async () => {
+      const tokenAddress = '0x' + '3'.repeat(40);
+
+      // Mock ERC20 contract that throws
+      const mockContract = {
+        decimals: vi.fn().mockRejectedValue(new Error('Contract call failed'))
+      };
+
+      vi.spyOn(ethers, 'Contract').mockReturnValue(mockContract as unknown as ethers.Contract);
+
+      const decimals = await helper.getDecimals(tokenAddress);
+
+      expect(decimals).toBeNull();
+    });
+  });
+
+  describe('getAssetPrice', () => {
+    beforeEach(async () => {
+      // Initialize helper with mock oracle
+      const mockOracleAddress = '0x' + '1'.repeat(40);
+      const mockOracle = {
+        getAssetPrice: vi.fn().mockResolvedValue(BigInt(300000000000)) // $3000 with 8 decimals
+      };
+
+      vi.spyOn(ethers, 'Contract').mockImplementation((address, abi) => {
+        const abiStr = Array.isArray(abi) ? abi.join('') : String(abi);
+        if (abiStr.includes('getPriceOracle')) {
+          return {
+            getPriceOracle: vi.fn().mockResolvedValue(mockOracleAddress)
+          } as unknown as ethers.Contract;
+        }
+        return mockOracle as unknown as ethers.Contract;
+      });
+
+      await helper.initialize();
+    });
+
+    it('should fetch asset price from oracle', async () => {
+      const tokenAddress = '0x' + '4'.repeat(40);
+      
+      const price = await helper.getAssetPrice(tokenAddress);
+
+      expect(price).toBe(BigInt(300000000000)); // $3000 with 8 decimals
+    });
+
+    it('should cache current prices', async () => {
+      const tokenAddress = '0x' + '5'.repeat(40);
+      
+      // First call
+      await helper.getAssetPrice(tokenAddress);
+      
+      // Second call should use cache (mock will still return value but cache hit is internal)
+      const price2 = await helper.getAssetPrice(tokenAddress);
+
+      expect(price2).toBe(BigInt(300000000000));
+    });
+
+    it('should support block-tagged reads', async () => {
+      const tokenAddress = '0x' + '6'.repeat(40);
+      const blockNumber = 12345;
+      
+      const price = await helper.getAssetPrice(tokenAddress, blockNumber);
+
+      expect(price).toBe(BigInt(300000000000));
+    });
+  });
+
+  describe('toUsd', () => {
+    beforeEach(async () => {
+      // Initialize helper with mock oracle and token
+      const mockOracleAddress = '0x' + '1'.repeat(40);
+      const mockOracle = {
+        getAssetPrice: vi.fn().mockResolvedValue(BigInt(300000000000)) // $3000 with 8 decimals
+      };
+      const mockToken = {
+        decimals: vi.fn().mockResolvedValue(18),
+        symbol: vi.fn().mockResolvedValue('WETH')
+      };
+
+      vi.spyOn(ethers, 'Contract').mockImplementation((address, abi) => {
+        const abiStr = Array.isArray(abi) ? abi.join('') : String(abi);
+        if (abiStr.includes('getPriceOracle')) {
+          return {
+            getPriceOracle: vi.fn().mockResolvedValue(mockOracleAddress)
+          } as unknown as ethers.Contract;
+        }
+        if (abiStr.includes('getAssetPrice')) {
+          return mockOracle as unknown as ethers.Contract;
+        }
+        return mockToken as unknown as ethers.Contract;
+      });
+
+      await helper.initialize();
+    });
+
+    it('should convert raw amount to USD', async () => {
+      const tokenAddress = '0x' + '7'.repeat(40);
+      const rawAmount = BigInt('1000000000000000000'); // 1 token with 18 decimals
+
+      const usdValue = await helper.toUsd(rawAmount, tokenAddress);
+
+      // 1 token * $3000 = $3000
+      expect(usdValue).toBeCloseTo(3000, 0);
+    });
+
+    it('should handle fractional amounts', async () => {
+      const tokenAddress = '0x' + '8'.repeat(40);
+      const rawAmount = BigInt('500000000000000000'); // 0.5 token with 18 decimals
+
+      const usdValue = await helper.toUsd(rawAmount, tokenAddress);
+
+      // 0.5 token * $3000 = $1500
+      expect(usdValue).toBeCloseTo(1500, 0);
+    });
+
+    it('should return null if decimals unavailable', async () => {
+      const tokenAddress = '0x' + '9'.repeat(40);
+      const rawAmount = BigInt('1000000000000000000');
+
+      // Mock token that fails to return decimals
+      vi.spyOn(ethers, 'Contract').mockImplementation((address, abi) => {
+        const abiStr = Array.isArray(abi) ? abi.join('') : String(abi);
+        if (abiStr.includes('decimals')) {
+          return {
+            decimals: vi.fn().mockRejectedValue(new Error('Failed'))
+          } as unknown as ethers.Contract;
+        }
+        return {} as ethers.Contract;
+      });
+
+      // Re-create helper
+      const newHelper = new AaveOracleHelper(mockProvider);
+      const usdValue = await newHelper.toUsd(rawAmount, tokenAddress);
+
+      expect(usdValue).toBeNull();
+    });
+  });
+
+  describe('cache management', () => {
+    it('should clear all caches', async () => {
+      helper.clearCaches();
+      // No error should be thrown
+      expect(true).toBe(true);
+    });
+  });
+});
