@@ -18,9 +18,13 @@ import {
 
 import { NotificationService } from './NotificationService.js';
 import { PriceService } from './PriceService.js';
+import { AaveOracleHelper } from './AaveOracleHelper.js';
+import { DecisionTraceStore } from './DecisionTraceStore.js';
+import { DecisionClassifier, type ClassifiedReason } from './DecisionClassifier.js';
+import { MissRowLogger } from './MissRowLogger.js';
 
 /**
- * Audit reason classification
+ * Audit reason classification (legacy)
  */
 export type AuditReason = 'not_in_watch_set' | 'raced';
 
@@ -37,11 +41,13 @@ export interface LiquidationAuditResult {
   transactionHash: string;
   liquidator: string;
   receiveAToken: boolean;
-  reason: AuditReason;
+  reason: AuditReason; // Legacy field
+  classifiedReason?: ClassifiedReason; // New classifier
   infoMinDebt?: boolean;
   debtUsd: number | null;
   collateralUsd: number | null;
   candidatesTotal: number;
+  notes?: string[]; // Classification notes
 }
 
 /**
@@ -90,16 +96,44 @@ export class LiquidationAuditService {
   private notificationService: NotificationService;
   private rateLimiter: RateLimiter;
   private provider: ethers.JsonRpcProvider | null = null;
+  private aaveOracleHelper: AaveOracleHelper | null = null;
+  private decisionTraceStore: DecisionTraceStore | null = null;
+  private classifier: DecisionClassifier | null = null;
+  private missRowLogger: MissRowLogger | null = null;
+  private useAaveOracle: boolean;
+  private ourBotAddress?: string;
 
   constructor(
     priceService: PriceService,
     notificationService: NotificationService,
-    provider?: ethers.JsonRpcProvider
+    provider?: ethers.JsonRpcProvider,
+    decisionTraceStore?: DecisionTraceStore,
+    ourBotAddress?: string
   ) {
     this.priceService = priceService;
     this.notificationService = notificationService;
     this.rateLimiter = new RateLimiter(config.liquidationAuditSampleLimit);
     this.provider = provider || null;
+    this.ourBotAddress = ourBotAddress;
+    
+    // Initialize Aave oracle helper if provider available
+    this.useAaveOracle = config.liquidationAuditPriceMode === 'aave_oracle' || false;
+    if (this.provider && this.useAaveOracle) {
+      this.aaveOracleHelper = new AaveOracleHelper(this.provider);
+      // Initialize asynchronously
+      this.aaveOracleHelper.initialize().catch((error) => {
+        // eslint-disable-next-line no-console
+        console.error('[liquidation-audit] Failed to initialize AaveOracleHelper:', error);
+        this.aaveOracleHelper = null;
+      });
+    }
+    
+    // Initialize decision trace store and classifier if provided
+    if (decisionTraceStore) {
+      this.decisionTraceStore = decisionTraceStore;
+      this.classifier = new DecisionClassifier(decisionTraceStore);
+      this.missRowLogger = new MissRowLogger(true);
+    }
 
     // Log config on initialization
     this.logConfig();
@@ -149,7 +183,7 @@ export class LiquidationAuditService {
       const liquidator = decoded.args.liquidator?.toLowerCase() || '';
       const receiveAToken = decoded.args.receiveAToken || false;
 
-      // Determine if user was in watch set
+      // Determine if user was in watch set (legacy)
       const inSet = isInWatchSet(user);
       const reason: AuditReason = inSet ? 'raced' : 'not_in_watch_set';
 
@@ -161,6 +195,57 @@ export class LiquidationAuditService {
         liquidatedCollateralAmount,
         blockNumber
       );
+
+      // Use classifier if available
+      let classifiedReason: ClassifiedReason | undefined;
+      let notes: string[] | undefined;
+      let blockTimestamp = 0;
+      
+      if (this.classifier && this.provider) {
+        const eventSeenAtMs = Date.now();
+        
+        // Get block timestamp
+        try {
+          const block = await this.provider.getBlock(blockNumber);
+          blockTimestamp = block?.timestamp || 0;
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.warn('[liquidation-audit] Failed to get block timestamp:', error);
+        }
+        
+        // Classify the miss
+        const classification = this.classifier.classify(
+          user,
+          liquidator,
+          eventSeenAtMs,
+          debtUsd,
+          blockNumber,
+          this.ourBotAddress
+        );
+        
+        classifiedReason = classification.reason;
+        notes = classification.notes;
+        
+        // Log miss row
+        if (this.missRowLogger) {
+          const missRow = MissRowLogger.fromClassification(
+            blockNumber,
+            blockTimestamp,
+            transactionHash,
+            user,
+            debtAsset,
+            collateralAsset,
+            liquidator,
+            classifiedReason,
+            eventSeenAtMs,
+            debtUsd,
+            collateralUsd,
+            classification.trace
+          );
+          
+          this.missRowLogger.log(missRow);
+        }
+      }
 
       // Check if debt is below MIN_DEBT_USD (informational tag)
       const infoMinDebt = debtUsd !== null && debtUsd < config.minDebtUsd;
@@ -177,10 +262,12 @@ export class LiquidationAuditService {
         liquidator,
         receiveAToken,
         reason,
+        classifiedReason,
         infoMinDebt: infoMinDebt ? true : undefined,
         debtUsd,
         collateralUsd,
-        candidatesTotal
+        candidatesTotal,
+        notes
       };
 
       // Log audit
@@ -215,8 +302,17 @@ export class LiquidationAuditService {
     blockNumber: number
   ): Promise<{ debtUsd: number | null; collateralUsd: number | null }> {
     try {
-      // Get token symbols from address (simplified - in production would need address->symbol mapping)
-      // For now, we'll try to fetch prices with addresses as-is, which will fallback to stub prices
+      // Use Aave oracle if enabled and available
+      if (this.aaveOracleHelper && this.aaveOracleHelper.isInitialized()) {
+        const [debtUsd, collateralUsd] = await Promise.all([
+          this.aaveOracleHelper.toUsd(debtToCover, debtAsset, blockNumber),
+          this.aaveOracleHelper.toUsd(liquidatedCollateralAmount, collateralAsset, blockNumber)
+        ]);
+        
+        return { debtUsd, collateralUsd };
+      }
+
+      // Fallback to PriceService (legacy)
       const debtSymbol = await this.getTokenSymbol(debtAsset);
       const collateralSymbol = await this.getTokenSymbol(collateralAsset);
 
@@ -310,9 +406,10 @@ export class LiquidationAuditService {
    * Log audit result
    */
   private logAudit(result: LiquidationAuditResult): void {
-    const debtUsdStr = result.debtUsd !== null ? `$${result.debtUsd.toFixed(2)}` : 'n/a';
-    const collateralUsdStr = result.collateralUsd !== null ? `$${result.collateralUsd.toFixed(2)}` : 'n/a';
+    const debtUsdStr = result.debtUsd !== null ? `$${result.debtUsd.toFixed(2)}` : '~$N/A';
+    const collateralUsdStr = result.collateralUsd !== null ? `$${result.collateralUsd.toFixed(2)}` : '~$N/A';
     const infoTag = result.infoMinDebt ? ' info_min_debt' : '';
+    const classifiedTag = result.classifiedReason ? ` classified=${result.classifiedReason}` : '';
 
     // eslint-disable-next-line no-console
     console.log(
@@ -320,7 +417,7 @@ export class LiquidationAuditService {
       `debtToCover=${result.debtToCover.toString()} (~${debtUsdStr}) ` +
       `collateralSeized=${result.liquidatedCollateralAmount.toString()} (~${collateralUsdStr}) ` +
       `block=${result.blockNumber} tx=${result.transactionHash} ` +
-      `reason=${result.reason}${infoTag} candidates_total=${result.candidatesTotal}`
+      `reason=${result.reason}${classifiedTag}${infoTag} candidates_total=${result.candidatesTotal}`
     );
   }
 
@@ -374,27 +471,47 @@ export class LiquidationAuditService {
     const debtAmount = this.formatAmount(result.debtToCover, result.debtAsset);
     const collateralAmount = this.formatAmount(result.liquidatedCollateralAmount, result.collateralAsset);
 
-    // Format USD values
-    const debtUsdStr = result.debtUsd !== null ? `~$${this.formatUsdValue(result.debtUsd)}` : 'n/a';
-    const collateralUsdStr = result.collateralUsd !== null ? `~$${this.formatUsdValue(result.collateralUsd)}` : 'n/a';
+    // Format USD values with improved N/A handling
+    const debtUsdStr = result.debtUsd !== null && result.debtUsd > 0 
+      ? `~$${this.formatUsdValue(result.debtUsd)}` 
+      : '~$N/A';
+    const collateralUsdStr = result.collateralUsd !== null && result.collateralUsd > 0
+      ? `~$${this.formatUsdValue(result.collateralUsd)}` 
+      : '~$N/A';
+    
+    // Add note if price missing
+    let priceNote = '';
+    if (result.debtUsd === null) {
+      priceNote += `\n⚠️ Price missing for debt asset ${result.debtAsset}`;
+    }
+    if (result.collateralUsd === null) {
+      priceNote += `\n⚠️ Price missing for collateral asset ${result.collateralAsset}`;
+    }
 
     // Info tag for min debt
     let infoTag = '';
     if (result.infoMinDebt && result.debtUsd !== null) {
       infoTag = `\n\nℹ️ <b>info_min_debt:</b> eventDebtUSD=${this.formatUsdValue(result.debtUsd)} &lt; MIN_DEBT_USD=${config.minDebtUsd}`;
     }
+    
+    // Add classification notes if available
+    let notesSection = '';
+    if (result.notes && result.notes.length > 0) {
+      notesSection = `\n\n📝 <b>Notes:</b>\n${result.notes.map(n => `  • ${n}`).join('\n')}`;
+    }
 
     const txLink = `https://basescan.org/tx/${result.transactionHash}`;
+    const reasonDisplay = result.classifiedReason || result.reason;
 
     return `🔍 <b>[liquidation-audit]</b>
 
 👤 user=<code>${userAddr}</code>
 💰 debt=${debtSymbol} debtToCover=${debtAmount} (${debtUsdStr})
-💎 collateral=${collateralSymbol} seized=${collateralAmount} (${collateralUsdStr})
+💎 collateral=${collateralSymbol} seized=${collateralAmount} (${collateralUsdStr})${priceNote}
 📦 block=${result.blockNumber}
 🔗 tx=<a href="${txLink}">${txAddr}</a>
-📊 reason=<b>${result.reason}</b>
-👥 candidates_total=${this.formatNumber(result.candidatesTotal)}${infoTag}`;
+📊 reason=<b>${reasonDisplay}</b>
+👥 candidates_total=${this.formatNumber(result.candidatesTotal)}${infoTag}${notesSection}`;
   }
 
   /**
