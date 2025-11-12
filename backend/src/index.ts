@@ -20,6 +20,7 @@ import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";
 import { NotificationService } from "./services/NotificationService.js";
+import { PriceService } from "./services/PriceService.js";
 import { HealthMonitor } from "./services/HealthMonitor.js";
 import { OnDemandHealthFactor } from "./services/OnDemandHealthFactor.js";
 import { ExecutionService } from "./services/ExecutionService.js";
@@ -55,8 +56,9 @@ if (config.useSubgraph) {
   logger.info('[subgraph] Service disabled (USE_SUBGRAPH=false) - relying on on-chain discovery');
 }
 
-// Initialize notification services
-const notificationService = new NotificationService();
+// Initialize price and notification services
+const priceService = new PriceService();
+const notificationService = new NotificationService(priceService);
 const healthMonitor = new HealthMonitor(subgraphService || SubgraphService.createMock());
 
 // Initialize execution scaffold
@@ -137,7 +139,11 @@ const lastNotifiedBlock = new Map<string, number>();
 const inflightExecutions = new Set<string>();
 
 if (config.useRealtimeHF) {
-  realtimeHFService = new RealTimeHFService({ subgraphService });
+  realtimeHFService = new RealTimeHFService({ 
+    subgraphService, 
+    notificationService, 
+    priceService 
+  });
   
   // Handle liquidatable events
   realtimeHFService.on('liquidatable', async (event: LiquidatableEvent) => {

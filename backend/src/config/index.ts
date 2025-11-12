@@ -230,4 +230,10 @@ export const config = {
 
   // Liquidation configuration
   get liquidationCloseFactor() { return env.liquidationCloseFactor; },
+
+  // Liquidation audit configuration
+  get liquidationAuditEnabled() { return env.liquidationAuditEnabled; },
+  get liquidationAuditNotify() { return env.liquidationAuditNotify; },
+  get liquidationAuditPriceMode() { return env.liquidationAuditPriceMode; },
+  get liquidationAuditSampleLimit() { return env.liquidationAuditSampleLimit; },
 };

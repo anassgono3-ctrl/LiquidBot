@@ -414,3 +414,28 @@ export const eventConcurrencyLevelHistogram = new Histogram({
   buckets: [1, 2, 3, 4, 5, 6, 7, 8],
   registers: [registry]
 });
+
+// Liquidation audit metrics
+export const liquidationAuditTotal = new Counter({
+  name: 'liquidbot_liquidation_audit_total',
+  help: 'Total number of liquidations audited',
+  registers: [registry]
+});
+
+export const liquidationAuditReasonNotInWatchSet = new Counter({
+  name: 'liquidbot_liquidation_audit_reason_not_in_watch_set',
+  help: 'Count of liquidations with reason: not_in_watch_set',
+  registers: [registry]
+});
+
+export const liquidationAuditReasonRaced = new Counter({
+  name: 'liquidbot_liquidation_audit_reason_raced',
+  help: 'Count of liquidations with reason: raced',
+  registers: [registry]
+});
+
+export const liquidationAuditErrors = new Counter({
+  name: 'liquidbot_liquidation_audit_errors',
+  help: 'Count of errors during liquidation audit',
+  registers: [registry]
+});
