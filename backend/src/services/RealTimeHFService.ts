@@ -32,7 +32,10 @@ import {
   eventBatchesSkipped,
   eventBatchesExecuted,
   eventConcurrencyLevel,
-  eventConcurrencyLevelHistogram
+  eventConcurrencyLevelHistogram,
+  realtimePriceTriggersTotal,
+  reserveRechecksTotal,
+  pendingVerifyErrorsTotal
 } from '../metrics/index.js';
 
 import { CandidateManager } from './CandidateManager.js';
@@ -47,6 +50,9 @@ import { PriceService } from './PriceService.js';
 import { HotSetTracker } from './HotSetTracker.js';
 import { PrecomputeService } from './PrecomputeService.js';
 import { DecisionTraceStore } from './DecisionTraceStore.js';
+import { FeedDiscoveryService, type DiscoveredReserve } from './FeedDiscoveryService.js';
+import { PerAssetTriggerConfig } from './PerAssetTriggerConfig.js';
+import { AaveDataService } from './AaveDataService.js';
 import { isZero } from '../utils/bigint.js';
 
 // ABIs
@@ -114,6 +120,10 @@ export class RealTimeHFService extends EventEmitter {
   private hotSetTracker?: HotSetTracker;
   private precomputeService?: PrecomputeService;
   private decisionTraceStore?: DecisionTraceStore;
+  private feedDiscoveryService?: FeedDiscoveryService;
+  private perAssetTriggerConfig?: PerAssetTriggerConfig;
+  private aaveDataService?: AaveDataService;
+  private discoveredReserves: DiscoveredReserve[] = [];
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -285,6 +295,18 @@ export class RealTimeHFService extends EventEmitter {
         this.provider as any, // Will be set later in setupProvider
         this.decisionTraceStore
       );
+    }
+    
+    // Initialize per-asset trigger config if price triggers are enabled
+    if (config.priceTriggerEnabled) {
+      this.perAssetTriggerConfig = new PerAssetTriggerConfig();
+      // eslint-disable-next-line no-console
+      console.log('[per-asset-trigger] Config initialized');
+      const configured = this.perAssetTriggerConfig.getConfiguredAssets();
+      if (configured.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[per-asset-trigger] Custom settings for: ${configured.join(', ')}`);
+      }
     }
     
     // Initialize adaptive settings
@@ -611,9 +633,40 @@ export class RealTimeHFService extends EventEmitter {
       // eslint-disable-next-line no-console
       console.log('[realtime-hf] Subscribed (ethers) to Aave Pool logs');
 
-      // 3. Optional: Setup Chainlink price feed listeners
-      if (config.chainlinkFeeds) {
-        const feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+      // 3. Optional: Auto-discover Chainlink feeds and setup BorrowersIndexService
+      let feeds: Record<string, string> = {};
+      
+      if (config.autoDiscoverFeeds && this.provider) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[feed-discovery] Auto-discovery enabled, discovering reserves...');
+          await this.performFeedDiscovery();
+          
+          // Build feeds map from discovered reserves
+          feeds = FeedDiscoveryService.buildFeedsMap(this.discoveredReserves);
+          
+          // Merge with manual config if provided
+          if (config.chainlinkFeeds) {
+            feeds = FeedDiscoveryService.mergeFeedsWithConfig(feeds, config.chainlinkFeeds);
+          }
+          
+          // eslint-disable-next-line no-console
+          console.log(`[feed-discovery] Discovered ${Object.keys(feeds).length} Chainlink feeds`);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[feed-discovery] Auto-discovery failed, falling back to manual config:', err);
+          // Fall back to manual config
+          if (config.chainlinkFeeds) {
+            feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+          }
+        }
+      } else if (config.chainlinkFeeds) {
+        // Use manual configuration only
+        feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+      }
+      
+      // Setup Chainlink price feed listeners if we have any feeds
+      if (Object.keys(feeds).length > 0) {
         // Get AnswerUpdated topic from event registry
         const answerUpdatedTopic = Array.from(eventRegistry.getAllTopics()).find(topic => {
           const entry = eventRegistry.get(topic);
@@ -1327,22 +1380,26 @@ export class RealTimeHFService extends EventEmitter {
         );
       }
       
+      // Get per-asset threshold and debounce settings
+      const assetDropBps = this.perAssetTriggerConfig?.getDropBps(symbol) ?? config.priceTriggerDropBps;
+      const assetDebounceSec = this.perAssetTriggerConfig?.getDebounceSec(symbol) ?? config.priceTriggerDebounceSec;
+      
       // Check if price dropped by threshold or more
-      if (priceDiffPct >= -config.priceTriggerDropBps) {
+      if (priceDiffPct >= -assetDropBps) {
         // Price increased or dropped less than threshold - no emergency scan
         return;
       }
       
       // Check debounce: prevent repeated scans on rapid ticks
       const now = Date.now();
-      const debounceMs = config.priceTriggerDebounceSec * 1000;
+      const debounceMs = assetDebounceSec * 1000;
       
       if (state.lastTriggerTs > 0 && (now - state.lastTriggerTs) < debounceMs) {
         const elapsedSec = Math.floor((now - state.lastTriggerTs) / 1000);
         // eslint-disable-next-line no-console
         console.log(
           `[price-trigger] Debounced (${source}): asset=${symbol} drop=${Math.abs(priceDiffPct).toFixed(2)}bps ` +
-          `elapsed=${elapsedSec}s debounce=${config.priceTriggerDebounceSec}s ` +
+          `elapsed=${elapsedSec}s debounce=${assetDebounceSec}s ` +
           `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'}`
         );
         return;
@@ -1363,11 +1420,14 @@ export class RealTimeHFService extends EventEmitter {
       // eslint-disable-next-line no-console
       console.log(
         `[price-trigger] Sharp price drop detected (${source}): asset=${symbol} ` +
-        `drop=${dropBps.toFixed(2)}bps threshold=${config.priceTriggerDropBps}bps ` +
+        `drop=${dropBps.toFixed(2)}bps threshold=${assetDropBps}bps ` +
         `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} ` +
         `reference=${referencePrice.toFixed(2)} current=${currentPrice.toFixed(2)} ` +
         `block=${blockNumber}`
       );
+      
+      // Increment metric
+      realtimePriceTriggersTotal.inc({ asset: symbol });
       
       // Select candidates for emergency scan
       const affectedUsers = this.selectCandidatesForEmergencyScan(symbol);
@@ -2626,6 +2686,64 @@ export class RealTimeHFService extends EventEmitter {
     }
     
     return feeds;
+  }
+
+  /**
+   * Perform feed discovery and initialize BorrowersIndexService
+   */
+  private async performFeedDiscovery(): Promise<void> {
+    if (!this.provider || !(this.provider instanceof JsonRpcProvider || this.provider instanceof WebSocketProvider)) {
+      throw new Error('[feed-discovery] Provider not initialized');
+    }
+
+    // Initialize AaveDataService if not already done
+    if (!this.aaveDataService) {
+      this.aaveDataService = new AaveDataService(this.provider as JsonRpcProvider);
+    }
+
+    // Initialize FeedDiscoveryService
+    this.feedDiscoveryService = new FeedDiscoveryService(
+      this.provider as JsonRpcProvider,
+      this.aaveDataService
+    );
+
+    // Discover reserves
+    this.discoveredReserves = await this.feedDiscoveryService.discoverReserves({
+      skipInactive: true,
+      onlyBorrowEnabled: true
+    });
+
+    // Initialize BorrowersIndexService with discovered reserves
+    if (this.discoveredReserves.length > 0) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log(`[borrowers-index] Initializing with ${this.discoveredReserves.length} reserves`);
+
+        const reserves = this.discoveredReserves.map(r => ({
+          asset: r.asset,
+          symbol: r.symbol,
+          variableDebtToken: r.variableDebtToken
+        }));
+
+        this.borrowersIndex = new BorrowersIndexService(
+          this.provider as JsonRpcProvider,
+          {
+            redisUrl: config.borrowersIndexRedisUrl || config.redisUrl,
+            backfillBlocks: 50000,
+            chunkSize: 2000
+          }
+        );
+
+        await this.borrowersIndex.initialize(reserves);
+        // eslint-disable-next-line no-console
+        console.log('[borrowers-index] Initialized successfully');
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[borrowers-index] Failed to initialize:', err);
+        // Continue without BorrowersIndexService
+        this.borrowersIndex = undefined;
+      }
+    }
   }
 
   /**
