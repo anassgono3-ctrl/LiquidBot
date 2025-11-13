@@ -1,8 +1,11 @@
 // BorrowersIndexService: Per-reserve borrower tracking via variableDebt Transfer events
 // Maintains persistent sets of borrowers for each reserve with on-chain discovery and live updates
+// Supports multiple storage modes: memory, redis, postgres
 
 import { EventLog, JsonRpcProvider, Interface } from 'ethers';
 import { createClient, RedisClientType } from 'redis';
+import pkg from 'pg';
+const { Pool } = pkg;
 
 import { config } from '../config/index.js';
 
@@ -11,10 +14,15 @@ const ERC20_ABI = [
   'event Transfer(address indexed from, address indexed to, uint256 value)'
 ];
 
+export type BorrowersIndexMode = 'memory' | 'redis' | 'postgres';
+
 export interface BorrowersIndexOptions {
+  mode?: BorrowersIndexMode;
   redisUrl?: string;
+  databaseUrl?: string;
   backfillBlocks?: number;
   chunkSize?: number;
+  maxUsersPerReserve?: number;
 }
 
 interface ReserveInfo {
@@ -25,35 +33,66 @@ interface ReserveInfo {
 
 /**
  * BorrowersIndexService maintains a per-reserve borrower set by indexing
- * variableDebt token Transfer events. Provides persistent storage via Redis
- * and live updates via event subscriptions.
+ * variableDebt token Transfer events. Supports multiple storage modes:
+ * - memory: in-memory storage (no persistence)
+ * - redis: persistent storage via Redis
+ * - postgres: persistent storage via PostgreSQL
  */
 export class BorrowersIndexService {
   private provider: JsonRpcProvider;
+  private mode: BorrowersIndexMode;
   private redis: RedisClientType | null = null;
+  private pgPool: typeof Pool.prototype | null = null;
   private reserves: Map<string, ReserveInfo> = new Map();
   private borrowersByReserve: Map<string, Set<string>> = new Map();
   private isBackfilled = false;
   private backfillBlocks: number;
   private chunkSize: number;
+  private maxUsersPerReserve: number;
   private eventListeners: Map<string, (log: EventLog) => void> = new Map();
+  private hasLoggedFallback = false;
 
   constructor(provider: JsonRpcProvider, options: BorrowersIndexOptions = {}) {
     this.provider = provider;
+    this.mode = options.mode || 'memory';
     this.backfillBlocks = options.backfillBlocks || 50000;
     this.chunkSize = options.chunkSize || 2000;
+    this.maxUsersPerReserve = options.maxUsersPerReserve || 3000;
 
-    // Initialize Redis if configured
-    if (options.redisUrl || config.redisUrl) {
-      this.initRedis(options.redisUrl || config.redisUrl);
+    // Initialize persistence layer based on mode
+    if (this.mode === 'redis') {
+      const redisUrl = options.redisUrl || config.borrowersIndexRedisUrl;
+      this.initRedis(redisUrl).catch(() => {
+        if (!this.hasLoggedFallback) {
+          // eslint-disable-next-line no-console
+          console.warn('[borrowers-index] Redis connection failed, falling back to memory mode');
+          this.hasLoggedFallback = true;
+        }
+        this.mode = 'memory';
+      });
+    } else if (this.mode === 'postgres') {
+      const dbUrl = options.databaseUrl || config.databaseUrl;
+      this.initPostgres(dbUrl).catch(() => {
+        if (!this.hasLoggedFallback) {
+          // eslint-disable-next-line no-console
+          console.warn('[borrowers-index] Postgres connection failed, falling back to memory mode');
+          this.hasLoggedFallback = true;
+        }
+        this.mode = 'memory';
+      });
     }
+
+    // eslint-disable-next-line no-console
+    console.log(`[borrowers-index] Using ${this.mode} mode`);
   }
 
   /**
    * Initialize Redis client for persistence
    */
   private async initRedis(redisUrl: string | undefined): Promise<void> {
-    if (!redisUrl) return;
+    if (!redisUrl) {
+      throw new Error('Redis URL not configured');
+    }
 
     try {
       this.redis = createClient({ url: redisUrl });
@@ -68,6 +107,46 @@ export class BorrowersIndexService {
       // eslint-disable-next-line no-console
       console.warn('[borrowers-index] Failed to connect to Redis:', err);
       this.redis = null;
+      throw err;
+    }
+  }
+
+  /**
+   * Initialize Postgres connection for persistence
+   */
+  private async initPostgres(databaseUrl: string | undefined): Promise<void> {
+    if (!databaseUrl) {
+      throw new Error('Database URL not configured');
+    }
+
+    try {
+      this.pgPool = new Pool({ connectionString: databaseUrl });
+
+      // Check if borrowers_index table exists
+      const tableCheck = await this.pgPool.query(`
+        SELECT EXISTS (
+          SELECT FROM information_schema.tables 
+          WHERE table_schema = 'public' 
+          AND table_name = 'borrowers_index'
+        )
+      `);
+
+      if (!tableCheck.rows[0].exists) {
+        if (!this.hasLoggedFallback) {
+          // eslint-disable-next-line no-console
+          console.warn('[borrowers-index] Table borrowers_index does not exist. Please run migration: backend/migrations/20251113_add_borrowers_index.sql');
+          this.hasLoggedFallback = true;
+        }
+        throw new Error('borrowers_index table does not exist');
+      }
+
+      // eslint-disable-next-line no-console
+      console.log('[borrowers-index] Postgres connected');
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[borrowers-index] Failed to connect to Postgres:', err);
+      this.pgPool = null;
+      throw err;
     }
   }
 
@@ -84,8 +163,8 @@ export class BorrowersIndexService {
       this.borrowersByReserve.set(reserve.asset.toLowerCase(), new Set());
     }
 
-    // Try loading from Redis first
-    const loaded = await this.loadFromRedis();
+    // Try loading from persistence first
+    const loaded = await this.loadFromPersistence();
     
     if (!loaded) {
       // Perform backfill if not loaded from Redis
@@ -97,6 +176,18 @@ export class BorrowersIndexService {
 
     // eslint-disable-next-line no-console
     console.log('[borrowers-index] Initialization complete');
+  }
+
+  /**
+   * Load borrower sets from persistence layer
+   */
+  private async loadFromPersistence(): Promise<boolean> {
+    if (this.mode === 'redis' && this.redis) {
+      return this.loadFromRedis();
+    } else if (this.mode === 'postgres' && this.pgPool) {
+      return this.loadFromPostgres();
+    }
+    return false;
   }
 
   /**
@@ -137,6 +228,57 @@ export class BorrowersIndexService {
   }
 
   /**
+   * Load borrower sets from Postgres persistence
+   */
+  private async loadFromPostgres(): Promise<boolean> {
+    if (!this.pgPool) return false;
+
+    try {
+      let totalLoaded = 0;
+      
+      for (const [asset] of this.reserves) {
+        const result = await this.pgPool.query(
+          'SELECT borrower_address FROM borrowers_index WHERE reserve_asset = $1',
+          [asset]
+        );
+        
+        if (result.rows.length > 0) {
+          const borrowerSet = this.borrowersByReserve.get(asset);
+          if (borrowerSet) {
+            result.rows.forEach(row => borrowerSet.add(row.borrower_address.toLowerCase()));
+            totalLoaded += result.rows.length;
+          }
+        }
+      }
+
+      if (totalLoaded > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[borrowers-index] Loaded ${totalLoaded} borrowers from Postgres`);
+        this.isBackfilled = true;
+        return true;
+      }
+
+      return false;
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[borrowers-index] Failed to load from Postgres:', err);
+      return false;
+    }
+  }
+
+  /**
+   * Save borrower sets to persistence layer
+   */
+  private async saveToPersistence(): Promise<void> {
+    if (this.mode === 'redis' && this.redis) {
+      await this.saveToRedis();
+    } else if (this.mode === 'postgres' && this.pgPool) {
+      await this.saveToPostgres();
+    }
+    // Memory mode: no-op
+  }
+
+  /**
    * Save borrower sets to Redis persistence
    */
   private async saveToRedis(): Promise<void> {
@@ -165,6 +307,50 @@ export class BorrowersIndexService {
   }
 
   /**
+   * Save borrower sets to Postgres persistence
+   */
+  private async saveToPostgres(): Promise<void> {
+    if (!this.pgPool) return;
+
+    try {
+      // Use a transaction to update all reserves atomically
+      const client = await this.pgPool.connect();
+      try {
+        await client.query('BEGIN');
+
+        for (const [asset, borrowerSet] of this.borrowersByReserve) {
+          // Delete existing entries for this reserve
+          await client.query('DELETE FROM borrowers_index WHERE reserve_asset = $1', [asset]);
+
+          // Insert new entries (batch insert for efficiency)
+          if (borrowerSet.size > 0) {
+            const borrowers = Array.from(borrowerSet);
+            const values = borrowers.map((addr, i) => `($1, $${i + 2})`).join(',');
+            const params = [asset, ...borrowers];
+            
+            await client.query(
+              `INSERT INTO borrowers_index (reserve_asset, borrower_address) VALUES ${values}`,
+              params
+            );
+          }
+        }
+
+        await client.query('COMMIT');
+        // eslint-disable-next-line no-console
+        console.log('[borrowers-index] Saved to Postgres');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[borrowers-index] Failed to save to Postgres:', err);
+    }
+  }
+
+  /**
    * Perform historical backfill of Transfer events
    */
   private async performBackfill(): Promise<void> {
@@ -188,8 +374,8 @@ export class BorrowersIndexService {
 
     this.isBackfilled = true;
     
-    // Save to Redis after backfill
-    await this.saveToRedis();
+    // Save to persistence after backfill
+    await this.saveToPersistence();
 
     // eslint-disable-next-line no-console
     console.log('[borrowers-index] Backfill complete');
@@ -357,8 +543,8 @@ export class BorrowersIndexService {
     }
     this.eventListeners.clear();
 
-    // Save final state to Redis
-    await this.saveToRedis();
+    // Save final state to persistence
+    await this.saveToPersistence();
 
     // Disconnect Redis
     if (this.redis) {
@@ -368,6 +554,16 @@ export class BorrowersIndexService {
         // Ignore cleanup errors
       }
       this.redis = null;
+    }
+
+    // Disconnect Postgres
+    if (this.pgPool) {
+      try {
+        await this.pgPool.end();
+      } catch (err) {
+        // Ignore cleanup errors
+      }
+      this.pgPool = null;
     }
 
     // eslint-disable-next-line no-console

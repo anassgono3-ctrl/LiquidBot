@@ -107,8 +107,13 @@ export const rawEnvSchema = z.object({
   // Pending-state verification
   PENDING_VERIFY_ENABLED: z.string().optional(),
   
-  // BorrowersIndex Redis configuration
+  // BorrowersIndex configuration
+  BORROWERS_INDEX_ENABLED: z.string().optional(),
+  BORROWERS_INDEX_MODE: z.string().optional(),
   BORROWERS_INDEX_REDIS_URL: z.string().optional(),
+  BORROWERS_INDEX_MAX_USERS_PER_RESERVE: z.string().optional(),
+  BORROWERS_INDEX_BACKFILL_BLOCKS: z.string().optional(),
+  BORROWERS_INDEX_CHUNK_BLOCKS: z.string().optional(),
 
   // At-risk user scanning
   AT_RISK_SCAN_LIMIT: z.string().optional(),
@@ -404,8 +409,13 @@ export const env = (() => {
     // Pending-state verification
     pendingVerifyEnabled: (parsed.PENDING_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
     
-    // BorrowersIndex Redis configuration
+    // BorrowersIndex configuration
+    borrowersIndexEnabled: (parsed.BORROWERS_INDEX_ENABLED || 'false').toLowerCase() === 'true',
+    borrowersIndexMode: parsed.BORROWERS_INDEX_MODE || 'memory',
     borrowersIndexRedisUrl: parsed.BORROWERS_INDEX_REDIS_URL,
+    borrowersIndexMaxUsersPerReserve: Number(parsed.BORROWERS_INDEX_MAX_USERS_PER_RESERVE || 3000),
+    borrowersIndexBackfillBlocks: Number(parsed.BORROWERS_INDEX_BACKFILL_BLOCKS || 50000),
+    borrowersIndexChunkBlocks: Number(parsed.BORROWERS_INDEX_CHUNK_BLOCKS || 2000),
 
     // At-risk user scanning
     atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),

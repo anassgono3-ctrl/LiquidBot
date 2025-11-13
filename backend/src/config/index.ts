@@ -151,8 +151,13 @@ export const config = {
   // Pending-state verification
   get pendingVerifyEnabled() { return env.pendingVerifyEnabled; },
   
-  // BorrowersIndex Redis configuration
+  // BorrowersIndex configuration
+  get borrowersIndexEnabled() { return env.borrowersIndexEnabled; },
+  get borrowersIndexMode() { return env.borrowersIndexMode; },
   get borrowersIndexRedisUrl() { return env.borrowersIndexRedisUrl; },
+  get borrowersIndexMaxUsersPerReserve() { return env.borrowersIndexMaxUsersPerReserve; },
+  get borrowersIndexBackfillBlocks() { return env.borrowersIndexBackfillBlocks; },
+  get borrowersIndexChunkBlocks() { return env.borrowersIndexChunkBlocks; },
 
   // At-risk user scanning
   get atRiskScanLimit() { return env.atRiskScanLimit; },
