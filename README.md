@@ -290,23 +290,47 @@ When a reserve is updated (ReserveDataUpdated event) or its price drops signific
 
 **Configuration:**
 ```bash
+# Enable borrowers index (default: false)
+BORROWERS_INDEX_ENABLED=true
+
+# Storage mode: memory (no persistence), redis (Redis-backed), postgres (Postgres-backed)
+BORROWERS_INDEX_MODE=memory  # or redis, or postgres
+
+# Mode-specific URLs (optional, uses defaults from DATABASE_URL or REDIS_URL)
+BORROWERS_INDEX_REDIS_URL=redis://localhost:6379  # for redis mode
+# Uses DATABASE_URL automatically for postgres mode
+
+# Tuning parameters
+BORROWERS_INDEX_MAX_USERS_PER_RESERVE=3000  # Max borrowers tracked per reserve
+BORROWERS_INDEX_BACKFILL_BLOCKS=50000       # Historical blocks to index on startup
+BORROWERS_INDEX_CHUNK_BLOCKS=2000            # Batch size for historical indexing
+
 # Maximum borrowers to recheck per reserve event (default: 50)
 RESERVE_RECHECK_TOP_N=50
 
 # Hard cap on batch size to avoid provider overload (default: 100)
 RESERVE_RECHECK_MAX_BATCH=100
+```
 
-# Redis URL for persistent borrower tracking (optional)
-BORROWERS_INDEX_REDIS_URL=redis://localhost:6379
-# Falls back to in-memory only if Redis unavailable
+**Storage Modes:**
+- **memory**: In-memory only (no persistence, no external dependencies, ideal for testing)
+- **redis**: Redis-backed (requires Redis, good for ephemeral deployments)
+- **postgres**: Postgres-backed (uses existing DATABASE_URL, persists across restarts, run migration first)
+
+**Migration for Postgres Mode:**
+```bash
+# Run once when enabling postgres mode
+psql $DATABASE_URL < backend/migrations/20251113_add_borrowers_index.sql
 ```
 
 **How It Works:**
 1. BorrowersIndexService indexes variableDebt Transfer events for each reserve
-2. Maintains a per-reserve set of borrower addresses (persisted to Redis if available)
+2. Maintains a per-reserve set of borrower addresses (persisted based on mode)
 3. On ReserveDataUpdated or price trigger, fetches borrowers for affected reserve
 4. Selects up to RESERVE_RECHECK_TOP_N borrowers (randomized for fairness)
 5. Performs immediate batch HF check with optional pending verification
+
+**Note:** The index is **disabled by default**. You can enable targeted rechecks without Docker/Redis by using `BORROWERS_INDEX_MODE=memory` or `postgres`.
 
 ### Pending-State Verification
 

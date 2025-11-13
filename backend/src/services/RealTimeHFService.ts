@@ -1836,17 +1836,17 @@ export class RealTimeHFService extends EventEmitter {
     }
 
     try {
-      // Get borrowers for this reserve
-      const borrowers = await this.borrowersIndex.getBorrowers(reserveAddr);
+      // Get borrowers for this reserve (with limit for efficiency)
+      const topN = config.reserveRecheckTopN;
+      const maxBatch = config.reserveRecheckMaxBatch;
+      const limit = Math.max(topN, maxBatch);
+      
+      const borrowers = await this.borrowersIndex.getBorrowers(reserveAddr, limit);
       
       if (borrowers.length === 0) {
         return;
       }
 
-      // Select top N borrowers to recheck (randomized or by some priority)
-      const topN = config.reserveRecheckTopN;
-      const maxBatch = config.reserveRecheckMaxBatch;
-      
       // Shuffle for fairness and take top N
       const shuffled = [...borrowers].sort(() => Math.random() - 0.5);
       const selected = shuffled.slice(0, Math.min(topN, maxBatch, borrowers.length));
@@ -2820,11 +2820,12 @@ export class RealTimeHFService extends EventEmitter {
       onlyBorrowEnabled: true
     });
 
-    // Initialize BorrowersIndexService with discovered reserves
-    if (this.discoveredReserves.length > 0) {
+    // Initialize BorrowersIndexService with discovered reserves (if enabled)
+    if (config.borrowersIndex.enabled && this.discoveredReserves.length > 0) {
       try {
+        const mode = config.borrowersIndex.mode;
         // eslint-disable-next-line no-console
-        console.log(`[borrowers-index] Initializing with ${this.discoveredReserves.length} reserves`);
+        console.log(`[borrowers-index] Initializing with ${this.discoveredReserves.length} reserves (mode=${mode})`);
 
         const reserves = this.discoveredReserves.map(r => ({
           asset: r.asset,
@@ -2835,9 +2836,12 @@ export class RealTimeHFService extends EventEmitter {
         this.borrowersIndex = new BorrowersIndexService(
           this.provider as JsonRpcProvider,
           {
-            redisUrl: config.borrowersIndexRedisUrl || config.redisUrl,
-            backfillBlocks: 50000,
-            chunkSize: 2000
+            mode: config.borrowersIndex.mode,
+            redisUrl: config.borrowersIndex.redisUrl || config.redisUrl,
+            postgresUrl: config.databaseUrl,
+            backfillBlocks: config.borrowersIndex.backfillBlocks,
+            chunkSize: config.borrowersIndex.chunkBlocks,
+            maxUsersPerReserve: config.borrowersIndex.maxUsersPerReserve
           }
         );
 
@@ -2850,6 +2854,9 @@ export class RealTimeHFService extends EventEmitter {
         // Continue without BorrowersIndexService
         this.borrowersIndex = undefined;
       }
+    } else if (!config.borrowersIndex.enabled) {
+      // eslint-disable-next-line no-console
+      console.log('[borrowers-index] Disabled (BORROWERS_INDEX_ENABLED=false)');
     }
   }
 

@@ -154,6 +154,11 @@ export const config = {
   // BorrowersIndex Redis configuration
   get borrowersIndexRedisUrl() { return env.borrowersIndexRedisUrl; },
 
+  // BorrowersIndex configuration
+  get borrowersIndex() {
+    return env.borrowersIndex;
+  },
+
   // At-risk user scanning
   get atRiskScanLimit() { return env.atRiskScanLimit; },
   get atRiskWarnThreshold() { return env.atRiskWarnThreshold; },

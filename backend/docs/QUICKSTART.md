@@ -323,6 +323,78 @@ Reduce tracked candidates:
 echo "MAX_CANDIDATES=100" >> .env
 ```
 
+## Advanced Features
+
+### Per-Asset Price Trigger Configuration
+
+Customize price drop thresholds and debounce times per asset:
+
+```bash
+cat >> .env << 'EOF'
+# Enable price-triggered emergency scans
+PRICE_TRIGGER_ENABLED=true
+
+# Global defaults
+PRICE_TRIGGER_DROP_BPS=30        # 0.3% drop triggers scan
+PRICE_TRIGGER_DEBOUNCE_SEC=60    # Wait 60s between triggers
+
+# Per-asset overrides
+PRICE_TRIGGER_BPS_BY_ASSET="WETH:8,WBTC:10,USDC:20"
+PRICE_TRIGGER_DEBOUNCE_BY_ASSET="WETH:3,WBTC:3,USDC:5"
+EOF
+```
+
+This allows more sensitive monitoring for volatile assets (WETH, WBTC) while reducing false alarms for stablecoins.
+
+### Borrowers Index (Optional)
+
+Enable targeted rechecks for affected reserves without requiring Redis or Docker:
+
+#### Memory Mode (No External Services)
+```bash
+cat >> .env << 'EOF'
+# Enable borrowers index in memory mode
+BORROWERS_INDEX_ENABLED=true
+BORROWERS_INDEX_MODE=memory
+BORROWERS_INDEX_MAX_USERS_PER_RESERVE=3000
+BORROWERS_INDEX_BACKFILL_BLOCKS=50000
+EOF
+```
+
+#### Postgres Mode (Uses Existing DATABASE_URL)
+```bash
+# Run migration first
+psql $DATABASE_URL < migrations/20251113_add_borrowers_index.sql
+
+cat >> .env << 'EOF'
+# Enable borrowers index in Postgres mode
+BORROWERS_INDEX_ENABLED=true
+BORROWERS_INDEX_MODE=postgres
+BORROWERS_INDEX_MAX_USERS_PER_RESERVE=3000
+BORROWERS_INDEX_BACKFILL_BLOCKS=50000
+EOF
+```
+
+#### Redis Mode (Requires Redis)
+```bash
+cat >> .env << 'EOF'
+# Enable borrowers index in Redis mode
+BORROWERS_INDEX_ENABLED=true
+BORROWERS_INDEX_MODE=redis
+BORROWERS_INDEX_REDIS_URL=redis://127.0.0.1:6379
+BORROWERS_INDEX_MAX_USERS_PER_RESERVE=3000
+BORROWERS_INDEX_BACKFILL_BLOCKS=50000
+EOF
+```
+
+**Benefits:**
+- Targeted health checks for affected reserves (ReserveDataUpdated events)
+- Reduced RPC usage by checking only borrowers of updated reserves
+- Persists across restarts in Postgres/Redis modes
+- Memory mode requires no external dependencies
+
+**Note:** The index is **disabled by default**. Set `BORROWERS_INDEX_ENABLED=true` to enable.
+
 ## Next Steps
 
 1. **Run in shadow mode** for 24-48h to validate detection
