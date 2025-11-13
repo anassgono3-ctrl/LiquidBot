@@ -92,6 +92,23 @@ export const rawEnvSchema = z.object({
   PRICE_TRIGGER_DEBOUNCE_SEC: z.string().optional(),
   PRICE_TRIGGER_CUMULATIVE: z.string().optional(),
   PRICE_TRIGGER_POLL_SEC: z.string().optional(),
+  
+  // Per-asset price trigger configuration
+  PRICE_TRIGGER_BPS_BY_ASSET: z.string().optional(),
+  PRICE_TRIGGER_DEBOUNCE_BY_ASSET: z.string().optional(),
+  
+  // Auto-discovery of Chainlink feeds and debt tokens
+  AUTO_DISCOVER_FEEDS: z.string().optional(),
+  
+  // Reserve-targeted recheck configuration
+  RESERVE_RECHECK_TOP_N: z.string().optional(),
+  RESERVE_RECHECK_MAX_BATCH: z.string().optional(),
+  
+  // Pending-state verification
+  PENDING_VERIFY_ENABLED: z.string().optional(),
+  
+  // BorrowersIndex Redis configuration
+  BORROWERS_INDEX_REDIS_URL: z.string().optional(),
 
   // At-risk user scanning
   AT_RISK_SCAN_LIMIT: z.string().optional(),
@@ -372,6 +389,23 @@ export const env = (() => {
     priceTriggerDebounceSec: Number(parsed.PRICE_TRIGGER_DEBOUNCE_SEC || 60),
     priceTriggerCumulative: (parsed.PRICE_TRIGGER_CUMULATIVE || 'false').toLowerCase() === 'true',
     priceTriggerPollSec: Number(parsed.PRICE_TRIGGER_POLL_SEC || 15),
+    
+    // Per-asset price trigger configuration
+    priceTriggerBpsByAsset: parsed.PRICE_TRIGGER_BPS_BY_ASSET,
+    priceTriggerDebounceByAsset: parsed.PRICE_TRIGGER_DEBOUNCE_BY_ASSET,
+    
+    // Auto-discovery of Chainlink feeds and debt tokens
+    autoDiscoverFeeds: (parsed.AUTO_DISCOVER_FEEDS || 'true').toLowerCase() === 'true',
+    
+    // Reserve-targeted recheck configuration
+    reserveRecheckTopN: Number(parsed.RESERVE_RECHECK_TOP_N || 50),
+    reserveRecheckMaxBatch: Number(parsed.RESERVE_RECHECK_MAX_BATCH || 100),
+    
+    // Pending-state verification
+    pendingVerifyEnabled: (parsed.PENDING_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
+    
+    // BorrowersIndex Redis configuration
+    borrowersIndexRedisUrl: parsed.BORROWERS_INDEX_REDIS_URL,
 
     // At-risk user scanning
     atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),

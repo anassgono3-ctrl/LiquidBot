@@ -226,6 +226,27 @@ export const emergencyScanLatency = new Histogram({
   registers: [registry]
 });
 
+// New detection speed metrics
+export const realtimePriceTriggersTotal = new Counter({
+  name: 'liquidbot_realtime_price_triggers_total',
+  help: 'Total number of price trigger events per asset',
+  labelNames: ['asset'],
+  registers: [registry]
+});
+
+export const reserveRechecksTotal = new Counter({
+  name: 'liquidbot_reserve_rechecks_total',
+  help: 'Total number of reserve-targeted rechecks',
+  labelNames: ['asset', 'source'],
+  registers: [registry]
+});
+
+export const pendingVerifyErrorsTotal = new Counter({
+  name: 'liquidbot_pending_verify_errors_total',
+  help: 'Total number of pending-state verification errors',
+  registers: [registry]
+});
+
 // Timeout and recovery metrics
 export const chunkTimeoutsTotal = new Counter({
   name: 'liquidbot_chunk_timeouts_total',
