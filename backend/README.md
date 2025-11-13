@@ -9,6 +9,11 @@ The LiquidBot backend provides:
 - **Optional subgraph integration** for candidate seeding when enabled
 - **On-demand health factor resolution** (per liquidation, no bulk snapshots)
 - **Liquidation opportunity detection with profit estimation**
+- **Hotlist tracking** for near-threshold users (configurable HF bands)
+- **Precompute service** for pre-cached liquidation calldata on top-K candidates
+- **Liquidation audit** with classifier-based reason codes for missed liquidations
+- **Aave oracle integration** for accurate USD pricing
+- **Decision trace store** for post-hoc analysis
 - **Telegram notifications for profitable opportunities**
 - Flash loan orchestration for position protection
 - Subscription management and protection logging
@@ -17,6 +22,8 @@ The LiquidBot backend provides:
 - Prometheus metrics for monitoring
 
 **Note**: Bulk health monitoring has been disabled. Health factors are now computed on-demand only when new liquidation events are detected, reducing API quota consumption by >95%.
+
+**Operator Guide**: See [OPERATIONS.md](./OPERATIONS.md) for startup verification and feature activation guidance.
 
 ## Candidate Discovery Modes
 

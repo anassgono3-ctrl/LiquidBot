@@ -449,6 +449,35 @@ httpServer.listen(port, async () => {
   logger.info(`WebSocket server available at ws://localhost:${port}/ws`);
   logger.info(`Build info: commit=${buildInfo.commit} node=${buildInfo.node} started=${buildInfo.startedAt}`);
   
+  // Feature module banners (A)
+  if (config.hotlistEnabled) {
+    logger.info(
+      `[hotlist] enabled hf=[${config.hotlistMinHf},${config.hotlistMaxHf}] ` +
+      `topN=${config.hotlistMax} minDebt=${config.hotlistMinDebtUsd} ` +
+      `revisitSec=${config.hotlistRevisitSec}`
+    );
+  }
+  
+  if (config.precomputeEnabled) {
+    logger.info(
+      `[precompute] enabled topK=${config.precomputeTopK} ` +
+      `receiveAToken=${config.precomputeReceiveAToken}`
+    );
+  }
+  
+  if (config.pricesUseAaveOracle) {
+    const oracleAddr = config.aaveOracle || '(will resolve from AddressesProvider)';
+    logger.info(
+      `[oracle] using Aave PriceOracle=${oracleAddr} BASE_CURRENCY_UNIT=1e8`
+    );
+  }
+  
+  if (config.liquidationAuditEnabled && config.auditClassifierEnabled) {
+    logger.info(
+      `[audit] classifier enabled (decision-trace ${config.decisionTraceEnabled ? 'on' : 'off'})`
+    );
+  }
+  
   // Log critical configuration at startup
   logger.info(`[config] NOTIFY_ONLY_WHEN_ACTIONABLE=${config.notifyOnlyWhenActionable}`);
   logger.info(`[config] ALWAYS_INCLUDE_HF_BELOW=${config.alwaysIncludeHfBelow}`);

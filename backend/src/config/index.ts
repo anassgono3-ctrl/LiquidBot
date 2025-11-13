@@ -236,6 +236,13 @@ export const config = {
   get liquidationAuditNotify() { return env.liquidationAuditNotify; },
   get liquidationAuditPriceMode() { return env.liquidationAuditPriceMode; },
   get liquidationAuditSampleLimit() { return env.liquidationAuditSampleLimit; },
+  
+  // Decision trace and classifier
+  get decisionTraceEnabled() { return env.decisionTraceEnabled; },
+  get auditClassifierEnabled() { return env.auditClassifierEnabled; },
+  
+  // Prices via Aave Oracle
+  get pricesUseAaveOracle() { return env.pricesUseAaveOracle; },
 
   // Priority Sweep configuration
   get prioritySweepEnabled() { return env.prioritySweepEnabled; },
@@ -255,4 +262,24 @@ export const config = {
   get prioritySweepPageSize() { return env.prioritySweepPageSize; },
   get prioritySweepInterRequestMs() { return env.prioritySweepInterRequestMs; },
   get hotlistMaxHf() { return env.hotlistMaxHf; },
+  
+  // Hotlist configuration
+  get hotlistEnabled() { return env.hotSetEnabled; },
+  get hotlistMinHf() { return env.hotlistMinHf; },
+  get hotlistMax() { return env.hotlistMax; },
+  get hotlistMinDebtUsd() { return env.hotlistMinDebtUsd; },
+  get hotlistRevisitSec() { return env.hotlistRevisitSec; },
+  
+  // Hot/Warm set tracking (legacy names)
+  get hotSetEnabled() { return env.hotSetEnabled; },
+  get hotSetHfMax() { return env.hotSetHfMax; },
+  get warmSetHfMax() { return env.warmSetHfMax; },
+  get maxHotSize() { return env.maxHotSize; },
+  get maxWarmSize() { return env.maxWarmSize; },
+  
+  // Precompute configuration
+  get precomputeEnabled() { return env.precomputeEnabled; },
+  get precomputeTopK() { return env.precomputeTopK; },
+  get precomputeCloseFactorPct() { return env.precomputeCloseFactorPct; },
+  get precomputeReceiveAToken() { return env.precomputeReceiveAToken; },
 };
