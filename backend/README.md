@@ -61,6 +61,35 @@ CHAINLINK_RPC_URL=https://mainnet.base.org
 CHAINLINK_FEEDS=ETH:0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70,USDC:0x7e860098F58bBFC8648a4311b374B1D669a2bc6B
 ```
 
+#### Base-Specific Feed Support
+
+On Base, some wrapped/staked ETH assets (wstETH, weETH) and bridged stablecoins (USDbC) require special handling:
+
+**Derived Assets via Ratio Feeds:**
+```bash
+# Assets priced via ratio feeds (e.g., wstETH price = WSTETH_ETH ratio × WETH/USD)
+# These assets will NOT be polled at asset-level, only via event listeners
+DERIVED_RATIO_FEEDS=wstETH:WSTETH_ETH,weETH:WEETH_ETH
+```
+
+**Asset Aliasing:**
+```bash
+# Alias one asset to another for pricing (e.g., USDbC uses USDC pricing)
+PRICE_FEED_ALIASES=USDbC:USDC
+```
+
+**Polling Error Hardening:**
+```bash
+# Number of consecutive errors before disabling polling for a feed (default: 3)
+# Event listeners remain active even when polling is disabled
+PRICE_POLL_DISABLE_AFTER_ERRORS=3
+```
+
+**How It Works:**
+- **Derived assets**: Automatically composed from ratio feed × base USD price. Skips asset-level polling to avoid `CALL_EXCEPTION` errors.
+- **Aliases**: USDbC resolves to USDC for pricing; both return the same price.
+- **Auto-disable on errors**: After N consecutive `CALL_EXCEPTION` errors, polling is disabled for that feed. Event listeners continue to work, so price updates are still captured via on-chain events.
+
 **Features:**
 - **Dynamic decimals**: PriceService automatically fetches decimals per feed on initialization
 - **Safe BigInt normalization**: Avoids "Cannot mix BigInt and other types" errors
