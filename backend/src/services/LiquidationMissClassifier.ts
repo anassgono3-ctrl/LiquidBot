@@ -15,7 +15,6 @@
  */
 
 import type { ExecutionDecisionsStore } from './executionDecisions.js';
-import type { AssetMetadataCache } from '../aave/AssetMetadataCache.js';
 import { ProfitEstimator } from './ProfitEstimator.js';
 
 export type MissReason =
@@ -51,20 +50,14 @@ export interface ClassifierConfig {
 export class LiquidationMissClassifier {
   private config: ClassifierConfig;
   private executionDecisions: ExecutionDecisionsStore;
-  private profitEstimator: ProfitEstimator | null = null;
   private firstSeenMap = new Map<string, { blockNumber: number; hf: number }>();
 
   constructor(
     config: ClassifierConfig,
-    executionDecisions: ExecutionDecisionsStore,
-    assetCache?: AssetMetadataCache
+    executionDecisions: ExecutionDecisionsStore
   ) {
     this.config = config;
     this.executionDecisions = executionDecisions;
-    
-    if (assetCache) {
-      this.profitEstimator = new ProfitEstimator(assetCache);
-    }
   }
 
   /**
@@ -303,28 +296,20 @@ export class LiquidationMissClassifier {
 
   /**
    * Estimate profit for a liquidation (if profit estimation is enabled)
+   * @param debtUsd Debt value in USD
+   * @param liquidationBonusPct Liquidation bonus percentage
    * @returns Profit estimate or null
    */
-  async estimateProfit(
-    debtAsset: string,
-    debtAmount: bigint,
-    collateralAsset: string,
-    collateralAmount: bigint,
+  estimateProfit(
+    debtUsd: number,
     liquidationBonusPct: number
-  ): Promise<number | null> {
-    if (!this.config.enableProfitCheck || !this.profitEstimator) {
+  ): number | null {
+    if (!this.config.enableProfitCheck) {
       return null;
     }
 
-    const estimate = await this.profitEstimator.estimateProfit(
-      debtAsset,
-      debtAmount,
-      collateralAsset,
-      collateralAmount,
-      liquidationBonusPct
-    );
-
-    return estimate?.grossProfitUsd || null;
+    const estimate = ProfitEstimator.estimateFromUsd(debtUsd, liquidationBonusPct);
+    return estimate.grossProfitUsd;
   }
 
   /**
