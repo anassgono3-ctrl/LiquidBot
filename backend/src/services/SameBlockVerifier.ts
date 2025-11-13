@@ -47,10 +47,10 @@ export class SameBlockVerifier {
   /**
    * Verify a user's liquidation status at a specific block
    * @param userAddress User to check
-   * @param blockTag Block number to check at (defaults to 'latest')
+   * @param blockTag Block number, 'latest', or 'pending' to check at
    * @returns Verification result with health factor and account data
    */
-  async verify(userAddress: string, blockTag?: number | 'latest'): Promise<VerifyResult> {
+  async verify(userAddress: string, blockTag?: number | 'latest' | 'pending'): Promise<VerifyResult> {
     try {
       // Prepare multicall for getUserAccountData
       const callData = this.poolInterface.encodeFunctionData('getUserAccountData', [userAddress]);
@@ -62,6 +62,7 @@ export class SameBlockVerifier {
       }];
       
       // Execute multicall at specific block
+      // Support 'pending' blockTag for fast path verification
       const blockOptions = blockTag !== undefined && blockTag !== 'latest' 
         ? { blockTag } 
         : {};

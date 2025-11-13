@@ -136,6 +136,23 @@ export const config = {
   get priceTriggerDebounceSec() { return env.priceTriggerDebounceSec; },
   get priceTriggerCumulative() { return env.priceTriggerCumulative; },
   get priceTriggerPollSec() { return env.priceTriggerPollSec; },
+  
+  // Per-asset price trigger configuration
+  get priceTriggerBpsByAsset() { return env.priceTriggerBpsByAsset; },
+  get priceTriggerDebounceByAsset() { return env.priceTriggerDebounceByAsset; },
+  
+  // Auto-discovery of Chainlink feeds and debt tokens
+  get autoDiscoverFeeds() { return env.autoDiscoverFeeds; },
+  
+  // Reserve-targeted recheck configuration
+  get reserveRecheckTopN() { return env.reserveRecheckTopN; },
+  get reserveRecheckMaxBatch() { return env.reserveRecheckMaxBatch; },
+  
+  // Pending-state verification
+  get pendingVerifyEnabled() { return env.pendingVerifyEnabled; },
+  
+  // BorrowersIndex Redis configuration
+  get borrowersIndexRedisUrl() { return env.borrowersIndexRedisUrl; },
 
   // At-risk user scanning
   get atRiskScanLimit() { return env.atRiskScanLimit; },

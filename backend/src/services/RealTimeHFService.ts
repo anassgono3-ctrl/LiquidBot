@@ -32,7 +32,10 @@ import {
   eventBatchesSkipped,
   eventBatchesExecuted,
   eventConcurrencyLevel,
-  eventConcurrencyLevelHistogram
+  eventConcurrencyLevelHistogram,
+  realtimePriceTriggersTotal,
+  reserveRechecksTotal,
+  pendingVerifyErrorsTotal
 } from '../metrics/index.js';
 
 import { CandidateManager } from './CandidateManager.js';
@@ -47,6 +50,9 @@ import { PriceService } from './PriceService.js';
 import { HotSetTracker } from './HotSetTracker.js';
 import { PrecomputeService } from './PrecomputeService.js';
 import { DecisionTraceStore } from './DecisionTraceStore.js';
+import { FeedDiscoveryService, type DiscoveredReserve } from './FeedDiscoveryService.js';
+import { PerAssetTriggerConfig } from './PerAssetTriggerConfig.js';
+import { AaveDataService } from './AaveDataService.js';
 import { isZero } from '../utils/bigint.js';
 
 // ABIs
@@ -114,6 +120,10 @@ export class RealTimeHFService extends EventEmitter {
   private hotSetTracker?: HotSetTracker;
   private precomputeService?: PrecomputeService;
   private decisionTraceStore?: DecisionTraceStore;
+  private feedDiscoveryService?: FeedDiscoveryService;
+  private perAssetTriggerConfig?: PerAssetTriggerConfig;
+  private aaveDataService?: AaveDataService;
+  private discoveredReserves: DiscoveredReserve[] = [];
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -285,6 +295,18 @@ export class RealTimeHFService extends EventEmitter {
         this.provider as any, // Will be set later in setupProvider
         this.decisionTraceStore
       );
+    }
+    
+    // Initialize per-asset trigger config if price triggers are enabled
+    if (config.priceTriggerEnabled) {
+      this.perAssetTriggerConfig = new PerAssetTriggerConfig();
+      // eslint-disable-next-line no-console
+      console.log('[per-asset-trigger] Config initialized');
+      const configured = this.perAssetTriggerConfig.getConfiguredAssets();
+      if (configured.length > 0) {
+        // eslint-disable-next-line no-console
+        console.log(`[per-asset-trigger] Custom settings for: ${configured.join(', ')}`);
+      }
     }
     
     // Initialize adaptive settings
@@ -611,9 +633,40 @@ export class RealTimeHFService extends EventEmitter {
       // eslint-disable-next-line no-console
       console.log('[realtime-hf] Subscribed (ethers) to Aave Pool logs');
 
-      // 3. Optional: Setup Chainlink price feed listeners
-      if (config.chainlinkFeeds) {
-        const feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+      // 3. Optional: Auto-discover Chainlink feeds and setup BorrowersIndexService
+      let feeds: Record<string, string> = {};
+      
+      if (config.autoDiscoverFeeds && this.provider) {
+        try {
+          // eslint-disable-next-line no-console
+          console.log('[feed-discovery] Auto-discovery enabled, discovering reserves...');
+          await this.performFeedDiscovery();
+          
+          // Build feeds map from discovered reserves
+          feeds = FeedDiscoveryService.buildFeedsMap(this.discoveredReserves);
+          
+          // Merge with manual config if provided
+          if (config.chainlinkFeeds) {
+            feeds = FeedDiscoveryService.mergeFeedsWithConfig(feeds, config.chainlinkFeeds);
+          }
+          
+          // eslint-disable-next-line no-console
+          console.log(`[feed-discovery] Discovered ${Object.keys(feeds).length} Chainlink feeds`);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.error('[feed-discovery] Auto-discovery failed, falling back to manual config:', err);
+          // Fall back to manual config
+          if (config.chainlinkFeeds) {
+            feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+          }
+        }
+      } else if (config.chainlinkFeeds) {
+        // Use manual configuration only
+        feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
+      }
+      
+      // Setup Chainlink price feed listeners if we have any feeds
+      if (Object.keys(feeds).length > 0) {
         // Get AnswerUpdated topic from event registry
         const answerUpdatedTopic = Array.from(eventRegistry.getAllTopics()).find(topic => {
           const entry = eventRegistry.get(topic);
@@ -1327,22 +1380,26 @@ export class RealTimeHFService extends EventEmitter {
         );
       }
       
+      // Get per-asset threshold and debounce settings
+      const assetDropBps = this.perAssetTriggerConfig?.getDropBps(symbol) ?? config.priceTriggerDropBps;
+      const assetDebounceSec = this.perAssetTriggerConfig?.getDebounceSec(symbol) ?? config.priceTriggerDebounceSec;
+      
       // Check if price dropped by threshold or more
-      if (priceDiffPct >= -config.priceTriggerDropBps) {
+      if (priceDiffPct >= -assetDropBps) {
         // Price increased or dropped less than threshold - no emergency scan
         return;
       }
       
       // Check debounce: prevent repeated scans on rapid ticks
       const now = Date.now();
-      const debounceMs = config.priceTriggerDebounceSec * 1000;
+      const debounceMs = assetDebounceSec * 1000;
       
       if (state.lastTriggerTs > 0 && (now - state.lastTriggerTs) < debounceMs) {
         const elapsedSec = Math.floor((now - state.lastTriggerTs) / 1000);
         // eslint-disable-next-line no-console
         console.log(
           `[price-trigger] Debounced (${source}): asset=${symbol} drop=${Math.abs(priceDiffPct).toFixed(2)}bps ` +
-          `elapsed=${elapsedSec}s debounce=${config.priceTriggerDebounceSec}s ` +
+          `elapsed=${elapsedSec}s debounce=${assetDebounceSec}s ` +
           `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'}`
         );
         return;
@@ -1363,11 +1420,14 @@ export class RealTimeHFService extends EventEmitter {
       // eslint-disable-next-line no-console
       console.log(
         `[price-trigger] Sharp price drop detected (${source}): asset=${symbol} ` +
-        `drop=${dropBps.toFixed(2)}bps threshold=${config.priceTriggerDropBps}bps ` +
+        `drop=${dropBps.toFixed(2)}bps threshold=${assetDropBps}bps ` +
         `mode=${config.priceTriggerCumulative ? 'cumulative' : 'delta'} ` +
         `reference=${referencePrice.toFixed(2)} current=${currentPrice.toFixed(2)} ` +
         `block=${blockNumber}`
       );
+      
+      // Increment metric
+      realtimePriceTriggersTotal.inc({ asset: symbol });
       
       // Select candidates for emergency scan
       const affectedUsers = this.selectCandidatesForEmergencyScan(symbol);
@@ -1400,9 +1460,23 @@ export class RealTimeHFService extends EventEmitter {
       const { realtimePriceEmergencyScansTotal, emergencyScanLatency } = await import('../metrics/index.js');
       realtimePriceEmergencyScansTotal.inc({ asset: symbol });
       
-      // Perform emergency scan with latency tracking
+      // If BorrowersIndexService is available, also check borrowers of this reserve
+      if (this.borrowersIndex) {
+        // Find the reserve address for this symbol
+        const reserve = this.discoveredReserves.find(
+          r => r.symbol.toUpperCase() === symbol.toUpperCase()
+        );
+        
+        if (reserve) {
+          // eslint-disable-next-line no-console
+          console.log(`[price-trigger] Also checking borrowers of reserve ${symbol} via BorrowersIndexService`);
+          await this.checkReserveBorrowers(reserve.asset, 'price', blockNumber);
+        }
+      }
+      
+      // Perform emergency scan with latency tracking on candidate set
       const startTime = Date.now();
-      await this.batchCheckCandidates(affectedUsers, 'price', blockNumber);
+      await this.batchCheckCandidatesWithPending(affectedUsers, 'price', blockNumber);
       const latencyMs = Date.now() - startTime;
       emergencyScanLatency.observe(latencyMs);
       
@@ -1754,6 +1828,91 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Check borrowers of a specific reserve when it's updated or price changes
+   */
+  private async checkReserveBorrowers(reserveAddr: string, source: 'reserve' | 'price', blockTag?: number): Promise<void> {
+    if (!this.borrowersIndex) {
+      return;
+    }
+
+    try {
+      // Get borrowers for this reserve
+      const borrowers = await this.borrowersIndex.getBorrowers(reserveAddr);
+      
+      if (borrowers.length === 0) {
+        return;
+      }
+
+      // Select top N borrowers to recheck (randomized or by some priority)
+      const topN = config.reserveRecheckTopN;
+      const maxBatch = config.reserveRecheckMaxBatch;
+      
+      // Shuffle for fairness and take top N
+      const shuffled = [...borrowers].sort(() => Math.random() - 0.5);
+      const selected = shuffled.slice(0, Math.min(topN, maxBatch, borrowers.length));
+      
+      // Resolve symbol for logging and metrics
+      const reserve = this.discoveredReserves.find(r => r.asset.toLowerCase() === reserveAddr.toLowerCase());
+      const symbol = reserve?.symbol || reserveAddr.slice(0, 10);
+      
+      // eslint-disable-next-line no-console
+      console.log(
+        `[reserve-recheck] Checking ${selected.length}/${borrowers.length} borrowers ` +
+        `for reserve ${symbol} (source=${source}, block=${blockTag || 'latest'})`
+      );
+      
+      // Increment metric
+      reserveRechecksTotal.inc({ asset: symbol, source });
+      
+      // Perform batch HF check with optional pending verification
+      await this.batchCheckCandidatesWithPending(selected, source, blockTag);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[reserve-recheck] Error checking reserve borrowers:`, err);
+    }
+  }
+
+  /**
+   * Batch check candidates with optional pending-state verification
+   */
+  private async batchCheckCandidatesWithPending(
+    addresses: string[],
+    triggerType: 'event' | 'head' | 'price' | 'reserve',
+    blockTag?: number
+  ): Promise<void> {
+    // Determine if we should use pending verification
+    const usePending = config.pendingVerifyEnabled && 
+                       (triggerType === 'price' || triggerType === 'reserve') &&
+                       !blockTag; // Only for real-time checks, not historical
+    
+    const effectiveBlockTag: number | 'pending' | undefined = usePending ? 'pending' : blockTag;
+    
+    // If using pending, log it
+    if (usePending) {
+      // eslint-disable-next-line no-console
+      console.log(`[pending-verify] Using pending block for ${addresses.length} checks (trigger=${triggerType})`);
+    }
+    
+    try {
+      // Use existing batch check with effective block tag
+      await this.batchCheckCandidates(addresses, triggerType as 'event' | 'head' | 'price', effectiveBlockTag);
+    } catch (err) {
+      // Check if error is related to pending block not supported
+      const errStr = String(err).toLowerCase();
+      if (usePending && (errStr.includes('pending') || errStr.includes('block tag'))) {
+        // eslint-disable-next-line no-console
+        console.warn('[pending-verify] Provider does not support pending block, falling back to latest');
+        pendingVerifyErrorsTotal.inc();
+        
+        // Retry with latest (undefined means latest)
+        await this.batchCheckCandidates(addresses, triggerType as 'event' | 'head' | 'price', blockTag);
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  /**
    * Enqueue event-driven batch check with coalescing
    */
   private enqueueEventBatch(users: string[], reserve: string | null, blockNumber: number): void {
@@ -1843,8 +2002,16 @@ export class RealTimeHFService extends EventEmitter {
       if (usersArray.length > 0) {
         await this.batchCheckCandidates(usersArray, 'event', blockNumber);
       } else if (reserveCount > 0) {
-        // No specific users but reserve updated - check low-HF candidates
-        await this.checkLowHFCandidates('event', blockNumber);
+        // No specific users but reserve updated - use BorrowersIndexService if available
+        // to target borrowers of the affected reserve
+        if (this.borrowersIndex) {
+          for (const reserveAddr of batch.reserves) {
+            await this.checkReserveBorrowers(reserveAddr, 'reserve', blockNumber);
+          }
+        } else {
+          // Fallback: check low-HF candidates
+          await this.checkLowHFCandidates('event', blockNumber);
+        }
       }
     } finally {
       this.runningEventBatches--;
@@ -2188,7 +2355,7 @@ export class RealTimeHFService extends EventEmitter {
   private async multicallAggregate3ReadOnly(
     calls: Array<{ target: string; allowFailure: boolean; callData: string }>,
     chunkSize?: number,
-    blockTag?: number
+    blockTag?: number | 'pending'
   ): Promise<Array<{ success: boolean; returnData: string }>> {
     if (!this.multicall3 || !this.provider) {
       throw new Error('[realtime-hf] Multicall3 or provider not initialized');
@@ -2331,7 +2498,7 @@ export class RealTimeHFService extends EventEmitter {
    * Batch check multiple candidates using Multicall3
    * @returns Metrics about the batch run
    */
-  private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<{ timeouts: number; avgLatency: number; candidates: number }> {
+  private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price', blockTag?: number | 'pending'): Promise<{ timeouts: number; avgLatency: number; candidates: number }> {
     if (!this.multicall3 || !this.provider || addresses.length === 0) {
       return { timeouts: 0, avgLatency: 0, candidates: 0 };
     }
@@ -2354,7 +2521,7 @@ export class RealTimeHFService extends EventEmitter {
       }));
 
       const results = await this.multicallAggregate3ReadOnly(calls, undefined, blockTag);
-      const blockNumber = blockTag || await this.provider.getBlockNumber();
+      const blockNumber = (typeof blockTag === 'number' ? blockTag : undefined) || await this.provider.getBlockNumber();
       let minHF: number | null = null;
 
       for (let i = 0; i < results.length; i++) {
@@ -2626,6 +2793,64 @@ export class RealTimeHFService extends EventEmitter {
     }
     
     return feeds;
+  }
+
+  /**
+   * Perform feed discovery and initialize BorrowersIndexService
+   */
+  private async performFeedDiscovery(): Promise<void> {
+    if (!this.provider || !(this.provider instanceof JsonRpcProvider || this.provider instanceof WebSocketProvider)) {
+      throw new Error('[feed-discovery] Provider not initialized');
+    }
+
+    // Initialize AaveDataService if not already done
+    if (!this.aaveDataService) {
+      this.aaveDataService = new AaveDataService(this.provider as JsonRpcProvider);
+    }
+
+    // Initialize FeedDiscoveryService
+    this.feedDiscoveryService = new FeedDiscoveryService(
+      this.provider as JsonRpcProvider,
+      this.aaveDataService
+    );
+
+    // Discover reserves
+    this.discoveredReserves = await this.feedDiscoveryService.discoverReserves({
+      skipInactive: true,
+      onlyBorrowEnabled: true
+    });
+
+    // Initialize BorrowersIndexService with discovered reserves
+    if (this.discoveredReserves.length > 0) {
+      try {
+        // eslint-disable-next-line no-console
+        console.log(`[borrowers-index] Initializing with ${this.discoveredReserves.length} reserves`);
+
+        const reserves = this.discoveredReserves.map(r => ({
+          asset: r.asset,
+          symbol: r.symbol,
+          variableDebtToken: r.variableDebtToken
+        }));
+
+        this.borrowersIndex = new BorrowersIndexService(
+          this.provider as JsonRpcProvider,
+          {
+            redisUrl: config.borrowersIndexRedisUrl || config.redisUrl,
+            backfillBlocks: 50000,
+            chunkSize: 2000
+          }
+        );
+
+        await this.borrowersIndex.initialize(reserves);
+        // eslint-disable-next-line no-console
+        console.log('[borrowers-index] Initialized successfully');
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[borrowers-index] Failed to initialize:', err);
+        // Continue without BorrowersIndexService
+        this.borrowersIndex = undefined;
+      }
+    }
   }
 
   /**
