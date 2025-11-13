@@ -296,17 +296,45 @@ RESERVE_RECHECK_TOP_N=50
 # Hard cap on batch size to avoid provider overload (default: 100)
 RESERVE_RECHECK_MAX_BATCH=100
 
-# Redis URL for persistent borrower tracking (optional)
-BORROWERS_INDEX_REDIS_URL=redis://localhost:6379
-# Falls back to in-memory only if Redis unavailable
+# Borrowers Index configuration (disabled by default)
+BORROWERS_INDEX_ENABLED=false                    # Enable borrower tracking
+BORROWERS_INDEX_MODE=memory                      # memory|redis|postgres
+BORROWERS_INDEX_REDIS_URL=redis://localhost:6379 # Redis URL (for redis mode)
+BORROWERS_INDEX_MAX_USERS_PER_RESERVE=3000       # Max tracked borrowers per reserve
+BORROWERS_INDEX_BACKFILL_BLOCKS=50000            # Historical blocks to scan
+BORROWERS_INDEX_CHUNK_BLOCKS=2000                # Block chunk size for backfill
 ```
+
+**Storage Modes:**
+- **memory** (default): In-memory tracking, no external dependencies. Data is lost on restart.
+- **redis**: Persistent tracking via Redis. Requires Redis server running.
+- **postgres**: Persistent tracking via PostgreSQL using `DATABASE_URL`. Requires migration:
+  ```bash
+  psql $DATABASE_URL < backend/migrations/20251113_add_borrowers_index.sql
+  ```
+  If the `borrowers_index` table doesn't exist, the service logs a warning and falls back to memory mode.
 
 **How It Works:**
 1. BorrowersIndexService indexes variableDebt Transfer events for each reserve
-2. Maintains a per-reserve set of borrower addresses (persisted to Redis if available)
+2. Maintains a per-reserve set of borrower addresses (persisted based on mode)
 3. On ReserveDataUpdated or price trigger, fetches borrowers for affected reserve
 4. Selects up to RESERVE_RECHECK_TOP_N borrowers (randomized for fairness)
 5. Performs immediate batch HF check with optional pending verification
+
+**Quick Start (No Dependencies):**
+```bash
+# Default: disabled, no external services required
+BORROWERS_INDEX_ENABLED=false
+
+# Memory mode: enable tracking without Redis/Postgres
+BORROWERS_INDEX_ENABLED=true
+BORROWERS_INDEX_MODE=memory
+
+# Postgres mode: enable with DATABASE_URL (after running migration)
+BORROWERS_INDEX_ENABLED=true
+BORROWERS_INDEX_MODE=postgres
+DATABASE_URL=postgresql://user:pass@localhost:5432/liquidbot
+```
 
 ### Pending-State Verification
 

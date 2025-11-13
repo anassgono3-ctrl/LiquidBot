@@ -2820,8 +2820,8 @@ export class RealTimeHFService extends EventEmitter {
       onlyBorrowEnabled: true
     });
 
-    // Initialize BorrowersIndexService with discovered reserves
-    if (this.discoveredReserves.length > 0) {
+    // Initialize BorrowersIndexService with discovered reserves (if enabled)
+    if (config.borrowersIndexEnabled && this.discoveredReserves.length > 0) {
       try {
         // eslint-disable-next-line no-console
         console.log(`[borrowers-index] Initializing with ${this.discoveredReserves.length} reserves`);
@@ -2835,9 +2835,12 @@ export class RealTimeHFService extends EventEmitter {
         this.borrowersIndex = new BorrowersIndexService(
           this.provider as JsonRpcProvider,
           {
-            redisUrl: config.borrowersIndexRedisUrl || config.redisUrl,
-            backfillBlocks: 50000,
-            chunkSize: 2000
+            mode: config.borrowersIndexMode as 'memory' | 'redis' | 'postgres',
+            redisUrl: config.borrowersIndexRedisUrl,
+            databaseUrl: config.databaseUrl,
+            backfillBlocks: config.borrowersIndexBackfillBlocks,
+            chunkSize: config.borrowersIndexChunkBlocks,
+            maxUsersPerReserve: config.borrowersIndexMaxUsersPerReserve
           }
         );
 
@@ -2850,6 +2853,9 @@ export class RealTimeHFService extends EventEmitter {
         // Continue without BorrowersIndexService
         this.borrowersIndex = undefined;
       }
+    } else if (!config.borrowersIndexEnabled) {
+      // eslint-disable-next-line no-console
+      console.log('[borrowers-index] Disabled via BORROWERS_INDEX_ENABLED=false');
     }
   }
 
