@@ -239,6 +239,122 @@ Event coalescing logs:
 [event-coalesce] executing batch (block=12345678, users=15, reserves=2)
 ```
 
+## Low-Latency Detection Upgrades
+
+The real-time HF service includes advanced detection features to catch liquidation opportunities earlier than competitors. These are **detection-only** enhancements that do not modify transaction execution.
+
+### Auto-Discovery of Chainlink Feeds
+
+Instead of manually configuring Chainlink price feeds, the service can automatically discover them from Aave reserves:
+
+**Configuration:**
+```bash
+# Enable automatic feed discovery (default: true)
+AUTO_DISCOVER_FEEDS=true
+
+# Optional: Manual feeds still work and override/augment auto-discovered feeds
+CHAINLINK_FEEDS=WETH:0x71041...
+```
+
+**How It Works:**
+1. On startup, queries Aave UI Pool Data Provider for all active reserves
+2. For each reserve, resolves the Chainlink aggregator address via Aave Oracle
+3. Resolves variableDebtToken addresses for borrower tracking
+4. Subscribes to AnswerUpdated and NewTransmission events for all discovered feeds
+5. Manual configuration (if provided) overrides auto-discovered values
+
+### Per-Asset Price Trigger Tuning
+
+Fine-tune price drop thresholds and debounce windows per asset for optimal sensitivity:
+
+**Configuration:**
+```bash
+# Global defaults (used when no per-asset override)
+PRICE_TRIGGER_DROP_BPS=30          # 30 basis points = 0.3%
+PRICE_TRIGGER_DEBOUNCE_SEC=60      # 60 seconds
+
+# Per-asset overrides (tighter for major assets)
+PRICE_TRIGGER_BPS_BY_ASSET=WETH:8,WBTC:10,USDC:20
+PRICE_TRIGGER_DEBOUNCE_BY_ASSET=WETH:3,WBTC:3,USDC:5
+```
+
+**Example:** With the above config:
+- WETH price drops trigger at 8 bps (0.08%) with 3-second debounce
+- WBTC triggers at 10 bps with 3-second debounce
+- USDC triggers at 20 bps with 5-second debounce
+- Other assets use global defaults (30 bps, 60 seconds)
+
+### Reserve-Targeted Borrower Rechecks
+
+When a reserve is updated (ReserveDataUpdated event) or its price drops significantly, the service can instantly recheck borrowers of that specific reserve:
+
+**Configuration:**
+```bash
+# Maximum borrowers to recheck per reserve event (default: 50)
+RESERVE_RECHECK_TOP_N=50
+
+# Hard cap on batch size to avoid provider overload (default: 100)
+RESERVE_RECHECK_MAX_BATCH=100
+
+# Redis URL for persistent borrower tracking (optional)
+BORROWERS_INDEX_REDIS_URL=redis://localhost:6379
+# Falls back to in-memory only if Redis unavailable
+```
+
+**How It Works:**
+1. BorrowersIndexService indexes variableDebt Transfer events for each reserve
+2. Maintains a per-reserve set of borrower addresses (persisted to Redis if available)
+3. On ReserveDataUpdated or price trigger, fetches borrowers for affected reserve
+4. Selects up to RESERVE_RECHECK_TOP_N borrowers (randomized for fairness)
+5. Performs immediate batch HF check with optional pending verification
+
+### Pending-State Verification
+
+For ultra-low latency, verify HF at `blockTag='pending'` before the block is mined:
+
+**Configuration:**
+```bash
+# Enable pending-state verification (default: true)
+PENDING_VERIFY_ENABLED=true
+```
+
+**How It Works:**
+- Price and reserve triggers optionally check HF at `blockTag='pending'`
+- Falls back to 'latest' if provider doesn't support pending blocks
+- Provides ~1-2 second head start over competitors checking after block confirmation
+- Errors are logged to `liquidbot_pending_verify_errors_total` metric
+
+### New Metrics
+
+Monitor detection performance with these Prometheus metrics:
+
+```
+# Price trigger events per asset
+liquidbot_realtime_price_triggers_total{asset="WETH"}
+
+# Reserve-targeted rechecks
+liquidbot_reserve_rechecks_total{asset="WETH", source="price|reserve"}
+
+# Pending verification failures (provider support issues)
+liquidbot_pending_verify_errors_total
+```
+
+### Safety and Rollback
+
+All detection upgrades are behind feature flags:
+
+```bash
+# Disable all new features to revert to previous behavior
+AUTO_DISCOVER_FEEDS=false
+PENDING_VERIFY_ENABLED=false
+
+# Or selectively disable per-asset triggers
+PRICE_TRIGGER_BPS_BY_ASSET=
+PRICE_TRIGGER_DEBOUNCE_BY_ASSET=
+```
+
+**No Execution Changes:** These upgrades only affect **when** opportunities are detected, not how they are executed. Transaction submission, gas tuning, and profitability simulation are unchanged.
+
 ## Security & Risk Controls
 
 - 95%+ contract test coverage (Hardhat + Foundry)
