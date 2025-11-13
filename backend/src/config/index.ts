@@ -241,6 +241,13 @@ export const config = {
   get decisionTraceEnabled() { return env.decisionTraceEnabled; },
   get auditClassifierEnabled() { return env.auditClassifierEnabled; },
   
+  // Liquidation Miss Classifier
+  get missClassifierEnabled() { return env.missClassifierEnabled; },
+  get missTransientBlocks() { return env.missTransientBlocks; },
+  get missMinProfitUsd() { return env.missMinProfitUsd; },
+  get missGasThresholdGwei() { return env.missGasThresholdGwei; },
+  get missEnableProfitCheck() { return env.missEnableProfitCheck; },
+  
   // Prices via Aave Oracle
   get pricesUseAaveOracle() { return env.pricesUseAaveOracle; },
 
