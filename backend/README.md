@@ -90,6 +90,41 @@ npm run verify:chainlink
 - Price normalization uses correct scaling: `Number(answer) / (10 ** decimals)`
 - Startup logs show: `[price] Feed WETH decimals=8 address=0x...`
 
+### Borrowers Index (Optional)
+
+LiquidBot supports optional per-reserve borrower tracking via the BorrowersIndexService. This feature maintains sets of borrowers for each reserve by indexing variableDebt token Transfer events.
+
+```bash
+# Enable borrowers index (default: false)
+BORROWERS_INDEX_ENABLED=false
+
+# Backfill configuration (only used when enabled)
+BORROWERS_INDEX_BACKFILL_BLOCKS=50000
+BORROWERS_INDEX_CHUNK_BLOCKS=2000
+
+# Optional Redis URL (defaults to REDIS_URL if not set)
+# BORROWERS_INDEX_REDIS_URL=redis://localhost:6379
+```
+
+**Behavior Matrix:**
+
+| BORROWERS_INDEX_ENABLED | Redis URL | Result | Logs |
+|-------------------------|-----------|--------|------|
+| `false` or `0` | any | **disabled** | No initialization, no errors |
+| `true` or `1` | not set | **memory mode** | `[borrowers-index] memory mode` |
+| `true` or `1` | valid & connects | **redis mode** | `[borrowers-index] redis mode` |
+| `true` or `1` | invalid / ECONNREFUSED | **memory mode fallback** | Single warning only |
+
+**Features:**
+- **Graceful fallback**: Automatically switches to memory-only mode if Redis is unavailable
+- **No error spam**: Single connection attempt with one warning on failure
+- **Zero impact when disabled**: Service is not instantiated if `BORROWERS_INDEX_ENABLED=false`
+
+**When to Enable:**
+- Only enable if you need per-reserve borrower tracking for custom analytics
+- Not required for core liquidation functionality
+- Adds Redis dependency when persistence is desired
+
 ### Subgraph Feature Gating
 ```bash
 # Master switch for subgraph (default: false)

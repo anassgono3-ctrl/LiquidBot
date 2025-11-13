@@ -108,7 +108,12 @@ export class RealTimeHFService extends EventEmitter {
   private subgraphService?: SubgraphService;
   private subgraphSeeder?: SubgraphSeeder;
   private backfillService?: OnChainBackfillService;
+  
+  // BorrowersIndexService: Optional per-reserve borrower tracking
+  // Gated by config.borrowersIndex.enabled (default: false)
+  // When enabled, instantiate with proper fallback handling
   private borrowersIndex?: BorrowersIndexService;
+  
   private lowHfTracker?: LowHFTracker;
   private liquidationAuditService?: LiquidationAuditService;
   private hotSetTracker?: HotSetTracker;

@@ -27,6 +27,11 @@ interface ReserveInfo {
  * BorrowersIndexService maintains a per-reserve borrower set by indexing
  * variableDebt token Transfer events. Provides persistent storage via Redis
  * and live updates via event subscriptions.
+ * 
+ * Modes:
+ * - disabled: Service not instantiated (gated by config)
+ * - memory: In-memory only (no Redis URL or connection failed)
+ * - redis: Persistent Redis storage
  */
 export class BorrowersIndexService {
   private provider: JsonRpcProvider;
@@ -37,37 +42,63 @@ export class BorrowersIndexService {
   private backfillBlocks: number;
   private chunkSize: number;
   private eventListeners: Map<string, (log: EventLog) => void> = new Map();
+  private mode: 'memory' | 'redis' = 'memory';
+  private redisInitAttempted = false;
 
   constructor(provider: JsonRpcProvider, options: BorrowersIndexOptions = {}) {
     this.provider = provider;
     this.backfillBlocks = options.backfillBlocks || 50000;
     this.chunkSize = options.chunkSize || 2000;
 
-    // Initialize Redis if configured
+    // Initialize Redis if configured (single attempt, no retries)
     if (options.redisUrl || config.redisUrl) {
       this.initRedis(options.redisUrl || config.redisUrl);
+    } else {
+      // eslint-disable-next-line no-console
+      console.log('[borrowers-index] memory mode (no Redis URL configured)');
     }
   }
 
   /**
-   * Initialize Redis client for persistence
+   * Initialize Redis client for persistence (single attempt, no retries)
    */
   private async initRedis(redisUrl: string | undefined): Promise<void> {
-    if (!redisUrl) return;
+    if (!redisUrl || this.redisInitAttempted) return;
+    
+    this.redisInitAttempted = true;
 
     try {
-      this.redis = createClient({ url: redisUrl });
-      this.redis.on('error', (err) => {
-        // eslint-disable-next-line no-console
-        console.error('[borrowers-index] Redis error:', err);
+      this.redis = createClient({ 
+        url: redisUrl,
+        socket: {
+          // Disable reconnect to prevent spam
+          reconnectStrategy: false
+        }
       });
+      
+      // Single error handler - log once only on connection failure
+      this.redis.on('error', (err) => {
+        if (!this.redis) return; // Already handled
+        
+        // eslint-disable-next-line no-console
+        console.warn('[borrowers-index] Redis connection failed, switching to memory mode:', err.message);
+        
+        // Clean up and switch to memory mode
+        this.redis = null;
+        this.mode = 'memory';
+      });
+      
       await this.redis.connect();
+      this.mode = 'redis';
+      
       // eslint-disable-next-line no-console
-      console.log('[borrowers-index] Redis connected');
+      console.log('[borrowers-index] redis mode');
     } catch (err) {
+      // Connection error - fall back to memory mode with single warning
       // eslint-disable-next-line no-console
-      console.warn('[borrowers-index] Failed to connect to Redis:', err);
+      console.warn('[borrowers-index] Redis connection failed, switching to memory mode');
       this.redis = null;
+      this.mode = 'memory';
     }
   }
 
@@ -76,7 +107,7 @@ export class BorrowersIndexService {
    */
   async initialize(reserves: ReserveInfo[]): Promise<void> {
     // eslint-disable-next-line no-console
-    console.log(`[borrowers-index] Initializing with ${reserves.length} reserves`);
+    console.log(`[borrowers-index] Initializing with ${reserves.length} reserves (mode=${this.mode})`);
 
     // Store reserve info
     for (const reserve of reserves) {
@@ -84,8 +115,8 @@ export class BorrowersIndexService {
       this.borrowersByReserve.set(reserve.asset.toLowerCase(), new Set());
     }
 
-    // Try loading from Redis first
-    const loaded = await this.loadFromRedis();
+    // Try loading from Redis first (only if redis mode)
+    const loaded = this.mode === 'redis' ? await this.loadFromRedis() : false;
     
     if (!loaded) {
       // Perform backfill if not loaded from Redis
@@ -96,7 +127,7 @@ export class BorrowersIndexService {
     await this.startLiveUpdates();
 
     // eslint-disable-next-line no-console
-    console.log('[borrowers-index] Initialization complete');
+    console.log(`[borrowers-index] Initialization complete (mode=${this.mode})`);
   }
 
   /**

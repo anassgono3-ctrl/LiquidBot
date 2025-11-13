@@ -289,4 +289,12 @@ export const config = {
   get precomputeTopK() { return env.precomputeTopK; },
   get precomputeCloseFactorPct() { return env.precomputeCloseFactorPct; },
   get precomputeReceiveAToken() { return env.precomputeReceiveAToken; },
+
+  // Borrowers Index configuration
+  borrowersIndex: {
+    get enabled() { return env.borrowersIndexEnabled; },
+    get backfillBlocks() { return env.borrowersIndexBackfillBlocks; },
+    get chunkBlocks() { return env.borrowersIndexChunkBlocks; },
+    get redisUrl() { return env.borrowersIndexRedisUrl || env.redisUrl; }
+  }
 };

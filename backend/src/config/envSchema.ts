@@ -278,7 +278,13 @@ export const rawEnvSchema = z.object({
   PRIORITY_SWEEP_METRICS_ENABLED: z.string().optional(),
   PRIORITY_SWEEP_TIMEOUT_MS: z.string().optional(),
   PRIORITY_SWEEP_PAGE_SIZE: z.string().optional(),
-  PRIORITY_SWEEP_INTER_REQUEST_MS: z.string().optional()
+  PRIORITY_SWEEP_INTER_REQUEST_MS: z.string().optional(),
+
+  // Borrowers Index configuration (optional)
+  BORROWERS_INDEX_ENABLED: z.string().optional(),
+  BORROWERS_INDEX_BACKFILL_BLOCKS: z.string().optional(),
+  BORROWERS_INDEX_CHUNK_BLOCKS: z.string().optional(),
+  BORROWERS_INDEX_REDIS_URL: z.string().optional()
 });
 
 export const env = (() => {
@@ -575,6 +581,12 @@ export const env = (() => {
     precomputeTopK: Number(parsed.PRECOMPUTE_TOP_K || 500),
     precomputeCloseFactorPct: Number(parsed.PRECOMPUTE_CLOSE_FACTOR_PCT || 50),
     precomputeReceiveAToken: (parsed.PRECOMPUTE_RECEIVE_A_TOKEN || 'false').toLowerCase() === 'true',
+    
+    // Borrowers Index configuration (optional)
+    borrowersIndexEnabled: (parsed.BORROWERS_INDEX_ENABLED || 'false').toLowerCase() === 'true',
+    borrowersIndexBackfillBlocks: Number(parsed.BORROWERS_INDEX_BACKFILL_BLOCKS || 50000),
+    borrowersIndexChunkBlocks: Number(parsed.BORROWERS_INDEX_CHUNK_BLOCKS || 2000),
+    borrowersIndexRedisUrl: parsed.BORROWERS_INDEX_REDIS_URL,
     
     // Price fastpath (Chainlink events)
     priceFastpathEnabled: (parsed.PRICE_FASTPATH_ENABLED || 'true').toLowerCase() === 'true',
