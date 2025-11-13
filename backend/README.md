@@ -12,6 +12,7 @@ The LiquidBot backend provides:
 - **Hotlist tracking** for near-threshold users (configurable HF bands)
 - **Precompute service** for pre-cached liquidation calldata on top-K candidates
 - **Liquidation audit** with classifier-based reason codes for missed liquidations
+- **Liquidation Sentry** for comprehensive miss diagnostics with profit and timing analysis
 - **Aave oracle integration** for accurate USD pricing
 - **Decision trace store** for post-hoc analysis
 - **Telegram notifications for profitable opportunities**
@@ -707,8 +708,64 @@ Adjust `SUBGRAPH_FAILURE_THRESHOLD` based on:
 
 Lower values = faster failover, higher values = more retry attempts before degradation.
 
+## Liquidation Sentry (New Feature)
+
+Advanced diagnostics layer for analyzing missed liquidations. Provides structured classification with timing, profit estimates, and execution decision tracking.
+
+### Configuration
+
+```bash
+# Enable miss classifier (default: false)
+MISS_CLASSIFIER_ENABLED=true
+
+# HF transience threshold in blocks (default: 3)
+MISS_TRANSIENT_BLOCKS=3
+
+# Minimum profit threshold in USD (default: 10)
+MISS_MIN_PROFIT_USD=10
+
+# Gas price threshold for gas_outbid detection in Gwei (default: 50)
+MISS_GAS_THRESHOLD_GWEI=50
+
+# Enable profit estimation (default: true)
+MISS_ENABLE_PROFIT_CHECK=true
+```
+
+### Classification Reasons
+
+- `not_in_watch_set` - User not tracked
+- `raced` - Competitor executed first
+- `hf_transient` - Brief HF violation, recovered quickly
+- `insufficient_profit` - Profit below threshold
+- `execution_filtered` - Suppressed by execution guard
+- `revert` - Attempt reverted on-chain
+- `gas_outbid` - Competitor used higher gas price
+- `oracle_jitter` - Price swing reversal (placeholder)
+- `unknown` - Fallback category
+
+### Testing
+
+```bash
+# Run unit tests (17 tests)
+npm test -- liquidationMissClassifier
+
+# Run validation harness (9 scenarios)
+npx tsx scripts/test-liquidation-sentry.ts
+```
+
+### Metrics
+
+- `liquidbot_liquidation_miss_total{reason}` - Miss counts by reason
+- `liquidbot_liquidation_latency_blocks` - Detection-to-event latency
+- `liquidbot_liquidation_profit_gap_usd` - Missed profit estimates
+- `liquidbot_liquidation_classifier_errors_total` - Classification errors
+- `liquidbot_liquidation_hf_transience_total` - Transient HF violations
+
+See [docs/LIQUIDATION_SENTRY.md](docs/LIQUIDATION_SENTRY.md) for detailed documentation.
+
 ## Documentation
 
+- **[Liquidation Sentry](docs/LIQUIDATION_SENTRY.md)** - NEW: Miss classification and diagnostics
 - **[Health Monitoring & Alerts](docs/ALERTS.md)** - Opportunity detection, profit simulation, Telegram notifications
 - [Liquidation Tracking](docs/LIQUIDATION_TRACKING.md) - Incremental liquidation detection
 - [OpenAPI Spec](docs/openapi.yaml)

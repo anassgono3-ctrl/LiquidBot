@@ -223,6 +223,13 @@ export const rawEnvSchema = z.object({
   DECISION_TRACE_ENABLED: z.string().optional(),
   AUDIT_CLASSIFIER_ENABLED: z.string().optional(),
   
+  // Liquidation Miss Classifier configuration
+  MISS_CLASSIFIER_ENABLED: z.string().optional(),
+  MISS_TRANSIENT_BLOCKS: z.string().optional(),
+  MISS_MIN_PROFIT_USD: z.string().optional(),
+  MISS_GAS_THRESHOLD_GWEI: z.string().optional(),
+  MISS_ENABLE_PROFIT_CHECK: z.string().optional(),
+  
   // Prices via Aave Oracle
   PRICES_USE_AAVE_ORACLE: z.string().optional(),
   
@@ -516,6 +523,13 @@ export const env = (() => {
       }
       return auditEnabled; // default to true if audit enabled
     })(),
+    
+    // Liquidation Miss Classifier
+    missClassifierEnabled: (parsed.MISS_CLASSIFIER_ENABLED || 'false').toLowerCase() === 'true',
+    missTransientBlocks: Number(parsed.MISS_TRANSIENT_BLOCKS || 3),
+    missMinProfitUsd: Number(parsed.MISS_MIN_PROFIT_USD || 10),
+    missGasThresholdGwei: Number(parsed.MISS_GAS_THRESHOLD_GWEI || 50),
+    missEnableProfitCheck: (parsed.MISS_ENABLE_PROFIT_CHECK || 'true').toLowerCase() === 'true',
     
     // Prices via Aave Oracle
     pricesUseAaveOracle: (parsed.PRICES_USE_AAVE_ORACLE || 'false').toLowerCase() === 'true',

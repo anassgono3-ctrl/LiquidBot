@@ -439,3 +439,37 @@ export const liquidationAuditErrors = new Counter({
   help: 'Count of errors during liquidation audit',
   registers: [registry]
 });
+
+// Liquidation miss classifier metrics
+export const liquidationMissTotal = new Counter({
+  name: 'liquidbot_liquidation_miss_total',
+  help: 'Total number of missed liquidations classified',
+  labelNames: ['reason'],
+  registers: [registry]
+});
+
+export const liquidationLatencyBlocks = new Histogram({
+  name: 'liquidbot_liquidation_latency_blocks',
+  help: 'Blocks between first detection and liquidation event',
+  buckets: [0, 1, 2, 3, 5, 10, 20, 50, 100],
+  registers: [registry]
+});
+
+export const liquidationProfitGapUsd = new Histogram({
+  name: 'liquidbot_liquidation_profit_gap_usd',
+  help: 'Estimated profit that was missed (USD)',
+  buckets: [0, 5, 10, 25, 50, 100, 250, 500, 1000],
+  registers: [registry]
+});
+
+export const liquidationClassifierErrorsTotal = new Counter({
+  name: 'liquidbot_liquidation_classifier_errors_total',
+  help: 'Total number of errors during miss classification',
+  registers: [registry]
+});
+
+export const liquidationHfTransienceTotal = new Counter({
+  name: 'liquidbot_liquidation_hf_transience_total',
+  help: 'Total number of transient HF violations detected',
+  registers: [registry]
+});
