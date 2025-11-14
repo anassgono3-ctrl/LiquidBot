@@ -88,6 +88,10 @@ export const rawEnvSchema = z.object({
   PRICE_FEED_ALIASES: z.string().optional(),
   DERIVED_RATIO_FEEDS: z.string().optional(),
   PRICE_POLL_DISABLE_AFTER_ERRORS: z.string().optional(),
+  
+  // Price readiness and deferred valuation
+  PRICE_DEFER_UNTIL_READY: z.string().optional(),
+  PRICE_SYMBOL_ALIASES: z.string().optional(),
 
   // Price-triggered emergency scans
   PRICE_TRIGGER_ENABLED: z.string().optional(),
@@ -395,6 +399,10 @@ export const env = (() => {
     priceFeedAliases: parsed.PRICE_FEED_ALIASES,
     derivedRatioFeeds: parsed.DERIVED_RATIO_FEEDS,
     pricePollDisableAfterErrors: Number(parsed.PRICE_POLL_DISABLE_AFTER_ERRORS || 3),
+    
+    // Price readiness and deferred valuation
+    priceDeferUntilReady: (parsed.PRICE_DEFER_UNTIL_READY || 'true').toLowerCase() === 'true',
+    priceSymbolAliases: parsed.PRICE_SYMBOL_ALIASES,
 
     // Price-triggered emergency scans
     priceTriggerEnabled: (parsed.PRICE_TRIGGER_ENABLED || 'false').toLowerCase() === 'true',
