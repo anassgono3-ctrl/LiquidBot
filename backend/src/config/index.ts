@@ -348,5 +348,13 @@ export const config = {
   },
   get fastLaneEnabled() {
     return process.env.FAST_LANE_ENABLED === 'true' || process.env.FAST_LANE_ENABLED === undefined;
+  },
+  
+  // Shadow execution configuration
+  get shadowExecuteEnabled() {
+    return process.env.SHADOW_EXECUTE_ENABLED === 'true';
+  },
+  get shadowExecuteThreshold() {
+    return parseFloat(process.env.SHADOW_EXECUTE_THRESHOLD || '1.005');
   }
 };
