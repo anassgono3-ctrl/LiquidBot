@@ -805,3 +805,153 @@ See [docs/LIQUIDATION_SENTRY.md](docs/LIQUIDATION_SENTRY.md) for detailed docume
 ## License
 
 MIT
+## Fast-Lane Liquidation Speed Improvements
+
+### New Environment Variables
+
+#### Transaction Submission
+
+- **`TX_SUBMIT_MODE`** (default: `public`)
+  - Values: `public` | `private`
+  - Controls transaction submission mode
+  - `private` mode requires `PRIVATE_TX_RPC_URL` to be set
+  - Private mode automatically falls back to public on failure
+
+- **`PRIVATE_TX_RPC_URL`** (optional)
+  - Private transaction relay endpoint (e.g., for Base)
+  - Required when `TX_SUBMIT_MODE=private`
+  - Example: `https://rpc.flashbots.net` (adjust for Base network)
+
+#### Gas Policy & RBF (Replace-By-Fee)
+
+- **`GAS_TIP_GWEI_FAST`** (default: `3`)
+  - Base priority fee in Gwei for fast execution
+  - Used in EIP-1559 fee calculation: `maxFee = baseFee*2 + tip`
+
+- **`GAS_BUMP_FACTOR`** (default: `1.25`)
+  - Multiplier for RBF attempts (25% increase per bump)
+  - Applied to priority fee when transaction not included quickly
+
+- **`GAS_BUMP_INTERVAL_MS`** (default: `500`)
+  - Milliseconds to wait before attempting RBF
+  - Shorter intervals = more aggressive bumping
+
+- **`GAS_BUMP_MAX`** (default: `3`)
+  - Maximum number of RBF attempts
+  - Set to `0` to disable RBF completely
+
+- **`GAS_MAX_FEE_GWEI`** (optional)
+  - Upper ceiling for maxFeePerGas in Gwei
+  - Prevents excessive gas spending during network congestion
+  - If not set, no ceiling is applied
+
+#### Fast-Lane Trigger System
+
+- **`FAST_LANE_ENABLED`** (default: `true`)
+  - Enable fast-lane trigger path for critical liquidation events
+  - When enabled, `ReserveDataUpdated` events bypass coalescing delay
+  - Immediate execution with zero latency for time-sensitive opportunities
+
+- **`FAST_LANE_HF_BUFFER_BPS`** (default: `2`)
+  - Health factor buffer in basis points (0.0002 = 0.02%)
+  - Adds small margin below HF < 1.0 threshold for fast-lane triggers
+  - Helps catch users right at liquidation boundary
+
+- **`QUOTE_REFRESH_MS`** (default: `750`)
+  - Background refresh interval for top route quotes (milliseconds)
+  - Precomputes swap routes for frequently observed token pairs
+  - Lower values = fresher quotes but more RPC load
+
+### Fast-Lane Features
+
+1. **Zero-Delay Trigger Path**
+   - Critical events (ReserveDataUpdated) execute immediately
+   - Bypasses standard 120ms EVENT_BATCH_COALESCE_MS delay
+   - Uses pending blockTag for latest state checks
+
+2. **Enhanced Telegram Notifications**
+   - Detection alert: `[liquidation-detect]` with user, HF, estimated profit, block
+   - Outcome alert: `[executed]`, `[raced]`, or `[skipped]` with details
+   - Timestamps and transaction links for traceability
+
+3. **Aggressive Gas Strategy**
+   - EIP-1559 with configurable fast tips
+   - Automatic RBF for non-included transactions
+   - Optional maxFeePerGas ceiling for cost control
+
+4. **Private Transaction Support**
+   - Submit via private relay to avoid public mempool
+   - Automatic fallback to public on failure
+   - Single-line configuration switch
+
+5. **Reserve-Targeted Rechecks**
+   - Instant borrower lookups via BorrowersIndexService
+   - Fast-lane checks for affected users on reserve updates
+   - Reduces "not_in_watch_set" audit failures
+
+### Configuration Examples
+
+#### Basic Fast-Lane (Public Mempool)
+```bash
+# Enable fast-lane with defaults (already enabled by default)
+FAST_LANE_ENABLED=true
+GAS_TIP_GWEI_FAST=3
+GAS_BUMP_MAX=3
+```
+
+#### Aggressive Private Mode
+```bash
+TX_SUBMIT_MODE=private
+PRIVATE_TX_RPC_URL=https://your-private-relay.example.com
+GAS_TIP_GWEI_FAST=5
+GAS_BUMP_FACTOR=1.5
+GAS_BUMP_INTERVAL_MS=300
+GAS_BUMP_MAX=5
+GAS_MAX_FEE_GWEI=100
+```
+
+#### Conservative Mode (RBF Disabled)
+```bash
+TX_SUBMIT_MODE=public
+GAS_TIP_GWEI_FAST=2
+GAS_BUMP_MAX=0  # Disable RBF
+GAS_MAX_FEE_GWEI=50  # Set ceiling
+```
+
+### Rollback / Disable Fast-Lane
+
+To revert to pre-fast-lane behavior:
+```bash
+FAST_LANE_ENABLED=false
+TX_SUBMIT_MODE=public
+GAS_BUMP_MAX=0
+```
+
+This restores:
+- Standard event coalescing with EVENT_BATCH_COALESCE_MS delay
+- No RBF attempts
+- Public mempool only
+
+### Observability
+
+Fast-lane operations log with distinguishing prefixes:
+
+- `[fast-lane]` - Fast-lane trigger and execution
+- `[rbf]` - RBF attempt with new tip
+- `[private-tx]` - Private transaction submission
+- `[reserve-recheck]` - Reserve-targeted borrower checks
+- `[liquidation-detect]` - Detection notification sent
+- `[executed]` / `[raced]` / `[skipped]` - Outcome notifications
+
+### Performance Impact
+
+Expected improvements with fast-lane enabled:
+- **Detection latency**: 0ms (vs 120ms with coalescing)
+- **Same-block execution**: Increased probability with RBF
+- **Race reduction**: Private mode and aggressive gas reduce frontrunning
+- **Coverage**: Reserve-targeted rechecks improve "not_in_watch_set" audit
+
+Trade-offs:
+- Slightly higher RPC load from pending state checks
+- Gas cost increases with aggressive tips and RBF
+- Private relay may have additional fees

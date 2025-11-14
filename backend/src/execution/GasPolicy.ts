@@ -83,7 +83,7 @@ export class GasPolicy {
     const bumpMultiplier = Math.pow(this.config.bumpFactor, attemptNumber);
     const bumpedTipWei = (previousFee.maxPriorityFeePerGas * BigInt(Math.floor(bumpMultiplier * 100))) / 100n;
     
-    let maxFeePerGas = baseFee * 2n + bumpedTipWei;
+    const maxFeePerGas = baseFee * 2n + bumpedTipWei;
     
     // Apply ceiling if configured
     if (this.config.maxFeeGwei) {
