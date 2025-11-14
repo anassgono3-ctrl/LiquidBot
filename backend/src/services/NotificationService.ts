@@ -59,6 +59,7 @@ export class NotificationService {
   /**
    * Send a liquidation opportunity notification
    * HARD GATING: Only send if all required data is present and actionable
+   * UPDATED: Now handles deferred opportunities when price feeds not ready
    */
   async notifyOpportunity(opportunity: Opportunity): Promise<void> {
     if (!this.enabled || !this.bot || !this.chatId) {
@@ -82,8 +83,22 @@ export class NotificationService {
       }
     }
 
-    // Additional sanity checks on amounts
-    const scalingCheck = this.checkScalingSanity(opportunity);
+    // Additional sanity checks on amounts (now async to support price revalidation)
+    const scalingCheck = await this.checkScalingSanity(opportunity);
+    
+    // Handle deferred opportunities (price feeds not ready yet)
+    if (scalingCheck.deferred) {
+      // Don't skip permanently - just log that it's deferred
+      // The opportunity will be revalued when feeds become ready
+      // eslint-disable-next-line no-console
+      console.log('[notification] Opportunity deferred until price feeds ready:', {
+        user: opportunity.user,
+        symbol: opportunity.collateralReserve.symbol,
+        hf: opportunity.healthFactor
+      });
+      return;
+    }
+    
     if (!scalingCheck.valid) {
       // eslint-disable-next-line no-console
       console.warn('[notification] SCALING SUSPECTED - skipping notification:', {
@@ -112,11 +127,13 @@ export class NotificationService {
   /**
    * Check for scaling issues in opportunity amounts.
    * Returns validation result with warnings if issues detected.
+   * UPDATED: Now defers validation when price feeds not ready instead of immediately failing
    */
-  private checkScalingSanity(opportunity: Opportunity): {
+  private async checkScalingSanity(opportunity: Opportunity): Promise<{
     valid: boolean;
     warnings: string[];
-  } {
+    deferred?: boolean; // New: indicates opportunity should be deferred, not skipped
+  }> {
     const warnings: string[] = [];
 
     // Check collateral amount
@@ -141,12 +158,60 @@ export class NotificationService {
       }
     }
 
-    // Check health factor consistency
+    // Check health factor consistency with PRICE READINESS awareness
     if (opportunity.healthFactor !== null && opportunity.healthFactor !== undefined) {
-      // If HF < 1 but collateral USD is 0 or undefined, suspicious
+      // If HF < 1 but collateral USD is 0 or undefined, check if feeds are ready
       if (opportunity.healthFactor < 1 && 
           (!opportunity.collateralValueUsd || opportunity.collateralValueUsd === 0)) {
-        warnings.push('HF < 1 but collateral USD is 0 (data inconsistency)');
+        
+        // Check if price feeds are ready
+        const feedsReady = this.priceService.isFeedsReady();
+        
+        if (!feedsReady && config.priceDeferUntilReady) {
+          // Feeds not ready - defer this opportunity instead of skipping
+          // eslint-disable-next-line no-console
+          console.log(
+            `[notification] pending_price_retry scheduled: user=${opportunity.user} ` +
+            `symbol=${opportunity.collateralReserve.symbol} hf=${opportunity.healthFactor.toFixed(4)}`
+          );
+          
+          return {
+            valid: false,
+            warnings: ['Deferred: price feeds not ready yet'],
+            deferred: true
+          };
+        } else if (feedsReady) {
+          // Feeds ARE ready but still zero - attempt one-time re-fetch
+          try {
+            const collateralSymbol = opportunity.collateralReserve.symbol || 'UNKNOWN';
+            const revalidatedPrice = await this.priceService.getPrice(collateralSymbol, false);
+            
+            if (revalidatedPrice > 0) {
+              // Price is now available! Update the opportunity
+              const collateralDecimals = opportunity.collateralReserve.decimals ?? 18;
+              const collateralAmountNum = Number(opportunity.collateralAmountRaw) / (10 ** collateralDecimals);
+              opportunity.collateralValueUsd = collateralAmountNum * revalidatedPrice;
+              
+              // eslint-disable-next-line no-console
+              console.log(
+                `[notification] price_revalidation_success: symbol=${collateralSymbol} ` +
+                `price=${revalidatedPrice.toFixed(2)} usd=${opportunity.collateralValueUsd.toFixed(2)}`
+              );
+              
+              // Clear this warning - price is now valid
+              // Continue with other checks...
+            } else {
+              // Still zero after revalidation
+              warnings.push('HF < 1 but collateral USD is 0 (data inconsistency)');
+            }
+          } catch (error) {
+            // Revalidation failed
+            warnings.push('HF < 1 but collateral USD is 0 (data inconsistency)');
+          }
+        } else {
+          // Old behavior: price defer disabled
+          warnings.push('HF < 1 but collateral USD is 0 (data inconsistency)');
+        }
       }
 
       // If HF >= 1 but we're being notified as liquidatable, suspicious
@@ -158,7 +223,8 @@ export class NotificationService {
     // If there are warnings, mark as invalid (don't send)
     return {
       valid: warnings.length === 0,
-      warnings
+      warnings,
+      deferred: false
     };
   }
 
