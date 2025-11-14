@@ -54,6 +54,7 @@ import { FeedDiscoveryService, type DiscoveredReserve } from './FeedDiscoverySer
 import { PerAssetTriggerConfig } from './PerAssetTriggerConfig.js';
 import { AaveDataService } from './AaveDataService.js';
 import { isZero } from '../utils/bigint.js';
+import { maybeShadowExecute, type ShadowExecCandidate } from '../exec/shadowExecution.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -2705,6 +2706,21 @@ export class RealTimeHFService extends EventEmitter {
               // Already emitted for this user in this block - skip
               continue;
             }
+
+            // Shadow execution: log would-be liquidation attempts (respects same dedupe rules)
+            // Uses conservative estimates for debt/collateral assets and amounts
+            const shadowCandidate: ShadowExecCandidate = {
+              user: userAddress,
+              healthFactor,
+              blockTag: blockTag ?? blockNumber,
+              // Use placeholder addresses - exact asset breakdown requires additional RPC calls
+              debtAsset: '0x0000000000000000000000000000000000000000', // Placeholder
+              collateralAsset: '0x0000000000000000000000000000000000000000', // Placeholder
+              // Conservative estimates based on total values (8 decimals for base units)
+              debtAmountWei: totalDebtBase,
+              collateralAmountWei: totalCollateralBase
+            };
+            maybeShadowExecute(shadowCandidate);
 
             // Check if we should emit based on edge-triggering and hysteresis
             const emitDecision = this.shouldEmit(userAddress, healthFactor, blockNumber);
