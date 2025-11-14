@@ -1709,51 +1709,62 @@ export class RealTimeHFService extends EventEmitter {
       // Check all candidates every head
       addressesToCheck = allAddresses;
     } else {
-      // Paged strategy with dirty-first prioritization (Goal 3)
-      // Use dynamic page size if adaptive is enabled
-      const pageSize = config.headPageAdaptive ? this.currentDynamicPageSize : config.headCheckPageSize;
+      // Hotset-first strategy: prioritize low-HF and triggered users, add small maintenance sweep
       const totalCandidates = allAddresses.length;
       const candidates = this.candidateManager.getAll();
       const addressSet = new Set(allAddresses);
 
-      // 1. Dirty users first - users touched by recent Aave events
-      const dirtyFirst = Array.from(this.dirtyUsers).filter(addr => addressSet.has(addr));
-      
-      // 2. Get current rotating page window
-      const startIdx = this.headCheckRotatingIndex % totalCandidates;
-      const endIdx = Math.min(startIdx + pageSize, totalCandidates);
-      const windowAddresses = allAddresses.slice(startIdx, endIdx);
-      
-      // If we need more addresses to fill the page, wrap around
-      if (windowAddresses.length < pageSize && totalCandidates > pageSize) {
-        const remaining = pageSize - windowAddresses.length;
-        const wrapAddresses = allAddresses.slice(0, Math.min(remaining, totalCandidates));
-        windowAddresses.push(...wrapAddresses);
-      }
-      
-      // 3. Always include low-HF candidates (below configurable threshold)
+      // 1. Low-HF addresses (HF < ALWAYS_INCLUDE_HF_BELOW) - highest priority
       const lowHfThreshold = config.alwaysIncludeHfBelow;
       const lowHfAddresses = candidates
         .filter(c => c.lastHF !== null && c.lastHF < lowHfThreshold)
         .map(c => c.address);
+
+      // 2. Dirty users - event/price-triggered addresses
+      const dirtyFirst = Array.from(this.dirtyUsers).filter(addr => addressSet.has(addr));
       
-      // Deduplicate in priority order: dirty first, then window, then low HF
+      // 3. Maintenance sweep: small fixed-size sample from rotating window
+      // Only add maintenance sweep if we have a reasonable cold set (total - hotset > maintenance size)
+      const MAINTENANCE_SAMPLE_SIZE = 120; // Small fixed size for cache freshness
+      const hotsetSize = new Set([...lowHfAddresses, ...dirtyFirst]).size;
+      const coldSetSize = totalCandidates - hotsetSize;
+      
+      let maintenanceAddresses: string[] = [];
+      if (coldSetSize > 0 && lowHfAddresses.length > 0) {
+        // Cap maintenance sample to avoid large sweeps when lowHf count is high
+        const maintenanceSize = Math.min(MAINTENANCE_SAMPLE_SIZE, coldSetSize);
+        const startIdx = this.headCheckRotatingIndex % totalCandidates;
+        const endIdx = Math.min(startIdx + maintenanceSize, totalCandidates);
+        maintenanceAddresses = allAddresses.slice(startIdx, endIdx);
+        
+        // Wrap around if needed
+        if (maintenanceAddresses.length < maintenanceSize && totalCandidates > maintenanceSize) {
+          const remaining = maintenanceSize - maintenanceAddresses.length;
+          const wrapAddresses = allAddresses.slice(0, Math.min(remaining, totalCandidates));
+          maintenanceAddresses.push(...wrapAddresses);
+        }
+        
+        // Update rotating index for next iteration
+        this.headCheckRotatingIndex = (this.headCheckRotatingIndex + maintenanceSize) % totalCandidates;
+      } else if (lowHfAddresses.length === 0) {
+        // Fallback: if no low-HF users, use existing rotating window behavior
+        const pageSize = config.headPageAdaptive ? this.currentDynamicPageSize : config.headCheckPageSize;
+        const startIdx = this.headCheckRotatingIndex % totalCandidates;
+        const endIdx = Math.min(startIdx + pageSize, totalCandidates);
+        maintenanceAddresses = allAddresses.slice(startIdx, endIdx);
+        
+        if (maintenanceAddresses.length < pageSize && totalCandidates > pageSize) {
+          const remaining = pageSize - maintenanceAddresses.length;
+          const wrapAddresses = allAddresses.slice(0, Math.min(remaining, totalCandidates));
+          maintenanceAddresses.push(...wrapAddresses);
+        }
+        
+        this.headCheckRotatingIndex = (this.headCheckRotatingIndex + pageSize) % totalCandidates;
+      }
+      
+      // Deduplicate in priority order: low-HF first, then dirty, then maintenance
       const seen = new Set<string>();
       addressesToCheck = [];
-      
-      for (const addr of dirtyFirst) {
-        if (!seen.has(addr)) {
-          addressesToCheck.push(addr);
-          seen.add(addr);
-        }
-      }
-      
-      for (const addr of windowAddresses) {
-        if (!seen.has(addr)) {
-          addressesToCheck.push(addr);
-          seen.add(addr);
-        }
-      }
       
       for (const addr of lowHfAddresses) {
         if (!seen.has(addr)) {
@@ -1762,12 +1773,29 @@ export class RealTimeHFService extends EventEmitter {
         }
       }
       
-      // Update rotating index for next iteration
-      this.headCheckRotatingIndex = (this.headCheckRotatingIndex + pageSize) % totalCandidates;
+      for (const addr of dirtyFirst) {
+        if (!seen.has(addr)) {
+          addressesToCheck.push(addr);
+          seen.add(addr);
+        }
+      }
       
-      // Log paging info with dirty-first stats and dynamic page size if adaptive
+      for (const addr of maintenanceAddresses) {
+        if (!seen.has(addr)) {
+          addressesToCheck.push(addr);
+          seen.add(addr);
+        }
+      }
+      
+      // Log hotset-first stats
+      const maintenanceCount = maintenanceAddresses.length;
+      const mode = lowHfAddresses.length > 0 ? 'hotset-first' : 'rotating-fallback';
       // eslint-disable-next-line no-console
-      console.log(`[realtime-hf] head_page=${startIdx}..${endIdx} size=${addressesToCheck.length} total=${totalCandidates} dirty=${dirtyFirst.length} lowHf=${lowHfAddresses.length} pageSize=${pageSize}`);
+      console.log(
+        `[realtime-hf] ${mode}: total=${addressesToCheck.length} ` +
+        `lowHf=${lowHfAddresses.length} dirty=${dirtyFirst.length} maintenance=${maintenanceCount} ` +
+        `candidates=${totalCandidates}`
+      );
     }
 
     return await this.batchCheckCandidates(addressesToCheck, triggerType, blockTag);

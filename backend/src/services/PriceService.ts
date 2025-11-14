@@ -32,6 +32,42 @@ const CHAINLINK_DEFAULT_DECIMALS = 8;
 const BASE_CURRENCY_UNIT = 10n ** 8n;
 
 /**
+ * Token registry for Base network assets - minimal symbol→address→decimals mapping
+ * Used for Aave oracle fallback when Chainlink feeds are unavailable
+ */
+interface TokenInfo {
+  address: string;
+  decimals: number;
+}
+
+const BASE_TOKEN_REGISTRY: Record<string, TokenInfo> = {
+  'USDC': {
+    address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    decimals: 6
+  },
+  'WETH': {
+    address: '0x4200000000000000000000000000000000000006',
+    decimals: 18
+  },
+  'cbETH': {
+    address: '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22',
+    decimals: 18
+  },
+  'cbBTC': {
+    address: '0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf',
+    decimals: 8
+  },
+  'tBTC': {
+    address: '0x236aa50979D5f3De3Bd1Eeb40E81137F22ab794b',
+    decimals: 18
+  },
+  'WSTETH': {
+    address: '0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452',
+    decimals: 18
+  }
+};
+
+/**
  * PriceService provides USD price lookups for tokens.
  * Supports Chainlink price feeds with fallback to stub prices.
  */
@@ -553,15 +589,43 @@ export class PriceService {
   private async getAaveOraclePrice(symbol: string): Promise<number | null> {
     if (!this.aaveOracle) return null;
     
-    // We need the token address to query Aave oracle
-    // This is a limitation - we'd need a symbol->address mapping
-    // For now, return null and let it fall back to stub
-    // A full implementation would require a token address registry
+    // Look up token address from registry
+    const tokenInfo = BASE_TOKEN_REGISTRY[symbol];
+    if (!tokenInfo) {
+      // eslint-disable-next-line no-console
+      console.log(`[price] aave_fallback_attempted symbol=${symbol} result=no_address_mapping`);
+      return null;
+    }
     
-    // eslint-disable-next-line no-console
-    console.log(`[price] aave_fallback_attempted symbol=${symbol} result=no_address_mapping`);
-    
-    return null;
+    try {
+      // Query Aave oracle for asset price
+      const priceRaw = await this.aaveOracle.getAssetPrice(tokenInfo.address);
+      
+      // Aave oracle returns prices in 8 decimals (BASE_CURRENCY_UNIT)
+      // Convert to USD using the same format as Chainlink (price / 10^8)
+      const price = Number(priceRaw) / Number(BASE_CURRENCY_UNIT);
+      
+      // Validate price is positive and finite
+      if (!isFinite(price) || price <= 0) {
+        // eslint-disable-next-line no-console
+        console.warn(`[price] Invalid Aave oracle price for ${symbol}: ${price}`);
+        return null;
+      }
+      
+      // eslint-disable-next-line no-console
+      console.log(
+        `[price] Aave oracle success: ${symbol}=$${price.toFixed(8)} ` +
+        `address=${tokenInfo.address} decimals=${tokenInfo.decimals}`
+      );
+      
+      priceFallbackOracleTotal.inc({ symbol });
+      return price;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // eslint-disable-next-line no-console
+      console.warn(`[price] Aave oracle fetch failed for ${symbol}: ${message}`);
+      return null;
+    }
   }
 
   /**
