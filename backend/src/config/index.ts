@@ -316,4 +316,37 @@ export const config = {
   get precomputeTopK() { return env.precomputeTopK; },
   get precomputeCloseFactorPct() { return env.precomputeCloseFactorPct; },
   get precomputeReceiveAToken() { return env.precomputeReceiveAToken; },
+  
+  // Fast-lane execution enhancements
+  get txSubmitMode() { 
+    return (process.env.TX_SUBMIT_MODE as 'public' | 'private') || 'public'; 
+  },
+  get privateTxRpcUrl() { 
+    return process.env.PRIVATE_TX_RPC_URL; 
+  },
+  get gasTipGweiFast() { 
+    return parseFloat(process.env.GAS_TIP_GWEI_FAST || '3'); 
+  },
+  get gasBumpFactor() { 
+    return parseFloat(process.env.GAS_BUMP_FACTOR || '1.25'); 
+  },
+  get gasBumpIntervalMs() { 
+    return parseInt(process.env.GAS_BUMP_INTERVAL_MS || '500', 10); 
+  },
+  get gasBumpMax() { 
+    return parseInt(process.env.GAS_BUMP_MAX || '3', 10); 
+  },
+  get gasMaxFeeGwei() { 
+    const val = process.env.GAS_MAX_FEE_GWEI;
+    return val ? parseFloat(val) : undefined;
+  },
+  get fastLaneHfBufferBps() { 
+    return parseInt(process.env.FAST_LANE_HF_BUFFER_BPS || '2', 10); 
+  },
+  get quoteRefreshMs() { 
+    return parseInt(process.env.QUOTE_REFRESH_MS || '750', 10); 
+  },
+  get fastLaneEnabled() {
+    return process.env.FAST_LANE_ENABLED === 'true' || process.env.FAST_LANE_ENABLED === undefined;
+  }
 };

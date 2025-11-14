@@ -1152,13 +1152,13 @@ export class RealTimeHFService extends EventEmitter {
         
         // For all user-affecting events, enqueue with coalescing
         if (users.length > 0) {
-          // Enqueue event batch with coalescing
-          this.enqueueEventBatch(users, reserve, blockNumber);
+          // Enqueue event batch with coalescing (pass event name for fast-lane)
+          this.enqueueEventBatch(users, reserve, blockNumber, decoded.name);
         } else {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
-            // Enqueue a batch check for low-HF candidates, coalesced per block+reserve
-            this.enqueueEventBatch([], reserve, blockNumber);
+            // Enqueue a batch check for low-HF candidates (fast-lane for ReserveDataUpdated)
+            this.enqueueEventBatch([], reserve, blockNumber, decoded.name);
           }
         }
       } else {
@@ -1946,9 +1946,25 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Enqueue event-driven batch check with coalescing
+   * Fast-lane: bypass coalescing for critical liquidation events (ReserveDataUpdated)
    */
-  private enqueueEventBatch(users: string[], reserve: string | null, blockNumber: number): void {
-    // Create a key based on block number and reserve (if any)
+  private enqueueEventBatch(users: string[], reserve: string | null, blockNumber: number, eventName?: string): void {
+    // Fast-lane: execute immediately for ReserveDataUpdated when fast-lane enabled
+    const isFastLaneEvent = config.fastLaneEnabled && (eventName === 'ReserveDataUpdated' || !eventName);
+    
+    if (isFastLaneEvent && reserve) {
+      // eslint-disable-next-line no-console
+      console.log(`[fast-lane] ReserveDataUpdated reserve=${reserve} block=${blockNumber} - bypassing coalesce`);
+      
+      // Execute immediately without coalescing
+      this.executeFastLaneBatch(users, reserve, blockNumber).catch(err => {
+        // eslint-disable-next-line no-console
+        console.error(`[fast-lane] Failed to execute fast-lane batch:`, err);
+      });
+      return;
+    }
+
+    // Standard path: use existing coalescing logic
     const batchKey = reserve ? `block-${blockNumber}-reserve-${reserve}` : `block-${blockNumber}-users`;
 
     // Get or create batch entry
@@ -1985,6 +2001,46 @@ export class RealTimeHFService extends EventEmitter {
     }
     if (reserve) {
       batch.reserves.add(reserve.toLowerCase());
+    }
+  }
+
+  /**
+   * Execute fast-lane batch immediately (zero-delay)
+   */
+  private async executeFastLaneBatch(users: string[], reserve: string, blockNumber: number): Promise<void> {
+    try {
+      // Add users to candidate manager
+      for (const user of users) {
+        this.candidateManager.add(user.toLowerCase());
+      }
+
+      if (reserve && this.borrowersIndex) {
+        // Use BorrowersIndexService to get affected borrowers
+        const borrowers = await this.borrowersIndex.getBorrowers(reserve);
+        const topN = config.reserveRecheckTopN;
+        const maxBatch = config.reserveRecheckMaxBatch;
+        
+        // Shuffle for fairness and take top N
+        const shuffled = [...borrowers].sort(() => Math.random() - 0.5);
+        const selected = shuffled.slice(0, Math.min(topN, maxBatch, borrowers.length));
+        
+        if (selected.length > 0) {
+          // eslint-disable-next-line no-console
+          console.log(`[fast-lane] [reserve-recheck] reserve=${reserve} borrowers=${selected.length}/${borrowers.length} block=${blockNumber}`);
+          
+          // Check with pending blockTag for immediate liquidation detection
+          await this.batchCheckCandidatesWithPending(selected, 'reserve', blockNumber);
+        }
+      } else if (users.length > 0) {
+        // Direct user check
+        await this.batchCheckCandidatesWithPending(users, 'event', blockNumber);
+      } else {
+        // Fallback: check low-HF candidates
+        await this.checkLowHFCandidates('event', blockNumber);
+      }
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('[fast-lane] Error executing fast-lane batch:', error);
     }
   }
 
