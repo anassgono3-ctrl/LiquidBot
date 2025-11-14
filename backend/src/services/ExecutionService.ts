@@ -12,11 +12,15 @@ import {
 import { calculateUsdValue, formatTokenAmount } from '../utils/usdMath.js';
 import { AaveMetadata } from '../aave/AaveMetadata.js';
 import { isZero } from '../utils/bigint.js';
+import { GasPolicy } from '../execution/GasPolicy.js';
+import { PrivateTxSender } from '../execution/PrivateTxSender.js';
+import type { LiquidationOutcomeEvent, SkipReason } from '../types/liquidationOutcome.js';
 
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 import { AaveDataService } from './AaveDataService.js';
 import { UniswapV3QuoteService } from './UniswapV3QuoteService.js';
 import { ExecutorRevertDecoder } from './ExecutorRevertDecoder.js';
+import { NotificationService } from './NotificationService.js';
 
 export interface ExecutionResult {
   success: boolean;
@@ -44,13 +48,17 @@ export class ExecutionService {
   private executorAddress?: string;
   private aaveDataService?: AaveDataService;
   private aaveMetadata?: AaveMetadata;
+  private gasPolicy?: GasPolicy;
+  private privateTxSender?: PrivateTxSender;
+  private notificationService?: NotificationService;
   
   private static configLogged = false;
 
-  constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService, aaveMetadata?: AaveMetadata) {
+  constructor(gasEstimator?: GasEstimator, oneInchService?: OneInchQuoteService, aaveMetadata?: AaveMetadata, notificationService?: NotificationService) {
     this.gasEstimator = gasEstimator;
     this.oneInchService = oneInchService || new OneInchQuoteService();
     this.aaveMetadata = aaveMetadata;
+    this.notificationService = notificationService;
     
     // Initialize provider and wallet if configured
     const rpcUrl = process.env.RPC_URL;
@@ -62,6 +70,21 @@ export class ExecutionService {
       this.wallet = new ethers.Wallet(privateKey, this.provider);
       this.aaveDataService = new AaveDataService(this.provider, aaveMetadata);
       this.uniswapV3Service = new UniswapV3QuoteService(this.provider);
+      
+      // Initialize GasPolicy for fast execution
+      this.gasPolicy = new GasPolicy({
+        tipGweiFast: config.gasTipGweiFast,
+        bumpFactor: config.gasBumpFactor,
+        bumpIntervalMs: config.gasBumpIntervalMs,
+        bumpMax: config.gasBumpMax,
+        maxFeeGwei: config.gasMaxFeeGwei
+      });
+      
+      // Initialize PrivateTxSender
+      this.privateTxSender = new PrivateTxSender({
+        mode: config.txSubmitMode,
+        privateRpcUrl: config.privateTxRpcUrl
+      });
     }
     
     // Set close factor mode metric

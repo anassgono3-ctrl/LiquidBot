@@ -432,4 +432,111 @@ export class NotificationService {
       return rawAmount;
     }
   }
+
+  /**
+   * Send liquidation detection notification (fast-lane)
+   */
+  async notifyLiquidationDetect(event: {
+    user: string;
+    healthFactor: number;
+    estProfitUsd: number;
+    blockNumber: number;
+  }): Promise<void> {
+    if (!this.enabled || !this.bot || !this.chatId) {
+      return;
+    }
+
+    try {
+      const userAddr = this.sanitizeAddress(event.user);
+      const hf = event.healthFactor.toFixed(4);
+      const profit = this.formatUsdValue(event.estProfitUsd);
+
+      const message = `🔍 <b>[liquidation-detect]</b>
+
+👤 User: <code>${userAddr}</code>
+📊 HF: ${hf}
+💰 Est. Profit: $${profit}
+🔢 Block: ${event.blockNumber}
+
+⏰ ${new Date().toISOString()}`;
+
+      await this.bot.sendMessage(this.chatId, message, { parse_mode: 'HTML' });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[notification] Failed to send detection notification:', err);
+    }
+  }
+
+  /**
+   * Send liquidation outcome notification (fast-lane)
+   */
+  async notifyLiquidationOutcome(outcome: {
+    type: 'executed' | 'raced' | 'skipped';
+    user: string;
+    blockNumber: number;
+    txHash?: string;
+    gasUsed?: number;
+    profitUsd?: number;
+    competingTxHash?: string;
+    timeDeltaMs?: number;
+    skipReason?: string;
+    skipDetails?: string;
+  }): Promise<void> {
+    if (!this.enabled || !this.bot || !this.chatId) {
+      return;
+    }
+
+    try {
+      const userAddr = this.sanitizeAddress(outcome.user);
+      let message: string;
+
+      if (outcome.type === 'executed') {
+        const txLink = outcome.txHash 
+          ? `<a href="https://basescan.org/tx/${outcome.txHash}">${this.sanitizeAddress(outcome.txHash)}</a>`
+          : 'N/A';
+        const gasInfo = outcome.gasUsed ? ` | ⛽ ${outcome.gasUsed.toLocaleString()}` : '';
+        const profitInfo = outcome.profitUsd ? ` | 💵 $${this.formatUsdValue(outcome.profitUsd)}` : '';
+
+        message = `✅ <b>[executed]</b>
+
+👤 User: <code>${userAddr}</code>
+🔢 Block: ${outcome.blockNumber}
+🔗 Tx: ${txLink}${gasInfo}${profitInfo}
+
+⏰ ${new Date().toISOString()}`;
+
+      } else if (outcome.type === 'raced') {
+        const competingLink = outcome.competingTxHash
+          ? `<a href="https://basescan.org/tx/${outcome.competingTxHash}">${this.sanitizeAddress(outcome.competingTxHash)}</a>`
+          : 'N/A';
+        const timeDelta = outcome.timeDeltaMs ? ` (Δ${outcome.timeDeltaMs}ms)` : '';
+
+        message = `⚡ <b>[raced]</b>
+
+👤 User: <code>${userAddr}</code>
+🔢 Block: ${outcome.blockNumber}
+🏁 Competing Tx: ${competingLink}${timeDelta}
+
+⏰ ${new Date().toISOString()}`;
+
+      } else {
+        // skipped
+        const reason = outcome.skipReason || 'unknown';
+        const details = outcome.skipDetails ? `\n📝 ${outcome.skipDetails}` : '';
+
+        message = `⏭️ <b>[skipped]</b>
+
+👤 User: <code>${userAddr}</code>
+🔢 Block: ${outcome.blockNumber}
+❌ Reason: ${reason}${details}
+
+⏰ ${new Date().toISOString()}`;
+      }
+
+      await this.bot.sendMessage(this.chatId, message, { parse_mode: 'HTML' });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[notification] Failed to send outcome notification:', err);
+    }
+  }
 }
