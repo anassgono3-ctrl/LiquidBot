@@ -127,6 +127,11 @@ export const config = {
   get chainlinkFeeds() { return env.chainlinkFeeds; },
   get priceStalenessSeconds() { return env.priceStalenessSeconds; },
   get ratioPriceEnabled() { return env.ratioPriceEnabled; },
+  
+  // Price feed aliases and derived assets
+  get priceFeedAliases() { return env.priceFeedAliases; },
+  get derivedRatioFeeds() { return env.derivedRatioFeeds; },
+  get pricePollDisableAfterErrors() { return env.pricePollDisableAfterErrors; },
 
   // Price-triggered emergency scans
   get priceTriggerEnabled() { return env.priceTriggerEnabled; },

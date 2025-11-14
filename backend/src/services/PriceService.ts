@@ -44,6 +44,14 @@ export class PriceService {
   private decimalsInitialized: boolean = false; // Track initialization status
   private provider: ethers.JsonRpcProvider | null = null;
   private aaveOracle: ethers.Contract | null = null;
+  
+  // Alias and derived asset support
+  private aliases: Map<string, string> = new Map(); // alias -> target (e.g., USDbC -> USDC)
+  private derivedAssets: Map<string, string> = new Map(); // asset -> ratio feed key (e.g., wstETH -> WSTETH_ETH)
+  
+  // Per-feed error tracking for poll disabling
+  private feedErrorCounts: Map<string, number> = new Map(); // feed address -> consecutive error count
+  private disabledFeeds: Set<string> = new Set(); // set of feed addresses with polling disabled
 
   /**
    * Default price mappings for common tokens (USD per token)
@@ -69,6 +77,32 @@ export class PriceService {
   };
 
   constructor() {
+    // Parse aliases (e.g., "USDbC:USDC")
+    if (config.priceFeedAliases) {
+      const entries = config.priceFeedAliases.split(',').map(e => e.trim()).filter(e => e.length > 0);
+      for (const entry of entries) {
+        const [alias, target] = entry.split(':').map(s => s.trim());
+        if (alias && target) {
+          this.aliases.set(alias.toUpperCase(), target.toUpperCase());
+          // eslint-disable-next-line no-console
+          console.log(`[price] Alias configured: ${alias.toUpperCase()} -> ${target.toUpperCase()}`);
+        }
+      }
+    }
+    
+    // Parse derived ratio feeds (e.g., "wstETH:WSTETH_ETH,weETH:WEETH_ETH")
+    if (config.derivedRatioFeeds) {
+      const entries = config.derivedRatioFeeds.split(',').map(e => e.trim()).filter(e => e.length > 0);
+      for (const entry of entries) {
+        const [asset, ratioFeed] = entry.split(':').map(s => s.trim());
+        if (asset && ratioFeed) {
+          this.derivedAssets.set(asset.toUpperCase(), ratioFeed.toUpperCase());
+          // eslint-disable-next-line no-console
+          console.log(`[price] Derived asset configured: ${asset.toUpperCase()} via ${ratioFeed.toUpperCase()}`);
+        }
+      }
+    }
+    
     // Initialize Chainlink feeds if configured
     if (config.chainlinkRpcUrl && config.chainlinkFeeds) {
       try {
@@ -91,19 +125,24 @@ export class PriceService {
             const upperSymbol = symbol.toUpperCase();
             this.chainlinkFeeds.set(upperSymbol, address);
             
-            // Detect ratio feeds (ending with _ETH)
-            if (config.ratioPriceEnabled && upperSymbol.endsWith('_ETH')) {
+            // Detect ratio feeds (ending with _ETH) - backwards compatibility
+            if (config.ratioPriceEnabled && upperSymbol.endsWith('_ETH') && !this.derivedAssets.has(upperSymbol.replace(/_ETH$/, ''))) {
               // Extract underlying symbol (e.g., WSTETH_ETH -> WSTETH)
               const underlyingSymbol = upperSymbol.replace(/_ETH$/, '');
               this.ratioFeeds.set(underlyingSymbol, upperSymbol);
               // eslint-disable-next-line no-console
-              console.log(`[price] Ratio feed detected: ${underlyingSymbol} -> ${upperSymbol}`);
+              console.log(`[price] Ratio feed detected (legacy): ${underlyingSymbol} -> ${upperSymbol}`);
             }
           }
         }
         
+        // Add derived assets to ratioFeeds map for backwards compatibility
+        for (const [asset, ratioFeed] of this.derivedAssets.entries()) {
+          this.ratioFeeds.set(asset, ratioFeed);
+        }
+        
         // eslint-disable-next-line no-console
-        console.log(`[price] Chainlink feeds enabled for ${this.chainlinkFeeds.size} symbols (${this.ratioFeeds.size} ratio feeds)`);
+        console.log(`[price] Chainlink feeds enabled for ${this.chainlinkFeeds.size} symbols (${this.ratioFeeds.size} ratio feeds, ${this.aliases.size} aliases)`);
         
         // Fetch decimals for each feed asynchronously
         // Note: This is fire-and-forget to avoid blocking construction
@@ -168,9 +207,16 @@ export class PriceService {
     }
 
     const upperSymbol = symbol.toUpperCase();
+    
+    // Resolve alias if this is an aliased asset (e.g., USDbC -> USDC)
+    const resolvedSymbol = this.aliases.get(upperSymbol) || upperSymbol;
+    if (resolvedSymbol !== upperSymbol) {
+      // eslint-disable-next-line no-console
+      console.log(`[price] Resolving alias: ${upperSymbol} -> ${resolvedSymbol}`);
+    }
 
-    // Check cache first
-    const cached = this.priceCache.get(upperSymbol);
+    // Check cache first (using resolved symbol)
+    const cached = this.priceCache.get(resolvedSymbol);
     if (cached && Date.now() - cached.timestamp < this.cacheTtlMs) {
       return cached.price;
     }
@@ -178,39 +224,39 @@ export class PriceService {
     let price: number | null = null;
 
     // Try Chainlink feed if available (direct USD feed)
-    if (this.provider && this.chainlinkFeeds.has(upperSymbol)) {
-      price = await this.getChainlinkPrice(upperSymbol);
+    if (this.provider && this.chainlinkFeeds.has(resolvedSymbol)) {
+      price = await this.getChainlinkPrice(resolvedSymbol);
     }
     
     // Try ratio feed composition if no direct feed and ratio feed exists
-    if (price === null && this.provider && this.ratioFeeds.has(upperSymbol)) {
-      price = await this.getRatioComposedPrice(upperSymbol);
+    if (price === null && this.provider && this.ratioFeeds.has(resolvedSymbol)) {
+      price = await this.getRatioComposedPrice(resolvedSymbol);
     }
     
     // Try Aave oracle fallback
     if (price === null && this.aaveOracle && config.aaveOracle) {
-      price = await this.getAaveOraclePrice(upperSymbol);
+      price = await this.getAaveOraclePrice(resolvedSymbol);
     }
 
     // Fall back to default prices
     if (price === null) {
-      price = this.defaultPrices[upperSymbol] ?? this.defaultPrices.UNKNOWN;
+      price = this.defaultPrices[resolvedSymbol] ?? this.defaultPrices.UNKNOWN;
       
       // Log fallback when Chainlink/oracle was expected but failed
-      if (this.chainlinkFeeds.has(upperSymbol) || this.ratioFeeds.has(upperSymbol)) {
+      if (this.chainlinkFeeds.has(resolvedSymbol) || this.ratioFeeds.has(resolvedSymbol)) {
         // eslint-disable-next-line no-console
-        console.warn(`[price] Using stub price for ${upperSymbol}: ${price} USD (all sources unavailable)`);
+        console.warn(`[price] Using stub price for ${resolvedSymbol}: ${price} USD (all sources unavailable)`);
       }
       
       // If throwOnMissing is true and we're using stub prices for a token that should have real pricing
-      if (throwOnMissing && (this.chainlinkFeeds.has(upperSymbol) || this.ratioFeeds.has(upperSymbol))) {
-        priceMissingTotal.inc({ symbol: upperSymbol, stage: 'fetch' });
-        throw new Error(`[price] Missing price for ${upperSymbol} (all sources failed)`);
+      if (throwOnMissing && (this.chainlinkFeeds.has(resolvedSymbol) || this.ratioFeeds.has(resolvedSymbol))) {
+        priceMissingTotal.inc({ symbol: resolvedSymbol, stage: 'fetch' });
+        throw new Error(`[price] Missing price for ${resolvedSymbol} (all sources failed)`);
       }
     }
 
-    // Cache the result
-    this.priceCache.set(upperSymbol, { price, timestamp: Date.now() });
+    // Cache the result (using resolved symbol)
+    this.priceCache.set(resolvedSymbol, { price, timestamp: Date.now() });
 
     return price;
   }
@@ -242,6 +288,7 @@ export class PriceService {
         console.warn(`[price] Invalid Chainlink answer for ${symbol}: ${answer}`);
         priceOracleChainlinkRequestsTotal.inc({ status: 'error', symbol });
         priceOracleStubFallbackTotal.inc({ symbol, reason: 'invalid_answer' });
+        this.recordFeedError(feedAddress, symbol);
         return null;
       }
       
@@ -251,6 +298,7 @@ export class PriceService {
         console.warn(`[price] Stale Chainlink data for ${symbol}: answeredInRound=${answeredInRound} < roundId=${roundId}`);
         priceOracleChainlinkStaleTotal.inc({ symbol });
         priceOracleStubFallbackTotal.inc({ symbol, reason: 'stale_data' });
+        this.recordFeedError(feedAddress, symbol);
         return null;
       }
       
@@ -266,6 +314,7 @@ export class PriceService {
         console.warn(`[price] Invalid normalized Chainlink price for ${symbol}: ${price}`);
         priceOracleChainlinkRequestsTotal.inc({ status: 'error', symbol });
         priceOracleStubFallbackTotal.inc({ symbol, reason: 'invalid_normalized_price' });
+        this.recordFeedError(feedAddress, symbol);
         return null;
       }
       
@@ -284,17 +333,73 @@ export class PriceService {
         `decimals=${decimals} age=${age}s roundId=${roundId.toString()}`
       );
 
+      // Reset error count on success
+      this.resetFeedError(feedAddress);
+      
       priceOracleChainlinkRequestsTotal.inc({ status: 'success', symbol });
       return price;
     } catch (err) {
       // Log error and fallback to stub prices
       const message = err instanceof Error ? err.message : String(err);
+      
+      // Check if this is a CALL_EXCEPTION
+      const isCallException = message.includes('CALL_EXCEPTION') || (err instanceof Error && err.message.includes('CALL_EXCEPTION'));
+      
       // eslint-disable-next-line no-console
       console.warn(`[price] Chainlink fetch failed for ${symbol}: ${message}`);
       priceOracleChainlinkRequestsTotal.inc({ status: 'error', symbol });
       priceOracleStubFallbackTotal.inc({ symbol, reason: 'fetch_error' });
+      
+      // Record error for poll disabling
+      this.recordFeedError(feedAddress, symbol, isCallException);
+      
       return null;
     }
+  }
+
+  /**
+   * Record feed error and check if polling should be disabled
+   */
+  private recordFeedError(feedAddress: string, symbol: string, isCallException: boolean = false): void {
+    // Increment error count
+    const currentCount = this.feedErrorCounts.get(feedAddress) || 0;
+    const newCount = currentCount + 1;
+    this.feedErrorCounts.set(feedAddress, newCount);
+    
+    // Check if we should disable polling
+    const threshold = config.pricePollDisableAfterErrors;
+    if (newCount >= threshold && !this.disabledFeeds.has(feedAddress)) {
+      this.disabledFeeds.add(feedAddress);
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[price-poll] disabled feed=${symbol} address=${feedAddress} after ${newCount} consecutive ${isCallException ? 'CALL_EXCEPTION' : 'errors'}`
+      );
+    }
+  }
+
+  /**
+   * Reset feed error count on successful fetch
+   */
+  private resetFeedError(feedAddress: string): void {
+    if (this.feedErrorCounts.has(feedAddress)) {
+      this.feedErrorCounts.delete(feedAddress);
+    }
+  }
+
+  /**
+   * Check if a feed has polling disabled
+   */
+  isFeedPollingDisabled(symbol: string): boolean {
+    const feedAddress = this.chainlinkFeeds.get(symbol.toUpperCase());
+    if (!feedAddress) return false;
+    return this.disabledFeeds.has(feedAddress);
+  }
+
+  /**
+   * Check if an asset is derived (priced via ratio feed)
+   */
+  isDerivedAsset(symbol: string): boolean {
+    return this.derivedAssets.has(symbol.toUpperCase());
   }
 
   /**

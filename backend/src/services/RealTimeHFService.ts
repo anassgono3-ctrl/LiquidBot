@@ -124,6 +124,7 @@ export class RealTimeHFService extends EventEmitter {
   private perAssetTriggerConfig?: PerAssetTriggerConfig;
   private aaveDataService?: AaveDataService;
   private discoveredReserves: DiscoveredReserve[] = [];
+  private priceService?: PriceService;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -285,9 +286,15 @@ export class RealTimeHFService extends EventEmitter {
       console.log('[decision-trace] Store initialized');
     }
     
+    // Store price service for use in polling logic
+    this.priceService = options.priceService;
+    
     // Initialize liquidation audit service if enabled
     if (config.liquidationAuditEnabled) {
-      const priceService = options.priceService || new PriceService();
+      const priceService = this.priceService || new PriceService();
+      if (!this.priceService) {
+        this.priceService = priceService;
+      }
       const notificationService = options.notificationService || new NotificationService(priceService);
       this.liquidationAuditService = new LiquidationAuditService(
         priceService,
@@ -1498,15 +1505,33 @@ export class RealTimeHFService extends EventEmitter {
   private startPricePolling(feeds: Record<string, string>): void {
     const pollIntervalMs = config.priceTriggerPollSec * 1000;
     
+    // Filter out derived assets - they should not be polled at asset level
+    const pollableFeeds: Record<string, string> = {};
+    for (const [token, feedAddress] of Object.entries(feeds)) {
+      // Skip if this is a derived asset (e.g., wstETH, weETH)
+      if (this.priceService && this.priceService.isDerivedAsset(token)) {
+        // eslint-disable-next-line no-console
+        console.log(`[price-trigger] Skipping polling for derived asset: ${token} (event-only)`);
+        continue;
+      }
+      pollableFeeds[token] = feedAddress;
+    }
+    
     // eslint-disable-next-line no-console
     console.log(
       `[price-trigger] Starting polling fallback: interval=${config.priceTriggerPollSec}s ` +
-      `feeds=${Object.keys(feeds).length}`
+      `feeds=${Object.keys(pollableFeeds).length}/${Object.keys(feeds).length} (skipped ${Object.keys(feeds).length - Object.keys(pollableFeeds).length} derived)`
     );
+    
+    if (Object.keys(pollableFeeds).length === 0) {
+      // eslint-disable-next-line no-console
+      console.log('[price-trigger] No pollable feeds, polling disabled');
+      return;
+    }
     
     // Initial poll after a short delay
     setTimeout(() => {
-      this.pollChainlinkFeeds(feeds).catch(err => {
+      this.pollChainlinkFeeds(pollableFeeds).catch(err => {
         // eslint-disable-next-line no-console
         console.error('[price-trigger] Error in initial poll:', err);
       });
@@ -1516,7 +1541,7 @@ export class RealTimeHFService extends EventEmitter {
     this.pricePollingTimer = setInterval(() => {
       if (this.isShuttingDown) return;
       
-      this.pollChainlinkFeeds(feeds).catch(err => {
+      this.pollChainlinkFeeds(pollableFeeds).catch(err => {
         // eslint-disable-next-line no-console
         console.error('[price-trigger] Error in polling:', err);
       });
@@ -1534,6 +1559,11 @@ export class RealTimeHFService extends EventEmitter {
     
     for (const [token, feedAddress] of Object.entries(feeds)) {
       try {
+        // Skip if polling is disabled for this feed
+        if (this.priceService && this.priceService.isFeedPollingDisabled(token)) {
+          continue;
+        }
+        
         // Create contract instance for this feed
         const feedContract = new Contract(feedAddress, CHAINLINK_AGGREGATOR_ABI, this.provider);
         
@@ -1887,10 +1917,10 @@ export class RealTimeHFService extends EventEmitter {
     
     const effectiveBlockTag: number | 'pending' | undefined = usePending ? 'pending' : blockTag;
     
-    // If using pending, log it
+    // If using pending, log it with source information
     if (usePending) {
       // eslint-disable-next-line no-console
-      console.log(`[pending-verify] Using pending block for ${addresses.length} checks (trigger=${triggerType})`);
+      console.log(`[pending-verify] source=${triggerType} users=${addresses.length} blockTag=pending`);
     }
     
     try {
@@ -1899,9 +1929,11 @@ export class RealTimeHFService extends EventEmitter {
     } catch (err) {
       // Check if error is related to pending block not supported
       const errStr = String(err).toLowerCase();
-      if (usePending && (errStr.includes('pending') || errStr.includes('block tag'))) {
+      const errorCode = err instanceof Error && 'code' in err ? (err as any).code : 'unknown';
+      
+      if (usePending && (errStr.includes('pending') || errStr.includes('block tag') || errStr.includes('not supported'))) {
         // eslint-disable-next-line no-console
-        console.warn('[pending-verify] Provider does not support pending block, falling back to latest');
+        console.warn(`[pending-verify] fallback-to-latest due to error-code=${errorCode}`);
         pendingVerifyErrorsTotal.inc();
         
         // Retry with latest (undefined means latest)

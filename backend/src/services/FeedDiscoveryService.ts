@@ -11,11 +11,16 @@ const AAVE_ORACLE_ABI = [
   'function getSourceOfAsset(address asset) external view returns (address)'
 ];
 
+export type FeedType = 'usd' | 'ratio' | 'alias';
+
 export interface DiscoveredReserve {
   asset: string;           // Underlying asset address
   symbol: string;          // Asset symbol (e.g., "WETH", "USDC")
   chainlinkAggregator: string | null;  // Chainlink price feed address
   variableDebtToken: string;  // Variable debt token address
+  feedType?: FeedType;     // Feed type: usd, ratio, or alias
+  ratioFeedKey?: string;   // Ratio feed key (e.g., "WSTETH_ETH")
+  aliasTarget?: string;    // Alias target symbol (e.g., "USDC" for USDbC)
 }
 
 export interface FeedDiscoveryOptions {
@@ -200,5 +205,87 @@ export class FeedDiscoveryService {
     }
     
     return result;
+  }
+
+  /**
+   * Parse price feed aliases from config string
+   * Format: "USDbC:USDC,Token1:Token2"
+   * Returns map of alias → target
+   */
+  static parseAliases(aliasesConfig?: string): Map<string, string> {
+    const aliases = new Map<string, string>();
+    
+    if (!aliasesConfig) {
+      return aliases;
+    }
+    
+    const entries = aliasesConfig.split(',').map(e => e.trim()).filter(e => e.length > 0);
+    
+    for (const entry of entries) {
+      const [alias, target] = entry.split(':').map(s => s.trim());
+      if (alias && target) {
+        aliases.set(alias.toUpperCase(), target.toUpperCase());
+      }
+    }
+    
+    return aliases;
+  }
+
+  /**
+   * Parse derived ratio feeds from config string
+   * Format: "wstETH:WSTETH_ETH,weETH:WEETH_ETH"
+   * Returns map of asset symbol → ratio feed key
+   */
+  static parseDerivedRatioFeeds(derivedConfig?: string): Map<string, string> {
+    const derived = new Map<string, string>();
+    
+    if (!derivedConfig) {
+      return derived;
+    }
+    
+    const entries = derivedConfig.split(',').map(e => e.trim()).filter(e => e.length > 0);
+    
+    for (const entry of entries) {
+      const [asset, ratioFeed] = entry.split(':').map(s => s.trim());
+      if (asset && ratioFeed) {
+        derived.set(asset.toUpperCase(), ratioFeed.toUpperCase());
+      }
+    }
+    
+    return derived;
+  }
+
+  /**
+   * Classify feed type for a given asset symbol
+   * @param symbol Asset symbol
+   * @param aliases Alias map
+   * @param derivedFeeds Derived ratio feeds map
+   * @returns Feed type and additional info
+   */
+  static classifyFeed(
+    symbol: string,
+    aliases: Map<string, string>,
+    derivedFeeds: Map<string, string>
+  ): { type: FeedType; ratioFeedKey?: string; aliasTarget?: string } {
+    const upperSymbol = symbol.toUpperCase();
+    
+    // Check if it's an alias
+    if (aliases.has(upperSymbol)) {
+      return {
+        type: 'alias',
+        aliasTarget: aliases.get(upperSymbol)
+      };
+    }
+    
+    // Check if it's a derived ratio feed
+    if (derivedFeeds.has(upperSymbol)) {
+      return {
+        type: 'ratio',
+        ratioFeedKey: derivedFeeds.get(upperSymbol)
+      };
+    }
+    
+    // Default to USD feed
+    return { type: 'usd' };
   }
 }
