@@ -609,8 +609,9 @@ export class ExecutionService {
       const dustMinUsd = config.dustMinUsd;
       
       if (dustMinUsd !== null) {
-        // USD-based dust guard
-        // Calculate seized collateral USD value using liquidation bonus
+        // USD-based dust guard (corrected logic)
+        // Skip only when BOTH repayUSD AND seizedUSD are below threshold
+        // This prevents false skips when collateral price is missing (seizedUSD=0)
         const maxSeizableCollateral = (debtToCover * BigInt(Math.floor((1 + liquidationBonusPct) * 1e18))) / BigInt(1e18);
         const seizedUsd = calculateUsdValue(
           maxSeizableCollateral > selectedCollateral.aTokenBalance ? selectedCollateral.aTokenBalance : maxSeizableCollateral,
@@ -618,7 +619,7 @@ export class ExecutionService {
           selectedCollateral.priceRaw
         );
         
-        if (debtToCoverUsd < dustMinUsd || seizedUsd < dustMinUsd) {
+        if (debtToCoverUsd < dustMinUsd && seizedUsd < dustMinUsd) {
           // eslint-disable-next-line no-console
           console.log(
             `[execution] dust_guard: repayUSD=${debtToCoverUsd.toFixed(2)} seizedUSD=${seizedUsd.toFixed(2)} minUSD=${dustMinUsd}`
