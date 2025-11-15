@@ -316,6 +316,27 @@ export const priceMissingTotal = new Counter({
   registers: [registry]
 });
 
+// Price initialization and deferred valuation metrics
+export const pendingPriceQueueLength = new Gauge({
+  name: 'liquidbot_pending_price_queue_length',
+  help: 'Current number of opportunities queued for price revaluation',
+  registers: [registry]
+});
+
+export const revalueSuccessTotal = new Counter({
+  name: 'liquidbot_revalue_success_total',
+  help: 'Total number of successful price revaluations after feed initialization',
+  labelNames: ['symbol'],
+  registers: [registry]
+});
+
+export const revalueFailTotal = new Counter({
+  name: 'liquidbot_revalue_fail_total',
+  help: 'Total number of failed price revaluations (still zero after init)',
+  labelNames: ['symbol'],
+  registers: [registry]
+});
+
 // Low HF Tracker metrics
 export const lowHfSnapshotTotal = new Counter({
   name: 'liquidbot_lowhf_snapshot_total',

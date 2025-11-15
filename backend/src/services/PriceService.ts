@@ -71,6 +71,14 @@ const BASE_TOKEN_REGISTRY: Record<string, TokenInfo> = {
  * PriceService provides USD price lookups for tokens.
  * Supports Chainlink price feeds with fallback to stub prices.
  */
+// Interface for pending price resolution items
+interface PendingPriceResolution {
+  opportunityId?: string;
+  symbol: string;
+  rawCollateralAmount?: bigint;
+  timestamp: number;
+}
+
 export class PriceService {
   private priceCache: Map<string, { price: number; timestamp: number }> = new Map();
   private readonly cacheTtlMs = 60000; // 1 minute cache
@@ -88,6 +96,13 @@ export class PriceService {
   // Per-feed error tracking for poll disabling
   private feedErrorCounts: Map<string, number> = new Map(); // feed address -> consecutive error count
   private disabledFeeds: Set<string> = new Set(); // set of feed addresses with polling disabled
+  
+  // Price readiness and deferred valuation
+  private feedsReady: boolean = false; // True after all feed discovery/initialization complete
+  private pendingPriceResolutions: PendingPriceResolution[] = []; // Queue for opportunities needing revaluation
+  private readonly maxPendingQueueLength = 500; // Safety limit for queue size
+  private symbolAliases: Map<string, string> = new Map(); // Symbol normalization map (e.g., cbBTC -> CBBTC)
+  private addressRegistry: Map<string, string> = new Map(); // Normalized address -> symbol mapping
 
   /**
    * Default price mappings for common tokens (USD per token)
@@ -113,6 +128,23 @@ export class PriceService {
   };
 
   constructor() {
+    // Parse symbol aliases (e.g., "cbBTC:CBBTC,tBTC:TBTC") for normalization
+    if (config.priceSymbolAliases) {
+      const entries = config.priceSymbolAliases.split(',').map(e => e.trim()).filter(e => e.length > 0);
+      for (const entry of entries) {
+        const [alias, canonical] = entry.split(':').map(s => s.trim());
+        if (alias && canonical) {
+          const aliasUpper = alias.toUpperCase();
+          const canonicalUpper = canonical.toUpperCase();
+          this.symbolAliases.set(aliasUpper, canonicalUpper);
+          // Also map canonical to itself for consistency
+          this.symbolAliases.set(canonicalUpper, canonicalUpper);
+          // eslint-disable-next-line no-console
+          console.log(`[price] Symbol alias: ${aliasUpper} -> ${canonicalUpper}`);
+        }
+      }
+    }
+    
     // Parse aliases (e.g., "USDbC:USDC")
     if (config.priceFeedAliases) {
       const entries = config.priceFeedAliases.split(',').map(e => e.trim()).filter(e => e.length > 0);
@@ -210,6 +242,11 @@ export class PriceService {
         const aggregator = new ethers.Contract(address, AGGREGATOR_V3_ABI, this.provider);
         const decimals = await aggregator.decimals();
         this.feedDecimals.set(symbol, Number(decimals));
+        
+        // Populate address registry with normalized addresses
+        const normalizedAddress = address.toLowerCase();
+        this.addressRegistry.set(normalizedAddress, symbol);
+        
         // eslint-disable-next-line no-console
         console.log(`[price] Feed ${symbol} decimals=${decimals} address=${address}`);
       } catch (err) {
@@ -223,8 +260,115 @@ export class PriceService {
     }
     
     this.decimalsInitialized = true;
+    
+    // Mark feeds as ready after initialization (manual + auto discovery complete)
+    this.feedsReady = true;
     // eslint-disable-next-line no-console
-    console.log(`[price] Feed decimals initialization complete (${this.feedDecimals.size} feeds)`);
+    console.log(`[price] Feed decimals initialization complete (${this.feedDecimals.size} feeds) - feedsReady=true`);
+    
+    // Flush pending price resolutions
+    if (this.pendingPriceResolutions.length > 0) {
+      // eslint-disable-next-line no-console
+      console.log(`[price-init] Flushing ${this.pendingPriceResolutions.length} pending price resolutions`);
+      await this.flushPending();
+    }
+  }
+
+  /**
+   * Check if price feeds are ready (initialization complete)
+   * @returns true if all feed discovery and normalization is complete
+   */
+  isFeedsReady(): boolean {
+    return this.feedsReady;
+  }
+
+  /**
+   * Flush pending price resolutions after feeds become ready
+   * Revalues queued opportunities that were encountered before initialization
+   * @returns Number of items successfully revalued
+   */
+  async flushPending(): Promise<number> {
+    if (!this.feedsReady) {
+      // eslint-disable-next-line no-console
+      console.warn('[price-init] flushPending called but feedsReady=false, skipping');
+      return 0;
+    }
+
+    const toProcess = [...this.pendingPriceResolutions];
+    this.pendingPriceResolutions = []; // Clear queue
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (const item of toProcess) {
+      try {
+        const price = await this.getPrice(item.symbol, false);
+        
+        if (price > 0) {
+          successCount++;
+          const { revalueSuccessTotal } = require('../metrics/index.js');
+          revalueSuccessTotal.inc({ symbol: item.symbol });
+          
+          // Calculate USD value if raw amount provided
+          let usdValue = 'N/A';
+          if (item.rawCollateralAmount) {
+            // This is a simplified calculation - actual implementation would need decimals
+            usdValue = (Number(item.rawCollateralAmount) * price).toFixed(2);
+          }
+          
+          // eslint-disable-next-line no-console
+          console.log(`[price-init] revalue success symbol=${item.symbol} usd=${usdValue}`);
+        } else {
+          failCount++;
+          const { revalueFailTotal } = require('../metrics/index.js');
+          revalueFailTotal.inc({ symbol: item.symbol });
+          // eslint-disable-next-line no-console
+          console.warn(`[price-init] revalue fail symbol=${item.symbol} still_zero`);
+        }
+      } catch (error) {
+        failCount++;
+        const { revalueFailTotal } = require('../metrics/index.js');
+        revalueFailTotal.inc({ symbol: item.symbol });
+        // eslint-disable-next-line no-console
+        console.error(`[price-init] revalue error symbol=${item.symbol}:`, error instanceof Error ? error.message : error);
+      }
+    }
+    
+    // Update metrics
+    const { pendingPriceQueueLength } = require('../metrics/index.js');
+    pendingPriceQueueLength.set(this.pendingPriceResolutions.length);
+    
+    // eslint-disable-next-line no-console
+    console.log(`[price-init] Flush complete: ${successCount} success, ${failCount} fail`);
+    
+    return successCount;
+  }
+
+  /**
+   * Queue a price resolution for later (when feeds not ready)
+   */
+  private queuePriceResolution(symbol: string, opportunityId?: string, rawCollateralAmount?: bigint): void {
+    // Check queue length limit
+    if (this.pendingPriceResolutions.length >= this.maxPendingQueueLength) {
+      const dropped = this.pendingPriceResolutions.length - this.maxPendingQueueLength + 1;
+      this.pendingPriceResolutions.shift(); // Drop oldest
+      // eslint-disable-next-line no-console
+      console.warn(`[price-init] queue_overflow dropped=${dropped}`);
+    }
+    
+    this.pendingPriceResolutions.push({
+      opportunityId,
+      symbol,
+      rawCollateralAmount,
+      timestamp: Date.now()
+    });
+    
+    // Update metrics
+    const { pendingPriceQueueLength } = require('../metrics/index.js');
+    pendingPriceQueueLength.set(this.pendingPriceResolutions.length);
+    
+    // eslint-disable-next-line no-console
+    console.log(`[price-init] queued collateral valuation symbol=${symbol} amount=${rawCollateralAmount?.toString() || 'N/A'}`);
   }
 
   /**
@@ -244,8 +388,11 @@ export class PriceService {
 
     const upperSymbol = symbol.toUpperCase();
     
+    // Apply symbol aliases for normalization (e.g., cbBTC -> CBBTC)
+    const normalizedSymbol = this.symbolAliases.get(upperSymbol) || upperSymbol;
+    
     // Resolve alias if this is an aliased asset (e.g., USDbC -> USDC)
-    const resolvedSymbol = this.aliases.get(upperSymbol) || upperSymbol;
+    const resolvedSymbol = this.aliases.get(normalizedSymbol) || normalizedSymbol;
     if (resolvedSymbol !== upperSymbol) {
       // eslint-disable-next-line no-console
       console.log(`[price] Resolving alias: ${upperSymbol} -> ${resolvedSymbol}`);
@@ -583,23 +730,44 @@ export class PriceService {
   
   /**
    * Get price from Aave oracle as fallback
-   * @param symbol Token symbol
+   * @param symbolOrAddress Token symbol or hex address (0x...)
    * @returns USD price or null if unavailable
    */
-  private async getAaveOraclePrice(symbol: string): Promise<number | null> {
+  private async getAaveOraclePrice(symbolOrAddress: string): Promise<number | null> {
     if (!this.aaveOracle) return null;
     
-    // Look up token address from registry
-    const tokenInfo = BASE_TOKEN_REGISTRY[symbol];
-    if (!tokenInfo) {
+    let address: string;
+    let symbol: string;
+    
+    // Detect if input is a hex address (starts with 0x and has valid length)
+    const isAddress = /^0x[a-fA-F0-9]{40}$/i.test(symbolOrAddress);
+    
+    if (isAddress) {
+      // Normalize address to lowercase
+      address = symbolOrAddress.toLowerCase();
+      
+      // Try to find symbol from address registry
+      symbol = this.addressRegistry.get(address) || symbolOrAddress;
+      
       // eslint-disable-next-line no-console
-      console.log(`[price] aave_fallback_attempted symbol=${symbol} result=no_address_mapping`);
-      return null;
+      console.log(`[price] aave_fallback_attempted address=${address} symbol=${symbol}`);
+    } else {
+      // Look up token address from registry
+      symbol = symbolOrAddress;
+      const tokenInfo = BASE_TOKEN_REGISTRY[symbol];
+      
+      if (!tokenInfo) {
+        // eslint-disable-next-line no-console
+        console.log(`[price] aave_fallback_attempted symbol=${symbol} result=no_address_mapping`);
+        return null;
+      }
+      
+      address = tokenInfo.address.toLowerCase();
     }
     
     try {
       // Query Aave oracle for asset price
-      const priceRaw = await this.aaveOracle.getAssetPrice(tokenInfo.address);
+      const priceRaw = await this.aaveOracle.getAssetPrice(address);
       
       // Aave oracle returns prices in 8 decimals (BASE_CURRENCY_UNIT)
       // Convert to USD using the same format as Chainlink (price / 10^8)
@@ -615,7 +783,7 @@ export class PriceService {
       // eslint-disable-next-line no-console
       console.log(
         `[price] Aave oracle success: ${symbol}=$${price.toFixed(8)} ` +
-        `address=${tokenInfo.address} decimals=${tokenInfo.decimals}`
+        `address=${address}`
       );
       
       priceFallbackOracleTotal.inc({ symbol });

@@ -132,6 +132,10 @@ export const config = {
   get priceFeedAliases() { return env.priceFeedAliases; },
   get derivedRatioFeeds() { return env.derivedRatioFeeds; },
   get pricePollDisableAfterErrors() { return env.pricePollDisableAfterErrors; },
+  
+  // Price readiness and deferred valuation
+  get priceDeferUntilReady() { return env.priceDeferUntilReady; },
+  get priceSymbolAliases() { return env.priceSymbolAliases; },
 
   // Price-triggered emergency scans
   get priceTriggerEnabled() { return env.priceTriggerEnabled; },
