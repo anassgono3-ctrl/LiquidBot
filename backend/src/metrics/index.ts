@@ -515,3 +515,44 @@ export const liquidationHfTransienceTotal = new Counter({
   help: 'Total number of transient HF violations detected',
   registers: [registry]
 });
+
+// Execution Path Acceleration metrics
+export const preSimCacheHit = new Counter({
+  name: 'liquidbot_pre_sim_cache_hit_total',
+  help: 'Total number of pre-simulation cache hits',
+  registers: [registry]
+});
+
+export const preSimCacheMiss = new Counter({
+  name: 'liquidbot_pre_sim_cache_miss_total',
+  help: 'Total number of pre-simulation cache misses',
+  registers: [registry]
+});
+
+export const preSimLatencyMs = new Histogram({
+  name: 'liquidbot_pre_sim_latency_ms',
+  help: 'Pre-simulation computation latency in milliseconds',
+  buckets: [10, 25, 50, 100, 200, 500, 1000],
+  registers: [registry]
+});
+
+export const pricePerBlockCoalescedTotal = new Counter({
+  name: 'liquidbot_price_per_block_coalesced_total',
+  help: 'Total number of times per-block price coalescing was used',
+  labelNames: ['symbol'],
+  registers: [registry]
+});
+
+export const hedgeFiredTotal = new Counter({
+  name: 'liquidbot_hedge_fired_total',
+  help: 'Total number of times read hedge was fired',
+  labelNames: ['operation'],
+  registers: [registry]
+});
+
+export const hedgeWinnerSecondary = new Counter({
+  name: 'liquidbot_hedge_winner_secondary_total',
+  help: 'Total number of times secondary RPC won the hedge race',
+  labelNames: ['operation'],
+  registers: [registry]
+});

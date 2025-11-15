@@ -360,5 +360,16 @@ export const config = {
   },
   get shadowExecuteThreshold() {
     return parseFloat(process.env.SHADOW_EXECUTE_THRESHOLD || '1.005');
-  }
+  },
+  
+  // Execution Path Acceleration Configuration
+  get preSimEnabled() { return env.preSimEnabled; },
+  get preSimHfWindow() { return env.preSimHfWindow; },
+  get preSimMinDebtUsd() { return env.preSimMinDebtUsd; },
+  get preSimCacheTtlBlocks() { return env.preSimCacheTtlBlocks; },
+  get gasLadderEnabled() { return env.gasLadderEnabled; },
+  get gasLadderFastTipGwei() { return env.gasLadderFastTipGwei; },
+  get gasLadderMidTipGwei() { return env.gasLadderMidTipGwei; },
+  get gasLadderSafeTipGwei() { return env.gasLadderSafeTipGwei; },
+  get approvalsAutoSend() { return env.approvalsAutoSend; }
 };
