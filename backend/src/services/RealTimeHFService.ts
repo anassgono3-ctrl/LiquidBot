@@ -105,6 +105,14 @@ interface UserState {
   status: 'safe' | 'liq';
   lastHf: number;
   lastBlock: number;
+  hfHistory?: Array<{ hf: number; block: number }>; // Rolling HF history for delta tracking
+}
+
+interface PreSimQueueEntry {
+  user: string;
+  projectedHf: number;
+  debtUsd: number;
+  timestamp: number;
 }
 
 export class RealTimeHFService extends EventEmitter {
@@ -233,6 +241,10 @@ export class RealTimeHFService extends EventEmitter {
   
   // Polling timer
   private pricePollingTimer?: NodeJS.Timeout;
+  
+  // Pre-simulation queue for hot users
+  private preSimQueue: Map<string, PreSimQueueEntry> = new Map();
+  private readonly PRE_SIM_HISTORY_WINDOW = 4; // N=4 observations for delta tracking
 
   // Metrics
   private metrics = {
@@ -2722,6 +2734,9 @@ export class RealTimeHFService extends EventEmitter {
             };
             maybeShadowExecute(shadowCandidate);
 
+            // Track HF delta and queue for pre-simulation if trending toward liquidation
+            this.updateHfDeltaTracking(userAddress, healthFactor, blockNumber, totalDebtUsd);
+
             // Check if we should emit based on edge-triggering and hysteresis
             const emitDecision = this.shouldEmit(userAddress, healthFactor, blockNumber);
             
@@ -2992,13 +3007,73 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Track HF delta and queue for pre-simulation if trending toward liquidation
+   */
+  private updateHfDeltaTracking(userAddress: string, healthFactor: number, blockNumber: number, debtUsd: number): void {
+    if (!config.preSimEnabled) return;
+
+    const state = this.userStates.get(userAddress);
+    if (!state) return;
+
+    // Initialize history if needed
+    if (!state.hfHistory) {
+      state.hfHistory = [];
+    }
+
+    // Add current observation
+    state.hfHistory.push({ hf: healthFactor, block: blockNumber });
+
+    // Keep only last N observations
+    if (state.hfHistory.length > this.PRE_SIM_HISTORY_WINDOW) {
+      state.hfHistory.shift();
+    }
+
+    // Need at least 2 observations to compute delta
+    if (state.hfHistory.length < 2) return;
+
+    // Compute ΔHF/Δblock
+    const oldest = state.hfHistory[0];
+    const newest = state.hfHistory[state.hfHistory.length - 1];
+    const deltaHf = newest.hf - oldest.hf;
+    const deltaBlocks = newest.block - oldest.block;
+
+    if (deltaBlocks === 0) return;
+
+    const hfPerBlock = deltaHf / deltaBlocks;
+
+    // Project HF for next block
+    const projectedHf = healthFactor + hfPerBlock;
+
+    // Check if projected HF < window and debt meets minimum
+    if (projectedHf < config.preSimHfWindow && debtUsd >= config.preSimMinDebtUsd) {
+      // Queue for pre-simulation
+      this.preSimQueue.set(userAddress, {
+        user: userAddress,
+        projectedHf,
+        debtUsd,
+        timestamp: Date.now()
+      });
+
+      console.log(`[pre-sim] queued user=${userAddress.slice(0, 10)}... hf=${healthFactor.toFixed(4)} proj=${projectedHf.toFixed(4)} debt=$${debtUsd.toFixed(2)}`);
+    }
+  }
+
+  /**
+   * Get pre-simulation queue (for testing/monitoring)
+   */
+  getPreSimQueue(): Map<string, PreSimQueueEntry> {
+    return new Map(this.preSimQueue);
+  }
+
+  /**
    * Get service metrics
    */
   getMetrics() {
     return {
       ...this.metrics,
       candidateCount: this.candidateManager.size(),
-      lowestHFCandidate: this.candidateManager.getLowestHF()
+      lowestHFCandidate: this.candidateManager.getLowestHF(),
+      preSimQueueSize: this.preSimQueue.size
     };
   }
 

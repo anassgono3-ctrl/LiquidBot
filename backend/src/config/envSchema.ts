@@ -309,7 +309,18 @@ export const rawEnvSchema = z.object({
   PRIORITY_SWEEP_METRICS_ENABLED: z.string().optional(),
   PRIORITY_SWEEP_TIMEOUT_MS: z.string().optional(),
   PRIORITY_SWEEP_PAGE_SIZE: z.string().optional(),
-  PRIORITY_SWEEP_INTER_REQUEST_MS: z.string().optional()
+  PRIORITY_SWEEP_INTER_REQUEST_MS: z.string().optional(),
+  
+  // Execution Path Acceleration Configuration
+  PRE_SIM_ENABLED: z.string().optional(),
+  PRE_SIM_HF_WINDOW: z.string().optional(),
+  PRE_SIM_MIN_DEBT_USD: z.string().optional(),
+  PRE_SIM_CACHE_TTL_BLOCKS: z.string().optional(),
+  GAS_LADDER_ENABLED: z.string().optional(),
+  GAS_LADDER_FAST_TIP_GWEI: z.string().optional(),
+  GAS_LADDER_MID_TIP_GWEI: z.string().optional(),
+  GAS_LADDER_SAFE_TIP_GWEI: z.string().optional(),
+  APPROVALS_AUTO_SEND: z.string().optional()
 });
 
 export const env = (() => {
@@ -646,6 +657,17 @@ export const env = (() => {
     gasStrategy: parsed.GAS_STRATEGY || 'dynamic_v1',
     gasMaxFeeMultiplier: Number(parsed.GAS_MAX_FEE_MULTIPLIER || 1.3),
     gasMinPriorityGwei: Number(parsed.GAS_MIN_PRIORITY_GWEI || 0.05),
-    usePrivateTx: (parsed.USE_PRIVATE_TX || 'false').toLowerCase() === 'true'
+    usePrivateTx: (parsed.USE_PRIVATE_TX || 'false').toLowerCase() === 'true',
+    
+    // Execution Path Acceleration Configuration
+    preSimEnabled: (parsed.PRE_SIM_ENABLED || 'true').toLowerCase() === 'true',
+    preSimHfWindow: Number(parsed.PRE_SIM_HF_WINDOW || 1.01),
+    preSimMinDebtUsd: Number(parsed.PRE_SIM_MIN_DEBT_USD || 100),
+    preSimCacheTtlBlocks: Number(parsed.PRE_SIM_CACHE_TTL_BLOCKS || 2),
+    gasLadderEnabled: (parsed.GAS_LADDER_ENABLED || 'true').toLowerCase() === 'true',
+    gasLadderFastTipGwei: Number(parsed.GAS_LADDER_FAST_TIP_GWEI || 5),
+    gasLadderMidTipGwei: Number(parsed.GAS_LADDER_MID_TIP_GWEI || 3),
+    gasLadderSafeTipGwei: Number(parsed.GAS_LADDER_SAFE_TIP_GWEI || 2),
+    approvalsAutoSend: (parsed.APPROVALS_AUTO_SEND || 'false').toLowerCase() === 'true'
   };
 })();

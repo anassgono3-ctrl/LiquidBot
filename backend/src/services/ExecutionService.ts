@@ -51,6 +51,8 @@ export class ExecutionService {
   private gasPolicy?: GasPolicy;
   private privateTxSender?: PrivateTxSender;
   private notificationService?: NotificationService;
+  private preSimCache?: import('./PreSimCache.js').PreSimCache;
+  private gasLadder?: import('./GasLadder.js').GasLadder;
   
   private static configLogged = false;
 
@@ -84,6 +86,25 @@ export class ExecutionService {
       this.privateTxSender = new PrivateTxSender({
         mode: config.txSubmitMode,
         privateRpcUrl: config.privateTxRpcUrl
+      });
+    }
+    
+    // Initialize PreSimCache if enabled (lazy import)
+    if (config.preSimEnabled) {
+      import('./PreSimCache.js').then(({ PreSimCache }) => {
+        this.preSimCache = new PreSimCache();
+      }).catch(err => {
+        console.error('[execution] Failed to initialize PreSimCache:', err);
+      });
+    }
+    
+    // Initialize GasLadder if enabled (lazy import)
+    if (config.gasLadderEnabled && this.provider) {
+      import('./GasLadder.js').then(async ({ GasLadder }) => {
+        this.gasLadder = new GasLadder({ provider: this.provider! });
+        await this.gasLadder.initialize();
+      }).catch(err => {
+        console.error('[execution] Failed to initialize GasLadder:', err);
       });
     }
     

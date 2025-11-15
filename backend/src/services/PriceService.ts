@@ -103,6 +103,9 @@ export class PriceService {
   private readonly maxPendingQueueLength = 500; // Safety limit for queue size
   private symbolAliases: Map<string, string> = new Map(); // Symbol normalization map (e.g., cbBTC -> CBBTC)
   private addressRegistry: Map<string, string> = new Map(); // Normalized address -> symbol mapping
+  
+  // Per-block price coalescing: guarantee one price resolution per symbol per blockTag
+  private perBlockPriceCache: Map<string, { price: number; timestamp: number }> = new Map(); // key: symbol-blockTag
 
   /**
    * Default price mappings for common tokens (USD per token)
@@ -813,9 +816,51 @@ export class PriceService {
   }
 
   /**
+   * Get price at a specific block with per-block coalescing.
+   * Guarantees one price resolution per symbol per blockTag.
+   * @param symbol Token symbol
+   * @param blockTag Block number for price snapshot
+   * @returns USD price at the specified block
+   */
+  async getPriceAtBlock(symbol: string, blockTag: number): Promise<number> {
+    const cacheKey = `${symbol.toUpperCase()}-${blockTag}`;
+    const cached = this.perBlockPriceCache.get(cacheKey);
+    
+    if (cached) {
+      // Return cached per-block price
+      return cached.price;
+    }
+    
+    // Resolve price (will use regular cache if available)
+    const price = await this.getPrice(symbol);
+    
+    // Store in per-block cache
+    this.perBlockPriceCache.set(cacheKey, { price, timestamp: Date.now() });
+    
+    // Increment metric
+    const { pricePerBlockCoalescedTotal } = await import('../metrics/index.js');
+    pricePerBlockCoalescedTotal.inc({ symbol: symbol.toUpperCase() });
+    
+    // Prune old per-block entries (keep last 10 blocks worth)
+    if (this.perBlockPriceCache.size > 1000) {
+      const cutoffBlock = blockTag - 10;
+      for (const [key] of this.perBlockPriceCache) {
+        const parts = key.split('-');
+        const keyBlock = parseInt(parts[parts.length - 1], 10);
+        if (keyBlock < cutoffBlock) {
+          this.perBlockPriceCache.delete(key);
+        }
+      }
+    }
+    
+    return price;
+  }
+
+  /**
    * Clear the price cache (useful for testing)
    */
   clearCache(): void {
     this.priceCache.clear();
+    this.perBlockPriceCache.clear();
   }
 }

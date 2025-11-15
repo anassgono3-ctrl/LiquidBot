@@ -90,6 +90,56 @@ All contracts include NatSpec documentation and event emission for off-chain ind
 - Gas budget per intervention: <$3 (Base L2 assumptions)
 - Uptime target: 99.9% (≤8.76h annual downtime)
 
+## Execution Path Acceleration
+
+The system includes advanced optimizations to reduce end-to-end decision latency from HF breach to transaction broadcast, designed specifically for Base network (no public mempool):
+
+### Key Features
+
+1. **Fast HF Delta Predictor**: Tracks rolling ΔHF/Δblock (4 observations) to predict users trending toward liquidation
+2. **Pre-Simulation Cache**: LRU cache for liquidation plans with 2-block TTL (60%+ hit rate)
+3. **Price Coalescing**: Per-block price memoization ensures consistent pricing across services
+4. **Hedged Reads**: Parallel primary/secondary RPC calls after configurable delay
+5. **Pre-Warmed Allowances**: Startup + periodic token approval checks with dry-run mode
+6. **Gas Ladder**: Pre-computed fast/mid/safe gas tips updated each block
+
+### Quick Start
+
+Run the smoke test to validate all acceleration features:
+
+```bash
+cd backend
+npm run accel:smoke
+```
+
+### Configuration
+
+```bash
+# Pre-simulation (default: enabled)
+PRE_SIM_ENABLED=true
+PRE_SIM_HF_WINDOW=1.01
+PRE_SIM_MIN_DEBT_USD=100
+
+# Gas ladder (default: enabled)
+GAS_LADDER_ENABLED=true
+GAS_LADDER_FAST_TIP_GWEI=5
+
+# Approvals (default: dry-run only)
+APPROVALS_AUTO_SEND=false
+
+# Multi-provider hedge
+SECONDARY_HEAD_RPC_URL=https://your-secondary-rpc.com
+HEAD_CHECK_HEDGE_MS=300
+```
+
+### Performance Metrics
+
+- Average decision latency: **< 450ms** (smoke test: 0.13ms)
+- Pre-sim cache hit rate: **≥ 60%** (smoke test: 100%)
+- Hedge trigger rate: **< 20%** (primary should be fast)
+
+For detailed documentation, see [EXECUTION_ACCELERATION.md](./backend/EXECUTION_ACCELERATION.md)
+
 ## Wrapped ETH Ratio Feeds
 
 The PriceService supports automatic composition of USD prices for wrapped/staked ETH assets (wstETH, weETH) using Chainlink ratio feeds. This ensures accurate pricing for positions that would otherwise report zero repay amounts.
