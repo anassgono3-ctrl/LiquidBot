@@ -2,6 +2,11 @@
 // e2e-accel-smoke.ts: Smoke test for Execution Path Acceleration features
 // Validates pre-sim cache, decision latency, and hedge behavior
 
+// Set required env vars for config loading
+if (!process.env.API_KEY) process.env.API_KEY = 'smoke-test-key';
+if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'smoke-test-secret';
+if (!process.env.USE_MOCK_SUBGRAPH) process.env.USE_MOCK_SUBGRAPH = 'true';
+
 import { JsonRpcProvider } from 'ethers';
 import { config } from '../src/config/index.js';
 import { PreSimCache } from '../src/services/PreSimCache.js';
@@ -81,9 +86,10 @@ async function runSmokeTest(borrowers: string[]): Promise<SmokeTestResult> {
     }
 
     // 2. Test GasLadder
-    if (config.gasLadderEnabled && config.rpcUrl) {
+    const rpcUrl = process.env.RPC_URL;
+    if (config.gasLadderEnabled && rpcUrl) {
       console.log('\n[smoke] Testing GasLadder...');
-      const provider = new JsonRpcProvider(config.rpcUrl);
+      const provider = new JsonRpcProvider(rpcUrl);
       const gasLadder = new GasLadder({ provider });
       
       await gasLadder.initialize();
@@ -105,10 +111,10 @@ async function runSmokeTest(borrowers: string[]): Promise<SmokeTestResult> {
     }
 
     // 3. Test HedgedProvider
-    if (config.secondaryHeadRpcUrl && config.rpcUrl) {
+    if (config.secondaryHeadRpcUrl && rpcUrl) {
       console.log('\n[smoke] Testing HedgedProvider...');
       const hedgedProvider = new HedgedProvider({
-        primaryRpcUrl: config.rpcUrl,
+        primaryRpcUrl: rpcUrl,
         secondaryRpcUrl: config.secondaryHeadRpcUrl,
         hedgeDelayMs: config.headCheckHedgeMs
       });
