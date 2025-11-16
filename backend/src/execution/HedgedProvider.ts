@@ -3,6 +3,7 @@
 // First response wins; cancel the other
 
 import { JsonRpcProvider } from 'ethers';
+
 import { config } from '../config/index.js';
 import { hedgeFiredTotal, hedgeWinnerSecondary } from '../metrics/index.js';
 

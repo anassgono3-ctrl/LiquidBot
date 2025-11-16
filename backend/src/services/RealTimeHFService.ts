@@ -37,6 +37,8 @@ import {
   reserveRechecksTotal,
   pendingVerifyErrorsTotal
 } from '../metrics/index.js';
+import { isZero } from '../utils/bigint.js';
+import { maybeShadowExecute, type ShadowExecCandidate } from '../exec/shadowExecution.js';
 
 import { CandidateManager } from './CandidateManager.js';
 import type { SubgraphService } from './SubgraphService.js';
@@ -53,8 +55,6 @@ import { DecisionTraceStore } from './DecisionTraceStore.js';
 import { FeedDiscoveryService, type DiscoveredReserve } from './FeedDiscoveryService.js';
 import { PerAssetTriggerConfig } from './PerAssetTriggerConfig.js';
 import { AaveDataService } from './AaveDataService.js';
-import { isZero } from '../utils/bigint.js';
-import { maybeShadowExecute, type ShadowExecCandidate } from '../exec/shadowExecution.js';
 
 // ABIs
 const MULTICALL3_ABI = [

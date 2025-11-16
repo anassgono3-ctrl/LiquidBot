@@ -2,13 +2,15 @@
 // Coordinates between event subscriptions, head checks, and candidate management
 
 import EventEmitter from 'events';
+
 import { WebSocketProvider, JsonRpcProvider } from 'ethers';
+
+import { config } from '../config/index.js';
 
 import { CandidateManager } from './CandidateManager.js';
 import { SameBlockVerifier } from './SameBlockVerifier.js';
 import { pipelineLogger } from './PipelineLogger.js';
 import { SkipReason } from './PipelineMetrics.js';
-import { config } from '../config/index.js';
 
 export interface ScannerOptions {
   provider: WebSocketProvider | JsonRpcProvider;

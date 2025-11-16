@@ -3,6 +3,7 @@
 // Provides synchronous getGasPlan() for quick execution decisions
 
 import { JsonRpcProvider } from 'ethers';
+
 import { config } from '../config/index.js';
 
 export interface GasPlan {

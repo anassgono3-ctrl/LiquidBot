@@ -1,5 +1,6 @@
 // PriceInitialization.test.ts - Tests for price readiness and deferred valuation
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { PriceService } from '../../src/services/PriceService.js';
 
 describe('PriceService - Price Initialization', () => {
