@@ -73,7 +73,7 @@ export class SecondOrderChainer {
     this.chainQueue.push(...candidates);
 
     if (candidates.length > 0) {
-      secondOrderChainTotal.inc({ result: 'queued', count: candidates.length } as any);
+      secondOrderChainTotal.inc({ result: 'queued' });
     }
 
     return candidates;
@@ -110,7 +110,7 @@ export class SecondOrderChainer {
    * Get current queue size
    */
   getQueueSize(): number {
-    return this.chainQueue.size;
+    return this.chainQueue.length;
   }
 
   /**
