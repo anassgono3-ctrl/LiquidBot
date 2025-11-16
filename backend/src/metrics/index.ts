@@ -556,3 +556,138 @@ export const hedgeWinnerSecondary = new Counter({
   labelNames: ['operation'],
   registers: [registry]
 });
+
+// ==== HIGH-IMPACT SPEED FEATURES METRICS ====
+
+// Optimistic Execution Metrics (Feature #1)
+export const optimisticExecTotal = new Counter({
+  name: 'liquidbot_optimistic_exec_total',
+  help: 'Total optimistic execution attempts',
+  labelNames: ['result'], // result: sent|reverted|skipped
+  registers: [registry]
+});
+
+export const optimisticLatencyMs = new Histogram({
+  name: 'liquidbot_optimistic_latency_ms',
+  help: 'Optimistic execution latency in milliseconds',
+  buckets: [10, 25, 50, 75, 100, 150, 200, 300, 500],
+  registers: [registry]
+});
+
+export const optimisticRevertBudgetRemaining = new Gauge({
+  name: 'liquidbot_optimistic_revert_budget_remaining',
+  help: 'Remaining optimistic execution revert budget for today',
+  registers: [registry]
+});
+
+// Multi-RPC Write Racing Metrics (Feature #2)
+export const writeRpcRttMs = new Gauge({
+  name: 'liquidbot_write_rpc_rtt_ms',
+  help: 'Round-trip time for write RPC endpoints in milliseconds',
+  labelNames: ['rpc'],
+  registers: [registry]
+});
+
+export const writeRpcSuccessTotal = new Counter({
+  name: 'liquidbot_write_rpc_success_total',
+  help: 'Total successful write RPC calls',
+  labelNames: ['rpc'],
+  registers: [registry]
+});
+
+export const writeRpcErrorTotal = new Counter({
+  name: 'liquidbot_write_rpc_error_total',
+  help: 'Total failed write RPC calls',
+  labelNames: ['rpc'],
+  registers: [registry]
+});
+
+// Multiple Executor Keys Metrics (Feature #3)
+export const executorKeyUsageTotal = new Counter({
+  name: 'liquidbot_executor_key_usage_total',
+  help: 'Total executions per executor key',
+  labelNames: ['keyIndex'],
+  registers: [registry]
+});
+
+// Gas Burst/RBF Metrics (Feature #4)
+export const gasBumpTotal = new Counter({
+  name: 'liquidbot_gas_bump_total',
+  help: 'Total gas bump attempts',
+  labelNames: ['stage'], // stage: first|second
+  registers: [registry]
+});
+
+export const gasBumpSkippedTotal = new Counter({
+  name: 'liquidbot_gas_bump_skipped_total',
+  help: 'Total gas bumps skipped',
+  labelNames: ['reason'], // reason: already_mined|max_bumps|not_enabled
+  registers: [registry]
+});
+
+// Calldata Template Metrics (Feature #5)
+export const calldataTemplateHitsTotal = new Counter({
+  name: 'liquidbot_calldata_template_hits_total',
+  help: 'Total calldata template cache hits',
+  registers: [registry]
+});
+
+export const calldataTemplateMissesTotal = new Counter({
+  name: 'liquidbot_calldata_template_misses_total',
+  help: 'Total calldata template cache misses',
+  registers: [registry]
+});
+
+// Second-Order Liquidation Chaining Metrics (Feature #6)
+export const secondOrderChainTotal = new Counter({
+  name: 'liquidbot_second_order_chain_total',
+  help: 'Total second-order chaining events',
+  labelNames: ['result'], // result: queued|executed|skipped
+  registers: [registry]
+});
+
+// End-to-End Latency Instrumentation Metrics (Feature #7)
+export const execE2eLatencyMs = new Histogram({
+  name: 'liquidbot_exec_e2e_latency_ms',
+  help: 'End-to-end execution latency in milliseconds',
+  buckets: [25, 50, 75, 100, 150, 200, 300, 500, 1000, 2000],
+  registers: [registry]
+});
+
+export const execLatencyBlockToDetection = new Gauge({
+  name: 'liquidbot_exec_latency_block_to_detection_ms',
+  help: 'Latency from block received to candidate detected (ms)',
+  registers: [registry]
+});
+
+export const execLatencyDetectionToPlan = new Gauge({
+  name: 'liquidbot_exec_latency_detection_to_plan_ms',
+  help: 'Latency from candidate detected to plan ready (ms)',
+  registers: [registry]
+});
+
+export const execLatencyPlanToSign = new Gauge({
+  name: 'liquidbot_exec_latency_plan_to_sign_ms',
+  help: 'Latency from plan ready to tx signed (ms)',
+  registers: [registry]
+});
+
+export const execLatencySignToBroadcast = new Gauge({
+  name: 'liquidbot_exec_latency_sign_to_broadcast_ms',
+  help: 'Latency from tx signed to broadcast (ms)',
+  registers: [registry]
+});
+
+export const execLatencyBroadcastToCheck = new Gauge({
+  name: 'liquidbot_exec_latency_broadcast_to_check_ms',
+  help: 'Latency from broadcast to first inclusion check (ms)',
+  registers: [registry]
+});
+
+// Emergency Asset Scan Metrics (Feature #8)
+export const emergencyAssetScanTotal = new Counter({
+  name: 'liquidbot_emergency_asset_scan_total',
+  help: 'Total emergency asset scans performed',
+  labelNames: ['asset', 'result'], // result: partial|full
+  registers: [registry]
+});
