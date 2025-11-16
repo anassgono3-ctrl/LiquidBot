@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { SecondOrderChainer } from '../../../src/exec/fastpath/SecondOrderChainer.js';
 
 describe('SecondOrderChainer', () => {
@@ -140,7 +141,7 @@ describe('SecondOrderChainer', () => {
 
   describe('markExecuted', () => {
     it('should record execution metric', () => {
-      expect(() => chainer.markExecuted(user1)).not.toThrow();
+      expect(() => chainer.markExecuted()).not.toThrow();
     });
   });
 

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { OptimisticExecutor } from '../../../src/exec/fastpath/OptimisticExecutor.js';
 import { reversionBudget } from '../../../src/exec/fastpath/ReversionBudget.js';
 
@@ -62,7 +63,7 @@ describe('OptimisticExecutor', () => {
 
   describe('recordSuccess', () => {
     it('should record successful execution', () => {
-      expect(() => executor.recordSuccess('0xtxhash')).not.toThrow();
+      expect(() => executor.recordSuccess()).not.toThrow();
     });
   });
 

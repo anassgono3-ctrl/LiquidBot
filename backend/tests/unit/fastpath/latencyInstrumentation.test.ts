@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { LatencyTracker } from '../../../src/exec/fastpath/LatencyTracker.js';
 
 describe('LatencyTracker', () => {

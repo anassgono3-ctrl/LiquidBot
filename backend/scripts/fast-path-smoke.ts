@@ -105,9 +105,9 @@ await test('Should track pending transaction', () => {
   manager.clear();
   
   // Mock tracking
-  const mockProvider = {} as any;
-  const mockWallet = {} as any;
-  manager.trackTransaction('0xtxhash', '0xsignedtx', 1, 1000n, mockProvider, mockWallet);
+  const mockProvider = {} as { getTransactionReceipt: () => Promise<null> };
+  const mockWallet = {} as { signTransaction: () => Promise<string> };
+  manager.trackTransaction('0xtxhash', '0xsignedtx', 1, 1000n, mockProvider as never, mockWallet as never);
   
   const pending = manager.getPendingTransactions();
   assert(pending.length === 1, 'Expected 1 pending transaction');

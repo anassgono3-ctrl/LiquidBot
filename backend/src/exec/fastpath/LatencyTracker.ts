@@ -5,8 +5,6 @@
  * metrics for detailed latency analysis.
  */
 
-import { latencyConfig } from './config.js';
-import type { LatencyTimestamps } from './types.js';
 import {
   execE2eLatencyMs,
   execLatencyBlockToDetection,
@@ -15,6 +13,9 @@ import {
   execLatencySignToBroadcast,
   execLatencyBroadcastToCheck
 } from '../../metrics/index.js';
+
+import { latencyConfig } from './config.js';
+import type { LatencyTimestamps } from './types.js';
 
 export class LatencyTracker {
   private timestamps: Map<string, LatencyTimestamps> = new Map();

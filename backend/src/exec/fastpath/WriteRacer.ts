@@ -6,13 +6,15 @@
  */
 
 import { ethers } from 'ethers';
-import { writeRacingConfig } from './config.js';
-import type { RpcHealthMetrics } from './types.js';
+
 import {
   writeRpcRttMs,
   writeRpcSuccessTotal,
   writeRpcErrorTotal
 } from '../../metrics/index.js';
+
+import { writeRacingConfig } from './config.js';
+import type { RpcHealthMetrics } from './types.js';
 
 export class WriteRacer {
   private healthMetrics: Map<string, RpcHealthMetrics> = new Map();

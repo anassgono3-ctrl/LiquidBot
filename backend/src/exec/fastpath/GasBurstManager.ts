@@ -6,12 +6,14 @@
  */
 
 import { ethers } from 'ethers';
-import { gasBurstConfig } from './config.js';
-import type { GasBumpAttempt } from './types.js';
+
 import {
   gasBumpTotal,
   gasBumpSkippedTotal
 } from '../../metrics/index.js';
+
+import { gasBurstConfig } from './config.js';
+import type { GasBumpAttempt } from './types.js';
 
 interface PendingTransaction {
   txHash: string;

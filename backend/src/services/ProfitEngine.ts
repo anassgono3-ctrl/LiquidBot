@@ -3,8 +3,9 @@
 
 import { JsonRpcProvider } from 'ethers';
 
-import { RiskEngine, UserRiskSnapshot, ReserveRisk } from './RiskEngine.js';
 import { config } from '../config/index.js';
+
+import { RiskEngine, UserRiskSnapshot, ReserveRisk } from './RiskEngine.js';
 
 const WAD = 10n ** 18n;
 const BPS = 10000n;

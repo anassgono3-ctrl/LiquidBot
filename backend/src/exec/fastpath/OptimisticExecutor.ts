@@ -5,13 +5,14 @@
  * skipping synchronous pre-flight HF recheck. Performs async verification after sending.
  */
 
-import { optimisticConfig } from './config.js';
-import { reversionBudget } from './ReversionBudget.js';
-import type { OptimisticResult } from './types.js';
 import {
   optimisticExecTotal,
   optimisticLatencyMs
 } from '../../metrics/index.js';
+
+import { optimisticConfig } from './config.js';
+import { reversionBudget } from './ReversionBudget.js';
+import type { OptimisticResult } from './types.js';
 
 export class OptimisticExecutor {
   private enabled: boolean;
@@ -77,7 +78,7 @@ export class OptimisticExecutor {
   /**
    * Record successful optimistic execution
    */
-  recordSuccess(txHash: string): void {
+  recordSuccess(): void {
     optimisticExecTotal.inc({ result: 'sent' });
   }
 

@@ -5,8 +5,9 @@
  * plus collateral borrowers whose HF moved into liquidatable range.
  */
 
-import { secondOrderConfig } from './config.js';
 import { secondOrderChainTotal } from '../../metrics/index.js';
+
+import { secondOrderConfig } from './config.js';
 
 export interface ChainedCandidate {
   user: string;
@@ -123,7 +124,7 @@ export class SecondOrderChainer {
   /**
    * Mark candidate as executed
    */
-  markExecuted(user: string): void {
+  markExecuted(): void {
     secondOrderChainTotal.inc({ result: 'executed' });
   }
 

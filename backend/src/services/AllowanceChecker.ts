@@ -3,6 +3,7 @@
 // Stages approvals when EXECUTION_ENABLED=true, sends when APPROVALS_AUTO_SEND=true
 
 import { JsonRpcProvider, Contract, parseUnits } from 'ethers';
+
 import { config } from '../config/index.js';
 
 const ERC20_ABI = [

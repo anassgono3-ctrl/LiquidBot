@@ -8,6 +8,7 @@ if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'smoke-test-secret';
 if (!process.env.USE_MOCK_SUBGRAPH) process.env.USE_MOCK_SUBGRAPH = 'true';
 
 import { JsonRpcProvider } from 'ethers';
+
 import { config } from '../src/config/index.js';
 import { PreSimCache } from '../src/services/PreSimCache.js';
 import { GasLadder } from '../src/services/GasLadder.js';

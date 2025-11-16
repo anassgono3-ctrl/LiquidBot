@@ -5,12 +5,13 @@
  * Templates are refreshed when reserve config changes or variable debt index shifts significantly.
  */
 
-import { calldataTemplateConfig } from './config.js';
-import type { CalldataTemplate } from './types.js';
 import {
   calldataTemplateHitsTotal,
   calldataTemplateMissesTotal
 } from '../../metrics/index.js';
+
+import { calldataTemplateConfig } from './config.js';
+import type { CalldataTemplate } from './types.js';
 
 export class CalldataTemplateCache {
   private enabled: boolean;

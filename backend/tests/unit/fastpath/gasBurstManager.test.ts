@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { ethers } from 'ethers';
+
 import { GasBurstManager } from '../../../src/exec/fastpath/GasBurstManager.js';
 
 // Mock ethers
@@ -32,8 +34,8 @@ describe('GasBurstManager', () => {
 
   describe('trackTransaction', () => {
     it('should track a pending transaction', () => {
-      const mockProvider = {} as any;
-      const mockWallet = {} as any;
+      const mockProvider = {} as ethers.JsonRpcProvider;
+      const mockWallet = {} as ethers.Wallet;
 
       manager.trackTransaction(
         '0xtxhash',
@@ -51,8 +53,8 @@ describe('GasBurstManager', () => {
 
     it('should not track when disabled', () => {
       const disabledManager = new GasBurstManager(false);
-      const mockProvider = {} as any;
-      const mockWallet = {} as any;
+      const mockProvider = {} as ethers.JsonRpcProvider;
+      const mockWallet = {} as ethers.Wallet;
 
       disabledManager.trackTransaction(
         '0xtxhash',
@@ -69,8 +71,8 @@ describe('GasBurstManager', () => {
 
   describe('confirmTransaction', () => {
     it('should remove confirmed transaction', () => {
-      const mockProvider = {} as any;
-      const mockWallet = {} as any;
+      const mockProvider = {} as ethers.JsonRpcProvider;
+      const mockWallet = {} as ethers.Wallet;
 
       manager.trackTransaction(
         '0xtxhash',
@@ -95,8 +97,8 @@ describe('GasBurstManager', () => {
     });
 
     it('should track bump attempts', () => {
-      const mockProvider = {} as any;
-      const mockWallet = {} as any;
+      const mockProvider = {} as ethers.JsonRpcProvider;
+      const mockWallet = {} as ethers.Wallet;
 
       manager.trackTransaction(
         '0xtxhash',
@@ -114,8 +116,8 @@ describe('GasBurstManager', () => {
 
   describe('clear', () => {
     it('should clear all pending transactions', () => {
-      const mockProvider = {} as any;
-      const mockWallet = {} as any;
+      const mockProvider = {} as ethers.JsonRpcProvider;
+      const mockWallet = {} as ethers.Wallet;
 
       manager.trackTransaction(
         '0xtxhash1',

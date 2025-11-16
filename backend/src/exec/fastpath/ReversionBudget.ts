@@ -5,8 +5,9 @@
  * Resets at UTC midnight.
  */
 
-import { optimisticConfig } from './config.js';
 import { optimisticRevertBudgetRemaining } from '../../metrics/index.js';
+
+import { optimisticConfig } from './config.js';
 
 export class ReversionBudget {
   private revertCount: number = 0;

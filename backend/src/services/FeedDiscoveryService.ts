@@ -4,6 +4,7 @@
 import { JsonRpcProvider, Contract } from 'ethers';
 
 import { config } from '../config/index.js';
+
 import type { AaveDataService } from './AaveDataService.js';
 
 // Aave Oracle ABI for getting price feed sources
@@ -86,7 +87,7 @@ export class FeedDiscoveryService {
           const tokenAddresses = await this.aaveDataService.getReserveTokenAddresses(asset);
 
           // Try to get symbol from metadata cache or fallback
-          let symbol = await this.resolveSymbol(asset);
+          const symbol = await this.resolveSymbol(asset);
 
           // Get Chainlink aggregator address
           let chainlinkAggregator: string | null = null;

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { CalldataTemplateCache } from '../../../src/exec/fastpath/CalldataTemplateCache.js';
 
 describe('CalldataTemplateCache', () => {

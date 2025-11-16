@@ -8,8 +8,10 @@
  */
 
 import { ethers } from 'ethers';
-import { loadExecutorKeys } from './config.js';
+
 import { executorKeyUsageTotal } from '../../metrics/index.js';
+
+import { loadExecutorKeys } from './config.js';
 
 export type KeySelectionStrategy = 'round-robin' | 'deterministic';
 

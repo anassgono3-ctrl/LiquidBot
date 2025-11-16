@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { isZero } from '../../src/utils/bigint.js';
 
 describe('Zero-Debt Pruning', () => {

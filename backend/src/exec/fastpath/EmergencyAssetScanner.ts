@@ -5,8 +5,9 @@
  * Maintains asset → Set<user> mapping for efficient emergency scans.
  */
 
-import { emergencyScanConfig } from './config.js';
 import { emergencyAssetScanTotal } from '../../metrics/index.js';
+
+import { emergencyScanConfig } from './config.js';
 
 export interface EmergencyScanResult {
   asset: string;
