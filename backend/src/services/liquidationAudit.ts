@@ -363,6 +363,7 @@ export class LiquidationAuditService {
       '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca': 'USDbC',
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
       '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': 'cbETH',
+      '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 'cbBTC',
       '0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452': 'wstETH',
       '0x04c0599ae5a44757c0af6f9ec3b93da8976c150a': 'weETH'
     };
@@ -383,6 +384,7 @@ export class LiquidationAuditService {
       '0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca': 6,  // USDbC
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 18, // DAI
       '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': 18, // cbETH
+      '0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf': 8,  // cbBTC
       '0xc1cba3fcea344f92d9239c08c0568f6f2f0ee452': 18, // wstETH
       '0x04c0599ae5a44757c0af6f9ec3b93da8976c150a': 18  // weETH
     };
