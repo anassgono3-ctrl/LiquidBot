@@ -2,7 +2,6 @@ import { createServer } from "http";
 
 import express from "express";
 import cors from "cors";
-import promClient from "prom-client";
 import { createLogger, format, transports } from "winston";
 import { gql, GraphQLClient } from 'graphql-request';
 
@@ -14,8 +13,12 @@ import { initWebSocketServer } from "./websocket/server.js";
 import { 
   registry,
   actionableOpportunitiesTotal,
-  skippedUnresolvedPlanTotal
+  skippedUnresolvedPlanTotal,
+  initMetricsOnce
 } from "./metrics/index.js";
+
+// Initialize metrics before any other modules attempt to use them
+initMetricsOnce();
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";
@@ -42,9 +45,6 @@ const httpServer = createServer(app);
 app.use(cors());
 app.use(express.json());
 app.use(rateLimiter);
-
-// Collect default metrics
-promClient.collectDefaultMetrics({ register: registry });
 
 // Single service instance - only when USE_SUBGRAPH=true
 let subgraphService: SubgraphService | undefined;
