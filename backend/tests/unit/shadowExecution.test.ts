@@ -4,7 +4,7 @@ import { buildShadowPlan, maybeShadowExecute, type ShadowExecCandidate } from '.
 import { config } from '../../src/config/index.js';
 
 describe('shadowExecution', () => {
-  let consoleLogSpy: ReturnType<typeof vi.spyOn>;
+  let consoleLogSpy: any;
 
   beforeEach(() => {
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -168,7 +168,7 @@ describe('shadowExecution', () => {
       expect(consoleLogSpy).toHaveBeenCalledTimes(2);
       
       // Check that first call is JSON with SHADOW_EXECUTE tag
-      const firstCall = consoleLogSpy.mock.calls[0][0];
+      const firstCall = consoleLogSpy.mock.calls[0][0] as string;
       const loggedData = JSON.parse(firstCall);
       
       expect(loggedData.tag).toBe('SHADOW_EXECUTE');
@@ -234,7 +234,7 @@ describe('shadowExecution', () => {
 
       maybeShadowExecute(candidate);
 
-      const firstCall = consoleLogSpy.mock.calls[0][0];
+      const firstCall = consoleLogSpy.mock.calls[0][0] as string;
       const loggedData = JSON.parse(firstCall);
       
       // Should be strings, not bigint (which would fail JSON.parse)
@@ -264,7 +264,7 @@ describe('shadowExecution', () => {
 
       maybeShadowExecute(candidate);
 
-      const firstCall = consoleLogSpy.mock.calls[0][0];
+      const firstCall = consoleLogSpy.mock.calls[0][0] as string;
       
       // Should be single line (no newlines)
       expect(firstCall).not.toContain('\n');
