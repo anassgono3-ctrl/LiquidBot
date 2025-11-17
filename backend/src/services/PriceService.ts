@@ -8,7 +8,10 @@ import {
   priceOracleStubFallbackTotal,
   priceRatioComposedTotal,
   priceFallbackOracleTotal,
-  priceMissingTotal
+  priceMissingTotal,
+  revalueSuccessTotal,
+  revalueFailTotal,
+  pendingPriceQueueLength
 } from '../metrics/index.js';
 import { normalizeChainlinkPrice } from '../utils/chainlinkMath.js';
 
@@ -309,7 +312,6 @@ export class PriceService {
         
         if (price > 0) {
           successCount++;
-          const { revalueSuccessTotal } = require('../metrics/index.js');
           revalueSuccessTotal.inc({ symbol: item.symbol });
           
           // Calculate USD value if raw amount provided
@@ -323,14 +325,12 @@ export class PriceService {
           console.log(`[price-init] revalue success symbol=${item.symbol} usd=${usdValue}`);
         } else {
           failCount++;
-          const { revalueFailTotal } = require('../metrics/index.js');
           revalueFailTotal.inc({ symbol: item.symbol });
           // eslint-disable-next-line no-console
           console.warn(`[price-init] revalue fail symbol=${item.symbol} still_zero`);
         }
       } catch (error) {
         failCount++;
-        const { revalueFailTotal } = require('../metrics/index.js');
         revalueFailTotal.inc({ symbol: item.symbol });
         // eslint-disable-next-line no-console
         console.error(`[price-init] revalue error symbol=${item.symbol}:`, error instanceof Error ? error.message : error);
@@ -338,7 +338,6 @@ export class PriceService {
     }
     
     // Update metrics
-    const { pendingPriceQueueLength } = require('../metrics/index.js');
     pendingPriceQueueLength.set(this.pendingPriceResolutions.length);
     
     // eslint-disable-next-line no-console
@@ -367,7 +366,6 @@ export class PriceService {
     });
     
     // Update metrics
-    const { pendingPriceQueueLength } = require('../metrics/index.js');
     pendingPriceQueueLength.set(this.pendingPriceResolutions.length);
     
     // eslint-disable-next-line no-console

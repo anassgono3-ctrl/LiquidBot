@@ -35,7 +35,9 @@ import {
   eventConcurrencyLevelHistogram,
   realtimePriceTriggersTotal,
   reserveRechecksTotal,
-  pendingVerifyErrorsTotal
+  pendingVerifyErrorsTotal,
+  headstartProcessedTotal,
+  headstartLatencyMs
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
 import { maybeShadowExecute, type ShadowExecCandidate } from '../exec/shadowExecution.js';
@@ -191,6 +193,9 @@ export class RealTimeHFService extends EventEmitter {
   private lastWsActivity: number = Date.now();
   private wsHeartbeatTimer?: NodeJS.Timeout;
   private isReconnecting = false;
+  
+  // Head-start feature error tracking (fail-soft)
+  private headStartFeatureDisabled = false;
 
   // Dirty-first prioritization (Goal 2)
   private dirtyUsers = new Set<string>();
@@ -1730,43 +1735,59 @@ export class RealTimeHFService extends EventEmitter {
       // 1. Low-HF addresses (HF < ALWAYS_INCLUDE_HF_BELOW) - highest priority
       // ENHANCEMENT: Risk-ordered head-start slice within low-HF candidates
       // Sort by HF ascending to surface most at-risk borrowers first
-      const lowHfThreshold = config.alwaysIncludeHfBelow;
-      const HEAD_START_SLICE_SIZE = 300; // Risk-ordered head-start slice (highest priority)
+      let lowHfCandidates: typeof candidates = [];
+      let headStartSlice: typeof candidates = [];
+      let remainingLowHf: typeof candidates = [];
       
-      const lowHfCandidates = candidates
-        .filter(c => c.lastHF !== null && c.lastHF < lowHfThreshold)
-        .sort((a, b) => {
-          // Sort by HF ascending (lower HF = higher priority)
-          const hfA = a.lastHF ?? Infinity;
-          const hfB = b.lastHF ?? Infinity;
-          return hfA - hfB;
-        });
-      
-      // Take head-start slice for immediate processing
-      const headStartSlice = lowHfCandidates.slice(0, HEAD_START_SLICE_SIZE);
-      const remainingLowHf = lowHfCandidates.slice(HEAD_START_SLICE_SIZE);
-      
-      // Log head-start metrics
-      if (headStartSlice.length > 0) {
-        const headStartTime = Date.now();
-        const { headstartProcessedTotal, headstartLatencyMs } = require('../metrics/index.js');
+      try {
+        const lowHfThreshold = config.alwaysIncludeHfBelow;
+        const HEAD_START_SLICE_SIZE = 300; // Risk-ordered head-start slice (highest priority)
         
-        // Track head-start processing
-        headstartProcessedTotal.inc(headStartSlice.length);
+        lowHfCandidates = candidates
+          .filter(c => c.lastHF !== null && c.lastHF < lowHfThreshold)
+          .sort((a, b) => {
+            // Sort by HF ascending (lower HF = higher priority)
+            const hfA = a.lastHF ?? Infinity;
+            const hfB = b.lastHF ?? Infinity;
+            return hfA - hfB;
+          });
         
-        // Log head-start composition
-        const minHf = headStartSlice[0]?.lastHF?.toFixed(4) || 'N/A';
-        const maxHf = headStartSlice[headStartSlice.length - 1]?.lastHF?.toFixed(4) || 'N/A';
+        // Take head-start slice for immediate processing
+        headStartSlice = lowHfCandidates.slice(0, HEAD_START_SLICE_SIZE);
+        remainingLowHf = lowHfCandidates.slice(HEAD_START_SLICE_SIZE);
         
-        // eslint-disable-next-line no-console
-        console.log(
-          `[realtime-hf] head-start slice size=${headStartSlice.length} ` +
-          `hf_range=[${minHf}, ${maxHf}] (risk-ordered)`
-        );
-        
-        // Track latency (will be measured after batch processing completes)
-        const headStartLatency = Date.now() - headStartTime;
-        headstartLatencyMs.observe(headStartLatency);
+        // Log head-start metrics
+        if (headStartSlice.length > 0) {
+          const headStartTime = Date.now();
+          
+          // Track head-start processing
+          headstartProcessedTotal.inc(headStartSlice.length);
+          
+          // Log head-start composition
+          const minHf = headStartSlice[0]?.lastHF?.toFixed(4) || 'N/A';
+          const maxHf = headStartSlice[headStartSlice.length - 1]?.lastHF?.toFixed(4) || 'N/A';
+          
+          // eslint-disable-next-line no-console
+          console.log(
+            `[realtime-hf] head-start slice size=${headStartSlice.length} ` +
+            `hf_range=[${minHf}, ${maxHf}] (risk-ordered)`
+          );
+          
+          // Track latency (will be measured after batch processing completes)
+          const headStartLatency = Date.now() - headStartTime;
+          headstartLatencyMs.observe(headStartLatency);
+        }
+      } catch (err) {
+        // Fail-soft: disable head-start feature on error, continue with legacy ordering
+        if (!this.headStartFeatureDisabled) {
+          // eslint-disable-next-line no-console
+          console.warn('[realtime-hf] head_loop_feature_disabled: Head-start ordering failed, falling back to legacy ordering', err);
+          this.headStartFeatureDisabled = true;
+        }
+        // Reset to empty arrays to fall back to legacy behavior
+        lowHfCandidates = candidates.filter(c => c.lastHF !== null && c.lastHF < config.alwaysIncludeHfBelow);
+        headStartSlice = [];
+        remainingLowHf = lowHfCandidates;
       }
       
       // Combine head-start + remaining low-HF for final processing
