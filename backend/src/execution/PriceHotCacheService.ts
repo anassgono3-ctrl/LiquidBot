@@ -176,7 +176,7 @@ export class PriceHotCacheService {
   private async fetchAndCachePrice(asset: string): Promise<void> {
     try {
       // Use PriceService to get price (respects PRICES_USE_AAVE_ORACLE, CHAINLINK_FEEDS, etc.)
-      const priceUsd = await this.priceService.getPriceUsd(asset);
+      const priceUsd = await this.priceService.getPrice(asset);
       
       if (priceUsd) {
         this.cache.set(asset.toLowerCase(), {

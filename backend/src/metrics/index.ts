@@ -691,3 +691,6 @@ export const emergencyAssetScanTotal = new Counter({
   labelNames: ['asset', 'result'], // result: partial|full
   registers: [registry]
 });
+
+// Re-export execution path metrics
+export * from './execution.js';
