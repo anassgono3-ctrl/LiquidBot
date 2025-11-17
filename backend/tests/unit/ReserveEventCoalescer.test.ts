@@ -23,8 +23,8 @@ describe('ReserveEventCoalescer', () => {
   it('should coalesce multiple events in debounce window', async () => {
     let emittedBatch: CoalescedBatch | null = null;
     
-    coalescer.on('batch', (batch: CoalescedBatch) => {
-      emittedBatch = batch;
+    coalescer.on('batch', (batch) => {
+      emittedBatch = batch as CoalescedBatch;
     });
 
     // Add multiple events in quick succession
@@ -57,15 +57,15 @@ describe('ReserveEventCoalescer', () => {
     await new Promise(resolve => setTimeout(resolve, 60));
 
     expect(emittedBatch).not.toBeNull();
-    expect(emittedBatch?.eventCount).toBe(3);
-    expect(emittedBatch?.reserves.length).toBeGreaterThanOrEqual(1);
+    expect(emittedBatch!.eventCount).toBe(3);
+    expect(emittedBatch!.reserves.length).toBeGreaterThanOrEqual(1);
   });
 
   it('should deduplicate reserves in batch', async () => {
     let emittedBatch: CoalescedBatch | null = null;
     
-    coalescer.on('batch', (batch: CoalescedBatch) => {
-      emittedBatch = batch;
+    coalescer.on('batch', (batch) => {
+      emittedBatch = batch as CoalescedBatch;
     });
 
     // Add multiple events for same reserve
@@ -81,16 +81,16 @@ describe('ReserveEventCoalescer', () => {
     await new Promise(resolve => setTimeout(resolve, 60));
 
     expect(emittedBatch).not.toBeNull();
-    expect(emittedBatch?.eventCount).toBe(5);
+    expect(emittedBatch!.eventCount).toBe(5);
     // In global mode, reserves are deduplicated
-    expect(emittedBatch?.reserves).toContain('0xreserve1'); // Lowercased
+    expect(emittedBatch!.reserves).toContain('0xreserve1'); // Lowercased
   });
 
   it('should force flush when batch size exceeded', async () => {
     let emittedBatch: CoalescedBatch | null = null;
     
-    coalescer.on('batch', (batch: CoalescedBatch) => {
-      emittedBatch = batch;
+    coalescer.on('batch', (batch) => {
+      emittedBatch = batch as CoalescedBatch;
     });
 
     // Add maxBatchSize + 1 events
@@ -107,7 +107,7 @@ describe('ReserveEventCoalescer', () => {
     await new Promise(resolve => setTimeout(resolve, 10));
 
     expect(emittedBatch).not.toBeNull();
-    expect(emittedBatch?.eventCount).toBeGreaterThanOrEqual(50);
+    expect(emittedBatch!.eventCount).toBeGreaterThanOrEqual(50);
   });
 
   it('should handle per-reserve coalescing mode', async () => {
@@ -119,8 +119,8 @@ describe('ReserveEventCoalescer', () => {
 
     let emittedBatches: CoalescedBatch[] = [];
     
-    perReserveCoalescer.on('batch', (batch: CoalescedBatch) => {
-      emittedBatches.push(batch);
+    perReserveCoalescer.on('batch', (batch) => {
+      emittedBatches.push(batch as CoalescedBatch);
     });
 
     // Add events for different reserves
@@ -149,8 +149,8 @@ describe('ReserveEventCoalescer', () => {
   it('should flush all pending batches on stop', async () => {
     let emittedBatches: CoalescedBatch[] = [];
     
-    coalescer.on('batch', (batch: CoalescedBatch) => {
-      emittedBatches.push(batch);
+    coalescer.on('batch', (batch) => {
+      emittedBatches.push(batch as CoalescedBatch);
     });
 
     // Add events but don't wait for debounce
@@ -189,8 +189,8 @@ describe('ReserveEventCoalescer', () => {
   it('should handle rapid bursts efficiently', async () => {
     let emittedBatches: CoalescedBatch[] = [];
     
-    coalescer.on('batch', (batch: CoalescedBatch) => {
-      emittedBatches.push(batch);
+    coalescer.on('batch', (batch) => {
+      emittedBatches.push(batch as CoalescedBatch);
     });
 
     // Simulate rapid burst of 100 events
