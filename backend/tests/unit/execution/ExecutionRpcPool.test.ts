@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { ExecutionRpcPool, type ExecutionRpcConfig } from '../../../src/execution/ExecutionRpcPool.js';
 
 describe('ExecutionRpcPool', () => {

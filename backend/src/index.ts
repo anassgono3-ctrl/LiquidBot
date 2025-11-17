@@ -16,9 +16,6 @@ import {
   skippedUnresolvedPlanTotal,
   initMetricsOnce
 } from "./metrics/index.js";
-
-// Initialize metrics before any other modules attempt to use them
-initMetricsOnce();
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
 import { buildInfo } from "./buildInfo.js";
@@ -37,6 +34,9 @@ const logger = createLogger({
   format: format.combine(format.timestamp(), format.json()),
   transports: [new transports.Console()],
 });
+
+// Initialize metrics before any other modules attempt to use them
+initMetricsOnce();
 
 const app = express();
 const httpServer = createServer(app);

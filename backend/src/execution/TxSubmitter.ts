@@ -11,6 +11,7 @@
  */
 
 import { ethers } from 'ethers';
+
 import type { ExecutionRpcPool, RpcEndpoint } from './ExecutionRpcPool.js';
 
 export type TxSubmitMode = 'public' | 'private' | 'race' | 'bundle';

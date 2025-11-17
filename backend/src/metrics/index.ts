@@ -1,4 +1,5 @@
 import { Counter, Gauge, Histogram } from 'prom-client';
+
 import { metricsRegistry } from './registry.js';
 import { createExecutionMetrics, type ExecutionMetrics } from './execution.js';
 
@@ -721,10 +722,14 @@ export const emergencyAssetScanTotal = new Counter({
 
 // Proxy objects for execution metrics to maintain backward compatibility
 // These provide access to the initialized metrics through lazy getters
-function createMetricProxy<T extends { inc?: (...args: any[]) => any; observe?: (...args: any[]) => any; set?: (...args: any[]) => any; labels?: (...args: any[]) => any }>(name: keyof ExecutionMetrics): T {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type MetricLike = Record<string, any>;
+
+function createMetricProxy<T extends MetricLike>(name: keyof ExecutionMetrics): T {
   return new Proxy({} as T, {
     get(_target, prop: string) {
       const metrics = getExecutionMetrics();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const metric = metrics[name] as any;
       if (typeof metric[prop] === 'function') {
         return metric[prop].bind(metric);
@@ -734,27 +739,27 @@ function createMetricProxy<T extends { inc?: (...args: any[]) => any; observe?: 
   });
 }
 
-export const intentBuildLatencyMs = createMetricProxy<any>('intentBuildLatencyMs');
-export const intentCacheHits = createMetricProxy<any>('intentCacheHits');
-export const intentCacheMisses = createMetricProxy<any>('intentCacheMisses');
-export const intentRevalidations = createMetricProxy<any>('intentRevalidations');
-export const intentAgeMs = createMetricProxy<any>('intentAgeMs');
-export const pricePrewarmAgeMs = createMetricProxy<any>('pricePrewarmAgeMs');
-export const priceHotCacheSize = createMetricProxy<any>('priceHotCacheSize');
-export const priceHotCacheStalePrices = createMetricProxy<any>('priceHotCacheStalePrices');
-export const priceHotCacheRefreshLatency = createMetricProxy<any>('priceHotCacheRefreshLatency');
-export const executionLatencyMs = createMetricProxy<any>('executionLatencyMs');
-export const txSubmitAttempts = createMetricProxy<any>('txSubmitAttempts');
-export const txSubmitMode = createMetricProxy<any>('txSubmitMode');
-export const relayAcceptMs = createMetricProxy<any>('relayAcceptMs');
-export const raceWinner = createMetricProxy<any>('raceWinner');
-export const blockBoundaryDispatches = createMetricProxy<any>('blockBoundaryDispatches');
-export const blockBoundaryLatency = createMetricProxy<any>('blockBoundaryLatency');
-export const hotQueueSize = createMetricProxy<any>('hotQueueSize');
-export const warmQueueSize = createMetricProxy<any>('warmQueueSize');
-export const hotQueueMinHF = createMetricProxy<any>('hotQueueMinHF');
-export const hotQueueAvgDebtUsd = createMetricProxy<any>('hotQueueAvgDebtUsd');
-export const queueEntryReason = createMetricProxy<any>('queueEntryReason');
-export const missedLiquidationReason = createMetricProxy<any>('missedLiquidationReason');
-export const rpcPoolHealthy = createMetricProxy<any>('rpcPoolHealthy');
-export const rpcPoolTotal = createMetricProxy<any>('rpcPoolTotal');
+export const intentBuildLatencyMs = createMetricProxy<MetricLike>('intentBuildLatencyMs');
+export const intentCacheHits = createMetricProxy<MetricLike>('intentCacheHits');
+export const intentCacheMisses = createMetricProxy<MetricLike>('intentCacheMisses');
+export const intentRevalidations = createMetricProxy<MetricLike>('intentRevalidations');
+export const intentAgeMs = createMetricProxy<MetricLike>('intentAgeMs');
+export const pricePrewarmAgeMs = createMetricProxy<MetricLike>('pricePrewarmAgeMs');
+export const priceHotCacheSize = createMetricProxy<MetricLike>('priceHotCacheSize');
+export const priceHotCacheStalePrices = createMetricProxy<MetricLike>('priceHotCacheStalePrices');
+export const priceHotCacheRefreshLatency = createMetricProxy<MetricLike>('priceHotCacheRefreshLatency');
+export const executionLatencyMs = createMetricProxy<MetricLike>('executionLatencyMs');
+export const txSubmitAttempts = createMetricProxy<MetricLike>('txSubmitAttempts');
+export const txSubmitMode = createMetricProxy<MetricLike>('txSubmitMode');
+export const relayAcceptMs = createMetricProxy<MetricLike>('relayAcceptMs');
+export const raceWinner = createMetricProxy<MetricLike>('raceWinner');
+export const blockBoundaryDispatches = createMetricProxy<MetricLike>('blockBoundaryDispatches');
+export const blockBoundaryLatency = createMetricProxy<MetricLike>('blockBoundaryLatency');
+export const hotQueueSize = createMetricProxy<MetricLike>('hotQueueSize');
+export const warmQueueSize = createMetricProxy<MetricLike>('warmQueueSize');
+export const hotQueueMinHF = createMetricProxy<MetricLike>('hotQueueMinHF');
+export const hotQueueAvgDebtUsd = createMetricProxy<MetricLike>('hotQueueAvgDebtUsd');
+export const queueEntryReason = createMetricProxy<MetricLike>('queueEntryReason');
+export const missedLiquidationReason = createMetricProxy<MetricLike>('missedLiquidationReason');
+export const rpcPoolHealthy = createMetricProxy<MetricLike>('rpcPoolHealthy');
+export const rpcPoolTotal = createMetricProxy<MetricLike>('rpcPoolTotal');

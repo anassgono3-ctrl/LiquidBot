@@ -9,6 +9,7 @@
  */
 
 import { ethers } from 'ethers';
+
 import type { HotCriticalQueue } from './PriorityQueues.js';
 import type { IntentBuilder, LiquidationIntent } from './IntentBuilder.js';
 import type { TxSubmitter } from './TxSubmitter.js';
