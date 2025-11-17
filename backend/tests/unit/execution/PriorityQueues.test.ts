@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { HotCriticalQueue, WarmProjectedQueue, type PriorityQueueConfig, type QueueEntry } from '../../../src/execution/PriorityQueues.js';
 
 describe('PriorityQueues', () => {
