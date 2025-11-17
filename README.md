@@ -346,6 +346,229 @@ backend/src/exec/fastpath/
 └── index.ts                     # Public exports
 ```
 
+## Ultra-Low-Latency Execution Path
+
+Dedicated execution infrastructure for competitive one-block liquidation races on Base. This system introduces a separate hot path for critical liquidations with prebuilt intents, isolated RPC management, and block-boundary dispatch.
+
+### Overview
+
+Recent runtime analysis showed opportunities being lost to competitors who broadcast at the exact start of a new block. This feature addresses that gap by:
+
+1. **Separating critical liquidations** from bulk scans into a dedicated hot path
+2. **Prebuilding liquidation intents** with cached prices and calldata
+3. **Dispatching at block boundaries** with sub-200ms latency from block event to tx broadcast
+4. **Supporting private relays** and multi-RPC racing for maximum reach
+
+### Key Components
+
+#### 1. Execution RPC Pool (`ExecutionRpcPool`)
+Dedicated RPC management isolated from classification/scan providers:
+- **Public write endpoints**: From `WRITE_RPCS` (comma-separated) or fallback to `RPC_URL`
+- **Private relay**: From `PRIVATE_TX_RPC_URL` (single endpoint)
+- **Read endpoints**: From `EXECUTION_READ_RPC_URLS` or `RPC_URL`
+- Health tracking and automatic failover
+
+#### 2. Transaction Submitter (`TxSubmitter`)
+Multi-mode transaction submission with four strategies:
+- **public** (default): Send to fastest public write RPC
+- **private**: Send to private relay only
+- **race**: Concurrent broadcast to all endpoints, cancel others on first success
+- **bundle**: Timed/bundled inclusion (scaffold for future)
+
+Integrates with existing `GAS_LADDER`, `GAS_BURST`, and `GAS_BUMP_*` settings.
+
+#### 3. Priority Queues (`HotCriticalQueue`, `WarmProjectedQueue`)
+Separate queue system for liquidation candidates:
+- **HotCriticalQueue**: Users with `HF <= HOT_HF_THRESHOLD_BPS` OR projected to cross <1.0 within 1-2 blocks
+- **WarmProjectedQueue**: Users approaching liquidation but not immediate
+- Preempts bulk head/price-trigger scans for ultra-low latency
+
+#### 4. Intent Builder (`IntentBuilder`)
+Prebuilt liquidation intents for hot accounts:
+- Cached calldata, gas estimates, and priority fee suggestions
+- Price resolution from `PriceHotCacheService`
+- Revalidation when `intent_age > MAX_INTENT_AGE_MS`
+- Respects `PRECOMPUTE_*` and `CALLDATA_TEMPLATE_ENABLED` flags
+
+#### 5. Price Hot Cache (`PriceHotCacheService`)
+Sub-second price cache (300-500ms refresh) for hot account assets:
+- Eliminates price fallback delays on execution path
+- Respects `PRICES_USE_AAVE_ORACLE` and `CHAINLINK_FEEDS`
+- Only prefetches assets for users in `HotCriticalQueue`
+
+#### 6. Block Boundary Controller (`BlockBoundaryController`)
+Immediate liquidation dispatch on block events:
+- Listens to block events via Flashblocks WS or standard WebSocket
+- Dispatches prebuilt intents for users with `HF <= EXECUTION_HF_THRESHOLD_BPS`
+- Optional timing window (`BLOCK_BOUNDARY_SEND_MS_BEFORE`) for predictable chains
+- Limits concurrent dispatches per block
+
+### Configuration
+
+All features are **opt-in** and preserve existing defaults:
+
+```bash
+# Transaction Submit Mode (default: public)
+TX_SUBMIT_MODE=public                    # public|private|race|bundle
+
+# Write RPC endpoints (comma-separated, defaults to RPC_URL)
+WRITE_RPCS=https://rpc1.base.org,https://rpc2.base.org
+
+# Private relay endpoint (optional)
+PRIVATE_TX_RPC_URL=https://relay.flashbots.net
+
+# Execution read endpoints (optional, defaults to RPC_URL)
+EXECUTION_READ_RPC_URLS=https://read.base.org
+
+# Block Boundary Controller
+BLOCK_BOUNDARY_ENABLED=false            # Enable block-boundary dispatch
+BLOCK_BOUNDARY_SEND_MS_BEFORE=0         # Send N ms before expected block (0=immediate)
+MAX_DISPATCHES_PER_BLOCK=5              # Limit concurrent dispatches
+
+# Hot/Warm Queue Thresholds
+HOT_HF_THRESHOLD_BPS=10012              # 1.0012 (fallback to FAST_LANE_HF_BUFFER_BPS)
+WARM_SET_HF_MAX=1.03                    # Warm queue threshold
+MIN_LIQ_EXEC_USD=50                     # Min USD for execution consideration
+
+# Intent Builder
+MAX_INTENT_AGE_MS=2000                  # Max age before revalidation (2s)
+GAS_LIMIT_BUFFER=1.2                    # Gas estimate buffer multiplier
+
+# Price Hot Cache
+PRICE_HOT_CACHE_INTERVAL_MS=400         # Price refresh interval (400ms)
+PRICE_HOT_STALE_MS=1000                 # Consider price stale after (1s)
+PRICE_HOT_MAX_ASSETS=100                # Max assets to track
+```
+
+### Quick Start
+
+#### Enable Public Mode (Default)
+No configuration needed - uses existing `RPC_URL`:
+```bash
+TX_SUBMIT_MODE=public
+```
+
+#### Enable Private Relay Mode
+```bash
+TX_SUBMIT_MODE=private
+PRIVATE_TX_RPC_URL=https://relay.flashbots.net
+```
+
+#### Enable Race Mode (Recommended for Competitiveness)
+```bash
+TX_SUBMIT_MODE=race
+WRITE_RPCS=https://rpc1.base.org,https://rpc2.base.org,https://rpc3.base.org
+PRIVATE_TX_RPC_URL=https://relay.flashbots.net
+WRITE_RACE_TIMEOUT_MS=120               # Fire secondary RPCs after 120ms
+```
+
+#### Enable Block Boundary Dispatch
+```bash
+BLOCK_BOUNDARY_ENABLED=true
+HOT_HF_THRESHOLD_BPS=10012
+MAX_DISPATCHES_PER_BLOCK=5
+```
+
+### How We Win One-Block Races
+
+This runbook explains how the ultra-low-latency path wins competitive liquidation races:
+
+#### 1. Detection Phase (Ongoing)
+- **Real-time HF service** monitors all candidates via WebSocket events
+- **Price triggers** detect sharp collateral price drops
+- **Reserve updates** catch debt index changes
+- Users meeting criteria enter `HotCriticalQueue`
+
+#### 2. Preparation Phase (Pre-Block)
+- **Intent Builder** prebuilds liquidation calldata for hot queue users
+- **Price Hot Cache** refreshes prices every 300-500ms
+- **Gas estimates** and priority fees pre-calculated
+- Intent cached with `MAX_INTENT_AGE_MS=2000` TTL
+
+#### 3. Dispatch Phase (Block Boundary)
+- **Block event** fires via WebSocket (sub-50ms from actual block time on Base)
+- **Block Boundary Controller** immediately retrieves prebuilt intents
+- **Price revalidation** (only if intent age > threshold)
+- **TxSubmitter** broadcasts according to mode:
+  - **public**: Fastest RPC (single endpoint)
+  - **private**: Private relay only
+  - **race**: All RPCs + relay concurrently, cancel others on first success
+
+#### 4. Execution Phase
+- Transaction propagates through network
+- **Race mode** gives highest inclusion probability
+- **Gas burst** triggers automatic bumps if pending too long
+- **First success** cancels other pending broadcasts
+
+#### Target Latency Budget:
+- Block event → Intent retrieval: **5-10ms**
+- Price revalidation (if needed): **20-50ms**
+- Transaction signing: **5-10ms**
+- Broadcast (race mode): **30-100ms**
+- **Total: 60-170ms** from block event to broadcast
+
+### Metrics
+
+Monitor performance with Prometheus metrics:
+
+```
+# Intent Builder
+liquidbot_intent_build_latency_ms         # Intent building time
+liquidbot_intent_cache_hits_total         # Cache hit rate
+liquidbot_intent_age_ms                   # Intent age when used
+
+# Price Hot Cache
+liquidbot_price_prewarm_age_ms            # Price age when used
+liquidbot_price_hot_cache_size            # Assets in cache
+liquidbot_price_hot_cache_stale_prices    # Stale prices count
+
+# Transaction Submission
+liquidbot_execution_latency_ms            # End-to-end execution latency
+liquidbot_tx_submit_attempts_total        # Attempts by mode and result
+liquidbot_relay_accept_ms                 # Relay acceptance time
+liquidbot_race_winner_total               # Race winner by endpoint type
+
+# Block Boundary
+liquidbot_block_boundary_dispatches_total # Dispatch attempts
+liquidbot_block_boundary_latency_ms       # Block event to tx submission
+
+# Priority Queues
+liquidbot_hot_queue_size                  # Hot queue size
+liquidbot_hot_queue_min_hf                # Minimum HF in hot queue
+liquidbot_queue_entry_reason_total        # Entry reason breakdown
+```
+
+### Testing
+
+Run unit tests for execution modules:
+```bash
+cd backend
+npm test -- tests/unit/execution
+```
+
+Expected output:
+```
+✓ ExecutionRpcPool (6 tests)
+✓ PriorityQueues (8 tests)
+Total: 14 tests passed
+```
+
+### Safety Guarantees
+
+- **Non-breaking**: All features disabled by default
+- **Backward compatible**: `TX_SUBMIT_MODE=public` preserves existing behavior
+- **Graceful fallback**: Missing config falls back to `RPC_URL`
+- **Health tracking**: Automatic endpoint failover on errors
+- **No secrets logged**: URLs with credentials are masked
+
+### Notes
+
+- Block boundary dispatch requires WebSocket connection (`WS_RPC_URL`)
+- Race mode requires multiple healthy endpoints for effectiveness
+- Intent revalidation prevents stale price execution
+- Hot queue entries auto-expire when HF improves
+- Price hot cache only tracks assets for queued users (memory efficient)
+
 ## Wrapped ETH Ratio Feeds
 
 The PriceService supports automatic composition of USD prices for wrapped/staked ETH assets (wstETH, weETH) using Chainlink ratio feeds. This ensures accurate pricing for positions that would otherwise report zero repay amounts.

@@ -320,7 +320,31 @@ export const rawEnvSchema = z.object({
   GAS_LADDER_FAST_TIP_GWEI: z.string().optional(),
   GAS_LADDER_MID_TIP_GWEI: z.string().optional(),
   GAS_LADDER_SAFE_TIP_GWEI: z.string().optional(),
-  APPROVALS_AUTO_SEND: z.string().optional()
+  APPROVALS_AUTO_SEND: z.string().optional(),
+  
+  // Ultra-Low-Latency Execution Path Configuration
+  // Transaction submit mode: public (default), private, race, bundle
+  TX_SUBMIT_MODE: z.string().optional(),
+  // Private transaction RPC URL (single relay endpoint)
+  PRIVATE_TX_RPC_URL: z.string().optional(),
+  // Execution read RPC URLs (comma-separated, defaults to RPC_URL)
+  EXECUTION_READ_RPC_URLS: z.string().optional(),
+  // Block boundary dispatch configuration
+  BLOCK_BOUNDARY_ENABLED: z.string().optional(),
+  BLOCK_BOUNDARY_SEND_MS_BEFORE: z.string().optional(),
+  MAX_DISPATCHES_PER_BLOCK: z.string().optional(),
+  // Hot/warm HF thresholds (basis points)
+  HOT_HF_THRESHOLD_BPS: z.string().optional(),
+  FAST_LANE_HF_BUFFER_BPS: z.string().optional(),
+  // Minimum liquidation size for execution
+  MIN_LIQ_EXEC_USD: z.string().optional(),
+  // Intent builder configuration
+  MAX_INTENT_AGE_MS: z.string().optional(),
+  GAS_LIMIT_BUFFER: z.string().optional(),
+  // Price hot cache configuration
+  PRICE_HOT_CACHE_INTERVAL_MS: z.string().optional(),
+  PRICE_HOT_STALE_MS: z.string().optional(),
+  PRICE_HOT_MAX_ASSETS: z.string().optional()
 });
 
 export const env = (() => {
