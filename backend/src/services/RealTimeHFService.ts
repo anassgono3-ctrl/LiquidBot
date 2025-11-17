@@ -1728,10 +1728,49 @@ export class RealTimeHFService extends EventEmitter {
       const addressSet = new Set(allAddresses);
 
       // 1. Low-HF addresses (HF < ALWAYS_INCLUDE_HF_BELOW) - highest priority
+      // ENHANCEMENT: Risk-ordered head-start slice within low-HF candidates
+      // Sort by HF ascending to surface most at-risk borrowers first
       const lowHfThreshold = config.alwaysIncludeHfBelow;
-      const lowHfAddresses = candidates
+      const HEAD_START_SLICE_SIZE = 300; // Risk-ordered head-start slice (highest priority)
+      
+      const lowHfCandidates = candidates
         .filter(c => c.lastHF !== null && c.lastHF < lowHfThreshold)
-        .map(c => c.address);
+        .sort((a, b) => {
+          // Sort by HF ascending (lower HF = higher priority)
+          const hfA = a.lastHF ?? Infinity;
+          const hfB = b.lastHF ?? Infinity;
+          return hfA - hfB;
+        });
+      
+      // Take head-start slice for immediate processing
+      const headStartSlice = lowHfCandidates.slice(0, HEAD_START_SLICE_SIZE);
+      const remainingLowHf = lowHfCandidates.slice(HEAD_START_SLICE_SIZE);
+      
+      // Log head-start metrics
+      if (headStartSlice.length > 0) {
+        const headStartTime = Date.now();
+        const { headstartProcessedTotal, headstartLatencyMs } = require('../metrics/index.js');
+        
+        // Track head-start processing
+        headstartProcessedTotal.inc(headStartSlice.length);
+        
+        // Log head-start composition
+        const minHf = headStartSlice[0]?.lastHF?.toFixed(4) || 'N/A';
+        const maxHf = headStartSlice[headStartSlice.length - 1]?.lastHF?.toFixed(4) || 'N/A';
+        
+        // eslint-disable-next-line no-console
+        console.log(
+          `[realtime-hf] head-start slice size=${headStartSlice.length} ` +
+          `hf_range=[${minHf}, ${maxHf}] (risk-ordered)`
+        );
+        
+        // Track latency (will be measured after batch processing completes)
+        const headStartLatency = Date.now() - headStartTime;
+        headstartLatencyMs.observe(headStartLatency);
+      }
+      
+      // Combine head-start + remaining low-HF for final processing
+      const lowHfAddresses = [...headStartSlice, ...remainingLowHf].map(c => c.address);
 
       // 2. Dirty users - event/price-triggered addresses
       const dirtyFirst = Array.from(this.dirtyUsers).filter(addr => addressSet.has(addr));
@@ -2746,8 +2785,16 @@ export class RealTimeHFService extends EventEmitter {
               
               // Format HF with infinity symbol for zero debt (though zero debt should be filtered)
               const hfDisplay = isZero(totalDebtBase) ? '∞' : healthFactor.toFixed(4);
+              
+              // Determine status label based on HF
+              const threshold = config.executionHfThresholdBps / 10000;
+              const statusLabel = healthFactor < threshold ? 'liquidatable' : 'near_threshold';
+              
               // eslint-disable-next-line no-console
-              console.log(`[realtime-hf] emit liquidatable user=${userAddress} hf=${hfDisplay} reason=${emitDecision.reason} block=${blockNumber}`);
+              console.log(
+                `[realtime-hf] emit ${statusLabel} user=${userAddress} hf=${hfDisplay} ` +
+                `reason=${emitDecision.reason} block=${blockNumber} valuation_source=aave_oracle`
+              );
 
               // Track last emit block
               this.lastEmitBlock.set(userAddress, blockNumber);
