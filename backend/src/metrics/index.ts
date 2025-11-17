@@ -763,3 +763,55 @@ export const queueEntryReason = createMetricProxy<MetricLike>('queueEntryReason'
 export const missedLiquidationReason = createMetricProxy<MetricLike>('missedLiquidationReason');
 export const rpcPoolHealthy = createMetricProxy<MetricLike>('rpcPoolHealthy');
 export const rpcPoolTotal = createMetricProxy<MetricLike>('rpcPoolTotal');
+
+// Valuation Service metrics (Aave Oracle priority)
+export const valuationSourceUsedTotal = new Counter({
+  name: 'liquidbot_valuation_source_used_total',
+  help: 'Total price resolutions by source for liquidation decisions',
+  labelNames: ['source'],
+  registers: [metricsRegistry]
+});
+
+export const priceMismatchBpsHistogram = new Histogram({
+  name: 'liquidbot_price_mismatch_bps',
+  help: 'Price mismatch between Aave and Chainlink oracles in basis points',
+  buckets: [1, 5, 10, 25, 50, 100, 250, 500],
+  registers: [metricsRegistry]
+});
+
+export const valuationErrorsTotal = new Counter({
+  name: 'liquidbot_valuation_errors_total',
+  help: 'Total price resolution errors by source',
+  labelNames: ['source'],
+  registers: [metricsRegistry]
+});
+
+// Pending state recheck metrics
+export const pendingReadsTotal = new Counter({
+  name: 'liquidbot_pending_reads_total',
+  help: 'Total pending blockTag reads for trigger-driven rechecks',
+  labelNames: ['trigger_type'],
+  registers: [metricsRegistry]
+});
+
+export const pendingReadsLatencyMs = new Histogram({
+  name: 'liquidbot_pending_reads_latency_ms',
+  help: 'Latency of pending blockTag reads in milliseconds',
+  labelNames: ['trigger_type'],
+  buckets: [10, 25, 50, 100, 250, 500, 1000],
+  registers: [metricsRegistry]
+});
+
+// Head-start slice metrics
+export const headstartProcessedTotal = new Counter({
+  name: 'liquidbot_headstart_processed_total',
+  help: 'Total users processed in risk-ordered head-start slice',
+  registers: [metricsRegistry]
+});
+
+export const headstartLatencyMs = new Histogram({
+  name: 'liquidbot_headstart_latency_ms',
+  help: 'Latency of head-start slice processing in milliseconds',
+  buckets: [50, 100, 250, 500, 1000, 2000, 5000],
+  registers: [metricsRegistry]
+});
