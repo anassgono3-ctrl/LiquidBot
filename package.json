@@ -9,6 +9,9 @@
     "contracts"
   ],
   "scripts": {
+    "build": "npm run build:scripts && npm run build:backend && npm run contracts:build",
+    "build:scripts": "tsc --project tsconfig.json",
+    "build:backend": "cd backend && npm run build",
     "contracts:build": "cd contracts && npm run build",
     "contracts:test": "cd contracts && npm run test",
     "contracts:test:fork": "cd contracts && npm run test:fork",
