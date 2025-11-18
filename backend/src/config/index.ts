@@ -167,6 +167,18 @@ export const config = {
   get borrowersIndexMaxUsersPerReserve() { return env.borrowersIndexMaxUsersPerReserve; },
   get borrowersIndexBackfillBlocks() { return env.borrowersIndexBackfillBlocks; },
   get borrowersIndexChunkBlocks() { return env.borrowersIndexChunkBlocks; },
+  
+  // Startup diagnostics
+  get startupDiagnostics() { return env.startupDiagnostics; },
+  get startupDiagTimeoutMs() { return env.startupDiagTimeoutMs; },
+  
+  // Mempool transmit monitoring
+  get transmitMempoolEnabled() { return env.transmitMempoolEnabled; },
+  get mempoolSubscriptionMode() { return env.mempoolSubscriptionMode; },
+  
+  // Latency metrics
+  get latencyMetricsEnabled() { return env.latencyMetricsEnabled; },
+  get metricsEmitIntervalBlocks() { return env.metricsEmitIntervalBlocks; },
 
   // At-risk user scanning
   get atRiskScanLimit() { return env.atRiskScanLimit; },
@@ -234,6 +246,24 @@ export const config = {
   get eventBacklogThreshold() { return env.eventBacklogThreshold; },
   get dustMinUsd() { return env.dustMinUsd; },
   get minDebtUsd() { return env.minDebtUsd; },
+  
+  // Phase 1 Performance Enhancements
+  get mempoolMonitorEnabled() { return env.mempoolMonitorEnabled; },
+  get hfProjectionEnabled() { return env.hfProjectionEnabled; },
+  get hfProjectionCriticalMin() { return env.hfProjectionCriticalMin; },
+  get hfProjectionCriticalMax() { return env.hfProjectionCriticalMax; },
+  get hfProjectionBlocks() { return env.hfProjectionBlocks; },
+  get reserveCoalesceEnabled() { return env.reserveCoalesceEnabled; },
+  get reserveCoalesceWindowMs() { return env.reserveCoalesceWindowMs; },
+  get reserveCoalesceMaxBatch() { return env.reserveCoalesceMaxBatch; },
+  get reserveCoalescePerReserve() { return env.reserveCoalescePerReserve; },
+  get perfMetricsEnabled() { return env.perfMetricsEnabled; },
+  get perfMetricsLogIntervalMs() { return env.perfMetricsLogIntervalMs; },
+  get perfMetricsWindowMs() { return env.perfMetricsWindowMs; },
+  get vectorizedHfEnabled() { return env.vectorizedHfEnabled; },
+  get vectorizedHfCacheTtlMs() { return env.vectorizedHfCacheTtlMs; },
+  get vectorizedHfMaxTtlMs() { return env.vectorizedHfMaxTtlMs; },
+  get vectorizedHfMinTtlMs() { return env.vectorizedHfMinTtlMs; },
   
   // Execution configuration
   get executionEnabled() { return env.executionEnabled; },
