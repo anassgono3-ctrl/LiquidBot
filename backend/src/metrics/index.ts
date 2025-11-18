@@ -764,6 +764,18 @@ export const missedLiquidationReason = createMetricProxy<MetricLike>('missedLiqu
 export const rpcPoolHealthy = createMetricProxy<MetricLike>('rpcPoolHealthy');
 export const rpcPoolTotal = createMetricProxy<MetricLike>('rpcPoolTotal');
 
+// Sprinter metrics proxies
+export const sprinterPrestagedTotal = createMetricProxy<MetricLike>('sprinterPrestagedTotal');
+export const sprinterPrestagedActive = createMetricProxy<MetricLike>('sprinterPrestagedActive');
+export const sprinterAttemptsTotal = createMetricProxy<MetricLike>('sprinterAttemptsTotal');
+export const sprinterSentTotal = createMetricProxy<MetricLike>('sprinterSentTotal');
+export const sprinterWonTotal = createMetricProxy<MetricLike>('sprinterWonTotal');
+export const sprinterRacedTotal = createMetricProxy<MetricLike>('sprinterRacedTotal');
+export const sprinterVerifyLatencyMs = createMetricProxy<MetricLike>('sprinterVerifyLatencyMs');
+export const sprinterEventToSendMs = createMetricProxy<MetricLike>('sprinterEventToSendMs');
+export const sprinterTemplatePatchMs = createMetricProxy<MetricLike>('sprinterTemplatePatchMs');
+export const sprinterPublishFanoutMs = createMetricProxy<MetricLike>('sprinterPublishFanoutMs');
+
 // Valuation Service metrics (Aave Oracle priority)
 export const valuationSourceUsedTotal = new Counter({
   name: 'liquidbot_valuation_source_used_total',

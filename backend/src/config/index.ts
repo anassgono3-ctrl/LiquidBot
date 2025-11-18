@@ -401,5 +401,18 @@ export const config = {
   get gasLadderFastTipGwei() { return env.gasLadderFastTipGwei; },
   get gasLadderMidTipGwei() { return env.gasLadderMidTipGwei; },
   get gasLadderSafeTipGwei() { return env.gasLadderSafeTipGwei; },
-  get approvalsAutoSend() { return env.approvalsAutoSend; }
+  get approvalsAutoSend() { return env.approvalsAutoSend; },
+  
+  // Sprinter high-priority execution path
+  get sprinterEnabled() { return env.sprinterEnabled; },
+  get prestageHfBps() { return env.prestageHfBps; },
+  get sprinterMaxPrestaged() { return env.sprinterMaxPrestaged; },
+  get sprinterStaleBlocks() { return env.sprinterStaleBlocks; },
+  get sprinterVerifyBatch() { return env.sprinterVerifyBatch; },
+  get writeRpcs() { return env.writeRpcs; },
+  get writeRaceTimeoutMs() { return env.writeRaceTimeoutMs; },
+  get optimisticEnabled() { return env.optimisticEnabled; },
+  get optimisticEpsilonBps() { return env.optimisticEpsilonBps; },
+  get executionPrivateKeys() { return env.executionPrivateKeys; },
+  get templateRefreshIndexBps() { return env.templateRefreshIndexBps; }
 };

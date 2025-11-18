@@ -384,7 +384,31 @@ export const rawEnvSchema = z.object({
   // Price hot cache configuration
   PRICE_HOT_CACHE_INTERVAL_MS: z.string().optional(),
   PRICE_HOT_STALE_MS: z.string().optional(),
-  PRICE_HOT_MAX_ASSETS: z.string().optional()
+  PRICE_HOT_MAX_ASSETS: z.string().optional(),
+  
+  // ==== SPRINTER HIGH-PRIORITY EXECUTION PATH ====
+  // Sprinter feature flag
+  SPRINTER_ENABLED: z.string().optional(),
+  // Pre-staging HF threshold (BPS, e.g., 10200 = 1.02)
+  PRESTAGE_HF_BPS: z.string().optional(),
+  // Maximum pre-staged candidates
+  SPRINTER_MAX_PRESTAGED: z.string().optional(),
+  // Blocks after which pre-staged candidates are considered stale
+  SPRINTER_STALE_BLOCKS: z.string().optional(),
+  // Micro-verification batch size
+  SPRINTER_VERIFY_BATCH: z.string().optional(),
+  // Multiple write RPC URLs (comma-separated)
+  WRITE_RPCS: z.string().optional(),
+  // Write race timeout in milliseconds
+  WRITE_RACE_TIMEOUT_MS: z.string().optional(),
+  // Optimistic execution mode flag
+  OPTIMISTIC_ENABLED: z.string().optional(),
+  // Optimistic epsilon (BPS, e.g., 20 = 0.20%)
+  OPTIMISTIC_EPSILON_BPS: z.string().optional(),
+  // Multiple execution private keys (comma-separated)
+  EXECUTION_PRIVATE_KEYS: z.string().optional(),
+  // Template refresh index (BPS, e.g., 10000 = refresh every 10000 blocks)
+  TEMPLATE_REFRESH_INDEX_BPS: z.string().optional()
 });
 
 export const env = (() => {
@@ -772,6 +796,25 @@ export const env = (() => {
     gasLadderFastTipGwei: Number(parsed.GAS_LADDER_FAST_TIP_GWEI || 5),
     gasLadderMidTipGwei: Number(parsed.GAS_LADDER_MID_TIP_GWEI || 3),
     gasLadderSafeTipGwei: Number(parsed.GAS_LADDER_SAFE_TIP_GWEI || 2),
-    approvalsAutoSend: (parsed.APPROVALS_AUTO_SEND || 'false').toLowerCase() === 'true'
+    approvalsAutoSend: (parsed.APPROVALS_AUTO_SEND || 'false').toLowerCase() === 'true',
+    
+    // ==== SPRINTER HIGH-PRIORITY EXECUTION PATH ====
+    sprinterEnabled: (parsed.SPRINTER_ENABLED || 'false').toLowerCase() === 'true',
+    prestageHfBps: Number(parsed.PRESTAGE_HF_BPS || 10200), // 1.02
+    sprinterMaxPrestaged: Number(parsed.SPRINTER_MAX_PRESTAGED || 1000),
+    sprinterStaleBlocks: Number(parsed.SPRINTER_STALE_BLOCKS || 10),
+    sprinterVerifyBatch: Number(parsed.SPRINTER_VERIFY_BATCH || 25),
+    writeRpcs: (parsed.WRITE_RPCS || '')
+      .split(',')
+      .map(url => url.trim())
+      .filter(url => url.length > 0),
+    writeRaceTimeoutMs: Number(parsed.WRITE_RACE_TIMEOUT_MS || 2000),
+    optimisticEnabled: (parsed.OPTIMISTIC_ENABLED || 'false').toLowerCase() === 'true',
+    optimisticEpsilonBps: Number(parsed.OPTIMISTIC_EPSILON_BPS || 20), // 0.20%
+    executionPrivateKeys: (parsed.EXECUTION_PRIVATE_KEYS || parsed.EXECUTION_PRIVATE_KEY || '')
+      .split(',')
+      .map(key => key.trim())
+      .filter(key => key.length > 0),
+    templateRefreshIndexBps: Number(parsed.TEMPLATE_REFRESH_INDEX_BPS || 10000)
   };
 })();
