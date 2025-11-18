@@ -44,6 +44,106 @@ LiquidBot supports two discovery modes controlled by the `USE_SUBGRAPH` environm
 - Requires `GRAPH_API_KEY` and `SUBGRAPH_DEPLOYMENT_ID`
 - Note: Subgraph is for discovery only; prices come from on-chain sources
 
+## Startup Diagnostics & Mempool Fast Path
+
+LiquidBot includes comprehensive startup diagnostics to verify Phase 1 features are active and configured correctly.
+
+### Running Diagnostics
+
+```bash
+# Run startup diagnostics without starting the full engine
+npm run diag
+```
+
+### What Gets Checked
+
+The diagnostics report shows:
+
+1. **WebSocket Connectivity**
+   - Provider type (Flashblocks, Alchemy, or generic)
+   - Connection status
+   - URL host (masked for security)
+
+2. **Mempool Transmit Monitoring**
+   - Enabled/disabled status
+   - Subscription mode (filtered pending vs generic)
+   - Number of aggregators subscribed
+   - Fast path status: `ACTIVE` or `INACTIVE` with reason
+
+3. **Chainlink Feeds**
+   - Auto-discovery enabled/disabled
+   - Number of feeds discovered
+   - Pending and on-chain subscriptions
+
+4. **Projection Engine**
+   - Enabled status
+   - Buffer (hysteresis) in basis points
+   - Critical slice size cap
+
+5. **Reserve Event Coalescing**
+   - Debounce window (ms)
+   - Fast-lane settings
+
+6. **Metrics Configuration**
+   - Latency metrics enabled/disabled
+   - Emit interval (blocks)
+
+7. **Borrowers Index**
+   - Backfill configuration (blocks)
+   - Status (in-progress, done, disabled)
+   - Total addresses indexed
+
+8. **Precompute**
+   - Enabled status
+   - Top-K value
+
+### Example Output
+
+```
+================================================================================
+STARTUP DIAGNOSTICS - Phase 1 Features
+================================================================================
+
+[WebSocket Connectivity]
+  Provider: Alchemy
+  URL: mainnet.base.org
+  Status: CONNECTED
+
+[Mempool Transmit Monitoring]
+  Enabled: true
+  Mode: filtered pending
+  Status: ACTIVE
+  Reason: filtered pending for 9 aggregators
+
+[Chainlink Feeds]
+  Auto-discovery: ENABLED
+  Discovered: 9
+  Pending subscriptions: 9
+  On-chain subscriptions: 9
+
+[Summary]
+  mempool-transmit: ACTIVE (filtered pending for 9 aggregators) | feeds: 9 pending / 9 on-chain
+================================================================================
+```
+
+### Troubleshooting
+
+**Mempool transmit shows INACTIVE:**
+- Check that your provider supports pending transaction subscriptions
+- Alchemy Growth plan or higher required for pending tx access
+- If unavailable, the bot falls back to on-chain events (100-200ms slower)
+- Enable with `TRANSMIT_MEMPOOL_ENABLED=true`
+
+**WebSocket connection fails:**
+- Verify `WS_RPC_URL` is set and accessible
+- Check firewall rules for WebSocket connections
+- Some providers require authentication in the URL
+
+**Feeds show 0 discovered:**
+- Enable auto-discovery with `AUTO_DISCOVER_FEEDS=true`
+- Or manually configure feeds via `CHAINLINK_FEEDS`
+- Check that `AAVE_PROTOCOL_DATA_PROVIDER` is configured
+
 ## Configuration
 
 Key environment variables:

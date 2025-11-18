@@ -28,6 +28,7 @@ import { HealthCalculator } from "./services/HealthCalculator.js";
 import { AtRiskScanner } from "./services/AtRiskScanner.js";
 import { RealTimeHFService } from "./services/RealTimeHFService.js";
 import type { LiquidatableEvent } from "./services/RealTimeHFService.js";
+import { StartupDiagnosticsService } from "./services/StartupDiagnostics.js";
 
 const logger = createLogger({
   level: "info",
@@ -493,6 +494,30 @@ httpServer.listen(port, async () => {
     logger.info(`Subgraph endpoint: ${config.useMockSubgraph ? "(MOCK MODE)" : config.subgraphUrl.replace(config.graphApiKey || '', '****')}`);
   } else {
     logger.info('Subgraph: DISABLED (USE_SUBGRAPH=false) - using on-chain discovery only');
+  }
+  
+  // Run startup diagnostics if enabled
+  if (config.startupDiagnostics) {
+    try {
+      // Get WebSocket provider from real-time service if available
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wsProvider = realtimeHFService ? (realtimeHFService as any).provider : undefined;
+      
+      const diagnostics = new StartupDiagnosticsService(wsProvider);
+      const result = await diagnostics.run();
+      const formatted = diagnostics.formatDiagnostics(result);
+      
+      // Log diagnostics regardless of LOG_LEVEL
+      console.log(formatted);
+      
+      // Also log summary line for easy parsing
+      const mempoolStatus = result.mempoolTransmit.status === 'ACTIVE' 
+        ? `ACTIVE (${result.mempoolTransmit.reason})`
+        : `INACTIVE (${result.mempoolTransmit.reason})`;
+      logger.info(`[startup] mempool-transmit: ${mempoolStatus} | feeds: ${result.feeds.pendingSubscriptions} pending / ${result.feeds.onChainSubscriptions} on-chain`);
+    } catch (err) {
+      logger.error('[startup-diagnostics] Failed to run diagnostics:', err);
+    }
   }
   
   // Start real-time HF service if enabled
