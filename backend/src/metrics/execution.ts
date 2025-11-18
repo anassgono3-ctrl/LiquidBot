@@ -39,6 +39,18 @@ export interface ExecutionMetrics {
   missedLiquidationReason: Counter<string>;
   rpcPoolHealthy: Gauge<string>;
   rpcPoolTotal: Gauge<string>;
+  
+  // Sprinter metrics
+  sprinterPrestagedTotal: Gauge<string>;
+  sprinterPrestagedActive: Gauge<string>;
+  sprinterAttemptsTotal: Counter<string>;
+  sprinterSentTotal: Counter<string>;
+  sprinterWonTotal: Counter<string>;
+  sprinterRacedTotal: Counter<string>;
+  sprinterVerifyLatencyMs: Histogram<string>;
+  sprinterEventToSendMs: Histogram<string>;
+  sprinterTemplatePatchMs: Histogram<string>;
+  sprinterPublishFanoutMs: Histogram<string>;
 }
 
 /**
@@ -215,6 +227,72 @@ export function createExecutionMetrics(registry: Registry): ExecutionMetrics {
     registers: [registry]
   });
 
+  // Sprinter Metrics
+  const sprinterPrestagedTotal = new Gauge({
+    name: 'liquidbot_sprinter_prestaged_total',
+    help: 'Total number of pre-staged candidates',
+    registers: [registry]
+  });
+
+  const sprinterPrestagedActive = new Gauge({
+    name: 'liquidbot_sprinter_prestaged_active',
+    help: 'Number of active pre-staged candidates (non-stale)',
+    registers: [registry]
+  });
+
+  const sprinterAttemptsTotal = new Counter({
+    name: 'liquidbot_sprinter_attempts_total',
+    help: 'Total Sprinter execution attempts',
+    labelNames: ['result'],
+    registers: [registry]
+  });
+
+  const sprinterSentTotal = new Counter({
+    name: 'liquidbot_sprinter_sent_total',
+    help: 'Total Sprinter transactions sent',
+    registers: [registry]
+  });
+
+  const sprinterWonTotal = new Counter({
+    name: 'liquidbot_sprinter_won_total',
+    help: 'Total Sprinter race wins (our tx was first)',
+    registers: [registry]
+  });
+
+  const sprinterRacedTotal = new Counter({
+    name: 'liquidbot_sprinter_raced_total',
+    help: 'Total Sprinter races lost (competitor beat us)',
+    registers: [registry]
+  });
+
+  const sprinterVerifyLatencyMs = new Histogram({
+    name: 'liquidbot_sprinter_verify_latency_ms',
+    help: 'Sprinter micro-multicall verification latency (milliseconds)',
+    buckets: [5, 10, 25, 50, 100, 250, 500],
+    registers: [registry]
+  });
+
+  const sprinterEventToSendMs = new Histogram({
+    name: 'liquidbot_sprinter_event_to_send_ms',
+    help: 'Sprinter latency from price/log event to tx broadcast (milliseconds)',
+    buckets: [5, 10, 25, 50, 75, 100, 150, 200, 300, 500],
+    registers: [registry]
+  });
+
+  const sprinterTemplatePatchMs = new Histogram({
+    name: 'liquidbot_sprinter_template_patch_ms',
+    help: 'Sprinter calldata template patching latency (milliseconds)',
+    buckets: [0.5, 1, 2, 5, 10, 25],
+    registers: [registry]
+  });
+
+  const sprinterPublishFanoutMs = new Histogram({
+    name: 'liquidbot_sprinter_publish_fanout_ms',
+    help: 'Sprinter parallel publish fanout time (first send to last send)',
+    buckets: [5, 10, 25, 50, 100, 250],
+    registers: [registry]
+  });
+
   return {
     intentBuildLatencyMs,
     intentCacheHits,
@@ -239,6 +317,16 @@ export function createExecutionMetrics(registry: Registry): ExecutionMetrics {
     queueEntryReason,
     missedLiquidationReason,
     rpcPoolHealthy,
-    rpcPoolTotal
+    rpcPoolTotal,
+    sprinterPrestagedTotal,
+    sprinterPrestagedActive,
+    sprinterAttemptsTotal,
+    sprinterSentTotal,
+    sprinterWonTotal,
+    sprinterRacedTotal,
+    sprinterVerifyLatencyMs,
+    sprinterEventToSendMs,
+    sprinterTemplatePatchMs,
+    sprinterPublishFanoutMs
   };
 }

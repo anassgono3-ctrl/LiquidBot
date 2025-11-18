@@ -71,6 +71,14 @@ export interface StartupDiagnosticsResult {
     enabled: boolean;
     topK: number;
   };
+  sprinter: {
+    enabled: boolean;
+    prestageHf: number;
+    maxPrestaged: number;
+    verifyBatch: number;
+    writeRpcCount: number;
+    optimisticMode: boolean;
+  };
 }
 
 /**
@@ -97,7 +105,8 @@ export class StartupDiagnosticsService {
       coalesce: this.checkCoalesceSettings(),
       metrics: this.checkMetricsConfig(),
       borrowersIndex: this.checkBorrowersIndex(),
-      precompute: this.checkPrecomputeConfig()
+      precompute: this.checkPrecomputeConfig(),
+      sprinter: this.checkSprinterConfig()
     };
 
     return result;
@@ -336,6 +345,20 @@ export class StartupDiagnosticsService {
   }
 
   /**
+   * Check Sprinter configuration
+   */
+  private checkSprinterConfig(): StartupDiagnosticsResult['sprinter'] {
+    return {
+      enabled: config.sprinterEnabled || false,
+      prestageHf: config.prestageHfBps / 10000,
+      maxPrestaged: config.sprinterMaxPrestaged || 0,
+      verifyBatch: config.sprinterVerifyBatch || 0,
+      writeRpcCount: config.writeRpcs?.length || 0,
+      optimisticMode: config.optimisticEnabled || false
+    };
+  }
+
+  /**
    * Format diagnostics result as readable log message
    */
   formatDiagnostics(result: StartupDiagnosticsResult): string {
@@ -423,6 +446,18 @@ export class StartupDiagnosticsService {
     lines.push('[Precompute]');
     lines.push(`  Enabled: ${result.precompute.enabled}`);
     lines.push(`  Top K: ${result.precompute.topK}`);
+    
+    // Sprinter
+    lines.push('');
+    lines.push('[Sprinter High-Priority Execution]');
+    lines.push(`  Status: ${result.sprinter.enabled ? 'ENABLED' : 'DISABLED'}`);
+    if (result.sprinter.enabled) {
+      lines.push(`  Prestage HF threshold: ${result.sprinter.prestageHf.toFixed(4)} (${(result.sprinter.prestageHf * 100).toFixed(2)}%)`);
+      lines.push(`  Max prestaged: ${result.sprinter.maxPrestaged}`);
+      lines.push(`  Verify batch: ${result.sprinter.verifyBatch}`);
+      lines.push(`  Write RPCs: ${result.sprinter.writeRpcCount}`);
+      lines.push(`  Optimistic mode: ${result.sprinter.optimisticMode ? 'ENABLED' : 'DISABLED'}`);
+    }
     
     // Summary line
     lines.push('');
