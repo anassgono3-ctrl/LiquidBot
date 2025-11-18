@@ -13,7 +13,8 @@ import {
   liquidationAuditTotal,
   liquidationAuditReasonNotInWatchSet,
   liquidationAuditReasonRaced,
-  liquidationAuditErrors
+  liquidationAuditErrors,
+  watchMissCount
 } from '../metrics/index.js';
 
 import { NotificationService } from './NotificationService.js';
@@ -103,18 +104,22 @@ export class LiquidationAuditService {
   private useAaveOracle: boolean;
   private ourBotAddress?: string;
 
+  private autoHealCallback?: (user: string) => void;
+
   constructor(
     priceService: PriceService,
     notificationService: NotificationService,
     provider?: ethers.JsonRpcProvider,
     decisionTraceStore?: DecisionTraceStore,
-    ourBotAddress?: string
+    ourBotAddress?: string,
+    autoHealCallback?: (user: string) => void
   ) {
     this.priceService = priceService;
     this.notificationService = notificationService;
     this.rateLimiter = new RateLimiter(config.liquidationAuditSampleLimit);
     this.provider = provider || null;
     this.ourBotAddress = ourBotAddress;
+    this.autoHealCallback = autoHealCallback;
     
     // Initialize Aave oracle helper if provider available
     // Use pricesUseAaveOracle flag or fallback to liquidationAuditPriceMode
@@ -280,6 +285,18 @@ export class LiquidationAuditService {
       // Update metrics
       this.updateMetrics(reason);
 
+      // Auto-heal: add user to watch set if not_in_watch_set
+      if (reason === 'not_in_watch_set' && this.autoHealCallback) {
+        try {
+          this.autoHealCallback(user);
+          // eslint-disable-next-line no-console
+          console.log(`[liquidation-audit] Auto-heal: added user ${user} to watch set`);
+        } catch (error) {
+          // eslint-disable-next-line no-console
+          console.error('[liquidation-audit] Auto-heal failed:', error);
+        }
+      }
+
       // Send notification if enabled and under rate limit
       if (config.liquidationAuditNotify && this.rateLimiter.canSend()) {
         await this.sendNotification(auditResult);
@@ -435,6 +452,7 @@ export class LiquidationAuditService {
     
     if (reason === 'not_in_watch_set') {
       liquidationAuditReasonNotInWatchSet.inc();
+      watchMissCount.inc(); // New metric for coverage tracking
     } else if (reason === 'raced') {
       liquidationAuditReasonRaced.inc();
     }
