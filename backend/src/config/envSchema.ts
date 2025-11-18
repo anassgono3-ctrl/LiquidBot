@@ -233,6 +233,33 @@ export const rawEnvSchema = z.object({
   DUST_MIN_USD: z.string().optional(),
   MIN_DEBT_USD: z.string().optional(),
 
+  // ==== Phase 1 Performance Enhancements ====
+  // Mempool transmit monitoring
+  MEMPOOL_MONITOR_ENABLED: z.string().optional(),
+  
+  // Health factor projection
+  HF_PROJECTION_ENABLED: z.string().optional(),
+  HF_PROJECTION_CRITICAL_MIN: z.string().optional(),
+  HF_PROJECTION_CRITICAL_MAX: z.string().optional(),
+  HF_PROJECTION_BLOCKS: z.string().optional(),
+  
+  // Reserve event coalescing
+  RESERVE_COALESCE_ENABLED: z.string().optional(),
+  RESERVE_COALESCE_WINDOW_MS: z.string().optional(),
+  RESERVE_COALESCE_MAX_BATCH: z.string().optional(),
+  RESERVE_COALESCE_PER_RESERVE: z.string().optional(),
+  
+  // Performance metrics
+  PERF_METRICS_ENABLED: z.string().optional(),
+  PERF_METRICS_LOG_INTERVAL_MS: z.string().optional(),
+  PERF_METRICS_WINDOW_MS: z.string().optional(),
+  
+  // Vectorized HF calculator
+  VECTORIZED_HF_ENABLED: z.string().optional(),
+  VECTORIZED_HF_CACHE_TTL_MS: z.string().optional(),
+  VECTORIZED_HF_MAX_TTL_MS: z.string().optional(),
+  VECTORIZED_HF_MIN_TTL_MS: z.string().optional(),
+
   // Low HF Tracker for observability
   LOW_HF_TRACKER_ENABLED: z.string().optional(),
   LOW_HF_TRACKER_MAX: z.string().optional(),
@@ -587,6 +614,33 @@ export const env = (() => {
     // Dust threshold configuration
     dustMinUsd: parsed.DUST_MIN_USD ? Number(parsed.DUST_MIN_USD) : null,
     minDebtUsd: Number(parsed.MIN_DEBT_USD || 1),
+
+    // ==== Phase 1 Performance Enhancements ====
+    // Mempool transmit monitoring
+    mempoolMonitorEnabled: (parsed.MEMPOOL_MONITOR_ENABLED || 'false').toLowerCase() === 'true',
+    
+    // Health factor projection
+    hfProjectionEnabled: (parsed.HF_PROJECTION_ENABLED || 'false').toLowerCase() === 'true',
+    hfProjectionCriticalMin: Number(parsed.HF_PROJECTION_CRITICAL_MIN || 1.00),
+    hfProjectionCriticalMax: Number(parsed.HF_PROJECTION_CRITICAL_MAX || 1.03),
+    hfProjectionBlocks: Number(parsed.HF_PROJECTION_BLOCKS || 1),
+    
+    // Reserve event coalescing
+    reserveCoalesceEnabled: (parsed.RESERVE_COALESCE_ENABLED || 'true').toLowerCase() === 'true',
+    reserveCoalesceWindowMs: Number(parsed.RESERVE_COALESCE_WINDOW_MS || 40),
+    reserveCoalesceMaxBatch: Number(parsed.RESERVE_COALESCE_MAX_BATCH || 50),
+    reserveCoalescePerReserve: (parsed.RESERVE_COALESCE_PER_RESERVE || 'false').toLowerCase() === 'true',
+    
+    // Performance metrics
+    perfMetricsEnabled: (parsed.PERF_METRICS_ENABLED || 'true').toLowerCase() === 'true',
+    perfMetricsLogIntervalMs: Number(parsed.PERF_METRICS_LOG_INTERVAL_MS || 30000),
+    perfMetricsWindowMs: Number(parsed.PERF_METRICS_WINDOW_MS || 60000),
+    
+    // Vectorized HF calculator
+    vectorizedHfEnabled: (parsed.VECTORIZED_HF_ENABLED || 'true').toLowerCase() === 'true',
+    vectorizedHfCacheTtlMs: Number(parsed.VECTORIZED_HF_CACHE_TTL_MS || 10000),
+    vectorizedHfMaxTtlMs: Number(parsed.VECTORIZED_HF_MAX_TTL_MS || 60000),
+    vectorizedHfMinTtlMs: Number(parsed.VECTORIZED_HF_MIN_TTL_MS || 2000),
 
     // Low HF Tracker for observability
     lowHfTrackerEnabled: (parsed.LOW_HF_TRACKER_ENABLED || 'true').toLowerCase() === 'true',

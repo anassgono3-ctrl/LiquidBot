@@ -815,3 +815,120 @@ export const headstartLatencyMs = new Histogram({
   buckets: [50, 100, 250, 500, 1000, 2000, 5000],
   registers: [metricsRegistry]
 });
+
+// ==== PHASE 1 PERFORMANCE ENHANCEMENTS METRICS ====
+
+// Mempool Chainlink Transmit Monitor Metrics (Task A)
+export const mempoolTransmitDetectedTotal = new Counter({
+  name: 'liquidbot_mempool_transmit_detected_total',
+  help: 'Total Chainlink transmit() calls detected in mempool',
+  labelNames: ['symbol'],
+  registers: [metricsRegistry]
+});
+
+export const mempoolTransmitDecodeLatencyMs = new Histogram({
+  name: 'liquidbot_mempool_transmit_decode_latency_ms',
+  help: 'Latency to decode mempool transmit() calldata in milliseconds',
+  buckets: [5, 10, 25, 50, 100, 250, 500],
+  registers: [metricsRegistry]
+});
+
+export const mempoolTransmitProcessingErrorsTotal = new Counter({
+  name: 'liquidbot_mempool_transmit_processing_errors_total',
+  help: 'Total errors processing mempool transmit() calls',
+  registers: [metricsRegistry]
+});
+
+// Health Factor Projection Metrics (Task B)
+export const hfProjectionCalculatedTotal = new Counter({
+  name: 'liquidbot_hf_projection_calculated_total',
+  help: 'Total HF projections calculated for critical band accounts',
+  labelNames: ['result'], // result: liquidatable|safe
+  registers: [metricsRegistry]
+});
+
+export const hfProjectionLatencyMs = new Histogram({
+  name: 'liquidbot_hf_projection_latency_ms',
+  help: 'HF projection calculation latency in milliseconds',
+  buckets: [1, 5, 10, 25, 50, 100, 250],
+  registers: [metricsRegistry]
+});
+
+export const hfProjectionAccuracyTotal = new Counter({
+  name: 'liquidbot_hf_projection_accuracy_total',
+  help: 'HF projection accuracy tracking (predicted vs actual)',
+  labelNames: ['outcome'], // outcome: true_positive|false_positive|true_negative|false_negative
+  registers: [metricsRegistry]
+});
+
+// Reserve Event Coalescing Metrics (Task C)
+export const reserveEventCoalescedTotal = new Counter({
+  name: 'liquidbot_reserve_event_coalesced_total',
+  help: 'Total ReserveDataUpdated events coalesced',
+  labelNames: ['reserve'],
+  registers: [metricsRegistry]
+});
+
+export const reserveEventBatchSizeHistogram = new Histogram({
+  name: 'liquidbot_reserve_event_batch_size',
+  help: 'Number of events coalesced per batch',
+  buckets: [1, 2, 3, 5, 10, 20, 50],
+  registers: [metricsRegistry]
+});
+
+export const reserveEventDebounceTimeMs = new Histogram({
+  name: 'liquidbot_reserve_event_debounce_time_ms',
+  help: 'Time events waited in debounce window before processing',
+  buckets: [10, 20, 30, 40, 50, 75, 100, 150],
+  registers: [metricsRegistry]
+});
+
+// Core Latency & Throughput Metrics (Task D)
+export const blockToCriticalSliceMs = new Histogram({
+  name: 'liquidbot_block_to_critical_slice_ms',
+  help: 'Latency from block received to critical slice identified',
+  buckets: [10, 25, 50, 100, 250, 500, 1000, 2000],
+  registers: [metricsRegistry]
+});
+
+export const priceTransmitToProjectionMs = new Histogram({
+  name: 'liquidbot_price_transmit_to_projection_ms',
+  help: 'Latency from price transmit to HF projection completion',
+  buckets: [5, 10, 25, 50, 100, 250, 500, 1000],
+  registers: [metricsRegistry]
+});
+
+export const batchProcessingLatencyMs = new Histogram({
+  name: 'liquidbot_batch_processing_latency_ms',
+  help: 'Batch processing latency by operation type',
+  labelNames: ['operation'], // operation: head_check|event_batch|price_trigger
+  buckets: [50, 100, 250, 500, 1000, 2000, 5000, 10000],
+  registers: [metricsRegistry]
+});
+
+export const throughputAccountsPerSecond = new Gauge({
+  name: 'liquidbot_throughput_accounts_per_second',
+  help: 'Accounts processed per second (rolling average)',
+  registers: [metricsRegistry]
+});
+
+// Price Cache & Vectorized HF Math Metrics (Task E)
+export const priceCacheHitRateGauge = new Gauge({
+  name: 'liquidbot_price_cache_hit_rate',
+  help: 'Price cache hit rate (0-1)',
+  registers: [metricsRegistry]
+});
+
+export const vectorizedHfBatchSizeHistogram = new Histogram({
+  name: 'liquidbot_vectorized_hf_batch_size',
+  help: 'Number of accounts processed in vectorized HF calculation',
+  buckets: [10, 25, 50, 100, 250, 500, 1000],
+  registers: [metricsRegistry]
+});
+
+export const hfCalculationLatencyPerAccountMs = new Histogram({
+  name: 'liquidbot_hf_calculation_latency_per_account_ms',
+  help: 'Per-account HF calculation latency in milliseconds',
+  buckets: [0.1, 0.5, 1, 2, 5, 10, 25],
+  registers: [metricsRegistry]
+});
