@@ -932,3 +932,56 @@ export const hfCalculationLatencyPerAccountMs = new Histogram({
   buckets: [0.1, 0.5, 1, 2, 5, 10, 25],
   registers: [metricsRegistry]
 });
+
+// Coverage improvements metrics
+export const watchMissCount = new Counter({
+  name: 'liquidbot_watch_miss_count',
+  help: 'Number of liquidations missed due to not being in watch set',
+  registers: [metricsRegistry]
+});
+
+export const borrowersIndexBackfillBlocks = new Gauge({
+  name: 'liquidbot_borrowers_index_backfill_blocks',
+  help: 'Number of blocks to backfill for borrowers index',
+  registers: [metricsRegistry]
+});
+
+export const borrowersIndexTotalAddresses = new Gauge({
+  name: 'liquidbot_borrowers_index_total_addresses',
+  help: 'Total number of addresses in borrowers index',
+  registers: [metricsRegistry]
+});
+
+export const borrowersIndexLastBlock = new Gauge({
+  name: 'liquidbot_borrowers_index_last_block',
+  help: 'Last block indexed by borrowers index',
+  registers: [metricsRegistry]
+});
+
+// Mempool transmit metrics
+export const mempoolPendingSubscriptions = new Gauge({
+  name: 'liquidbot_mempool_pending_subscriptions',
+  help: 'Number of mempool pending subscriptions established',
+  registers: [metricsRegistry]
+});
+
+export const mempoolTransmitEventsSeenTotal = new Counter({
+  name: 'liquidbot_mempool_transmit_events_seen_total',
+  help: 'Total number of mempool transmit events seen',
+  labelNames: ['aggregator'],
+  registers: [metricsRegistry]
+});
+
+// Projection metrics
+export const projectionRunsTotal = new Counter({
+  name: 'liquidbot_projection_runs_total',
+  help: 'Total number of projection runs executed',
+  registers: [metricsRegistry]
+});
+
+export const projectionCandidatesFlagged = new Counter({
+  name: 'liquidbot_projection_candidates_flagged',
+  help: 'Total number of candidates flagged by projection engine',
+  labelNames: ['likelihood'],
+  registers: [metricsRegistry]
+});

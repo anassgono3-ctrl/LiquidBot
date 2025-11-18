@@ -112,6 +112,7 @@ export const rawEnvSchema = z.object({
   // Reserve-targeted recheck configuration
   RESERVE_RECHECK_TOP_N: z.string().optional(),
   RESERVE_RECHECK_MAX_BATCH: z.string().optional(),
+  RESERVE_RECHECK_TOP_N_BY_ASSET: z.string().optional(),
   
   // Pending-state verification
   PENDING_VERIFY_ENABLED: z.string().optional(),
@@ -123,6 +124,18 @@ export const rawEnvSchema = z.object({
   BORROWERS_INDEX_MAX_USERS_PER_RESERVE: z.string().optional(),
   BORROWERS_INDEX_BACKFILL_BLOCKS: z.string().optional(),
   BORROWERS_INDEX_CHUNK_BLOCKS: z.string().optional(),
+  
+  // Startup diagnostics
+  STARTUP_DIAGNOSTICS: z.string().optional(),
+  STARTUP_DIAG_TIMEOUT_MS: z.string().optional(),
+  
+  // Mempool transmit monitoring
+  TRANSMIT_MEMPOOL_ENABLED: z.string().optional(),
+  MEMPOOL_SUBSCRIPTION_MODE: z.string().optional(),
+  
+  // Latency metrics
+  LATENCY_METRICS_ENABLED: z.string().optional(),
+  METRICS_EMIT_INTERVAL_BLOCKS: z.string().optional(),
 
   // At-risk user scanning
   AT_RISK_SCAN_LIMIT: z.string().optional(),
@@ -483,8 +496,9 @@ export const env = (() => {
     autoDiscoverFeeds: (parsed.AUTO_DISCOVER_FEEDS || 'true').toLowerCase() === 'true',
     
     // Reserve-targeted recheck configuration
-    reserveRecheckTopN: Number(parsed.RESERVE_RECHECK_TOP_N || 50),
-    reserveRecheckMaxBatch: Number(parsed.RESERVE_RECHECK_MAX_BATCH || 100),
+    reserveRecheckTopN: Number(parsed.RESERVE_RECHECK_TOP_N || 800),
+    reserveRecheckMaxBatch: Number(parsed.RESERVE_RECHECK_MAX_BATCH || 1200),
+    reserveRecheckTopNByAsset: parsed.RESERVE_RECHECK_TOP_N_BY_ASSET,
     
     // Pending-state verification
     pendingVerifyEnabled: (parsed.PENDING_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
@@ -494,8 +508,20 @@ export const env = (() => {
     borrowersIndexMode: parsed.BORROWERS_INDEX_MODE || 'memory',
     borrowersIndexRedisUrl: parsed.BORROWERS_INDEX_REDIS_URL,
     borrowersIndexMaxUsersPerReserve: Number(parsed.BORROWERS_INDEX_MAX_USERS_PER_RESERVE || 3000),
-    borrowersIndexBackfillBlocks: Number(parsed.BORROWERS_INDEX_BACKFILL_BLOCKS || 50000),
+    borrowersIndexBackfillBlocks: Number(parsed.BORROWERS_INDEX_BACKFILL_BLOCKS || 400000),
     borrowersIndexChunkBlocks: Number(parsed.BORROWERS_INDEX_CHUNK_BLOCKS || 2000),
+    
+    // Startup diagnostics
+    startupDiagnostics: (parsed.STARTUP_DIAGNOSTICS || 'true').toLowerCase() === 'true',
+    startupDiagTimeoutMs: Number(parsed.STARTUP_DIAG_TIMEOUT_MS || 10000),
+    
+    // Mempool transmit monitoring
+    transmitMempoolEnabled: (parsed.TRANSMIT_MEMPOOL_ENABLED || 'false').toLowerCase() === 'true',
+    mempoolSubscriptionMode: parsed.MEMPOOL_SUBSCRIPTION_MODE || 'auto',
+    
+    // Latency metrics
+    latencyMetricsEnabled: (parsed.LATENCY_METRICS_ENABLED || 'false').toLowerCase() === 'true',
+    metricsEmitIntervalBlocks: Number(parsed.METRICS_EMIT_INTERVAL_BLOCKS || 10),
 
     // At-risk user scanning
     atRiskScanLimit: Number(parsed.AT_RISK_SCAN_LIMIT || 0),
