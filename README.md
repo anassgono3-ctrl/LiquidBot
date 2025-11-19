@@ -862,6 +862,71 @@ PRICE_TRIGGER_DEBOUNCE_BY_ASSET=
 
 **No Execution Changes:** These upgrades only affect **when** opportunities are detected, not how they are executed. Transaction submission, gas tuning, and profitability simulation are unchanged.
 
+### Micro-Verification Fast Path
+
+The Micro-Verification Fast Path reduces time-to-first sub-1.0 HF read for critical liquidation opportunities by performing immediate, single-user health factor checks when specific conditions are met.
+
+**Key Features:**
+- **Immediate Single-User Checks**: Direct `getUserAccountData()` calls for critical candidates
+- **Near-Threshold Tracking**: Monitors users with HF in near-threshold band and worsening trend
+- **Projection-Based Triggers**: Schedules checks when HF projection crosses below 1.0
+- **Reserve Fast-Subset**: Priority verification for near-threshold users on reserve events
+- **Head Critical Slice**: Early micro-verification for critical candidates in head-start slice
+
+**Configuration:**
+```bash
+# Enable micro-verification fast path (default: true)
+MICRO_VERIFY_ENABLED=true
+
+# Maximum micro-verifications per block (default: 25)
+MICRO_VERIFY_MAX_PER_BLOCK=25
+
+# Minimum interval between micro-verify runs in milliseconds (default: 150)
+MICRO_VERIFY_INTERVAL_MS=150
+
+# Near-threshold band in basis points (default: 30 = 0.30%)
+NEAR_THRESHOLD_BAND_BPS=30
+
+# Maximum users in reserve fast-subset recheck (default: 64)
+RESERVE_FAST_SUBSET_MAX=64
+
+# Head critical batch size for near-threshold segment (default: 120)
+HEAD_CRITICAL_BATCH_SIZE=120
+
+# Recommended settings for Base mainnet
+EXECUTION_HF_THRESHOLD_BPS=10000        # 1.0000
+RESERVE_RECHECK_TOP_N=400               # Reduced from 800
+SPRINTER_ENABLED=true                   # Enable for prestaging
+PRESTAGE_HF_BPS=10150                   # 1.0150
+OPTIMISTIC_ENABLED=true                 # Enable optimistic dispatch
+```
+
+**How It Works:**
+1. Tracks users with HF in [threshold, threshold + band] range and worsening trend
+2. Schedules immediate micro-verification when:
+   - Projected HF < 1.0 based on HF delta tracking
+   - User in near-threshold band with negative HF delta
+   - Reserve event affects near-threshold users (fast-subset)
+   - Critical candidates in head-start slice during batch check
+   - Pre-staged Sprinter candidates with projHF < 1.0
+3. Emits liquidatable event immediately if micro-verify returns HF < 1.0
+4. Enforces per-block caps and interval throttling to prevent overload
+
+**Metrics:**
+```
+liquidbot_micro_verify_total{result="hit|miss|cap|error", trigger="projection|reserve_fast|head_critical|sprinter"}
+liquidbot_micro_verify_latency_ms  # Histogram
+liquidbot_reserve_fast_subset_total{asset}
+```
+
+**Benefits:**
+- Catches brief liquidation opportunities between batch sweeps
+- Reduces time-to-first sub-1.0 HF read by 300-500ms
+- No heavy background work or broad backfills
+- Respects existing safety guards and execution flow
+
+For detailed documentation, see [backend/docs/REALTIME_HF_RUNTIME.md](./backend/docs/REALTIME_HF_RUNTIME.md#micro-verification-fast-path)
+
 ## Security & Risk Controls
 
 - 95%+ contract test coverage (Hardhat + Foundry)
