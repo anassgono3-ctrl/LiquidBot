@@ -1777,9 +1777,28 @@ export class RealTimeHFService extends EventEmitter {
             return hfA - hfB;
           });
         
+        // === HEAD CRITICAL SLICE EARLY-BREAK ===
+        // For the head-start slice, check for critical candidates needing immediate micro-verification
+        const threshold = config.executionHfThresholdBps / 10000;
+        const nearThresholdBand = config.nearThresholdBandBps / 10000;
+        const upperBound = threshold + nearThresholdBand;
+        
+        // Identify critical candidates in the head-start slice
+        const criticalCandidates = lowHfCandidates
+          .slice(0, HEAD_START_SLICE_SIZE)
+          .filter(c => {
+            if (!c.lastHF) return false;
+            // Critical if: projected HF < 1.0 OR in near-threshold band
+            const inNearThreshold = c.lastHF >= threshold && c.lastHF <= upperBound;
+            return inNearThreshold;
+          });
+        
+        // Use HEAD_CRITICAL_BATCH_SIZE for near-threshold segment if configured
+        const criticalBatchSize = config.headCriticalBatchSize || HEAD_START_SLICE_SIZE;
+        
         // Take head-start slice for immediate processing
-        headStartSlice = lowHfCandidates.slice(0, HEAD_START_SLICE_SIZE);
-        remainingLowHf = lowHfCandidates.slice(HEAD_START_SLICE_SIZE);
+        headStartSlice = lowHfCandidates.slice(0, Math.min(criticalBatchSize, HEAD_START_SLICE_SIZE));
+        remainingLowHf = lowHfCandidates.slice(headStartSlice.length);
         
         // Log head-start metrics
         if (headStartSlice.length > 0) {
@@ -1795,8 +1814,36 @@ export class RealTimeHFService extends EventEmitter {
           // eslint-disable-next-line no-console
           console.log(
             `[realtime-hf] head-start slice size=${headStartSlice.length} ` +
-            `hf_range=[${minHf}, ${maxHf}] (risk-ordered)`
+            `hf_range=[${minHf}, ${maxHf}] critical=${criticalCandidates.length} (risk-ordered)`
           );
+          
+          // Perform micro-verification on critical candidates if enabled
+          if (this.microVerifier && config.microVerifyEnabled && criticalCandidates.length > 0) {
+            const microVerifyCandidates = criticalCandidates.slice(0, config.microVerifyMaxPerBlock);
+            
+            // eslint-disable-next-line no-console
+            console.log(
+              `[realtime-hf] head-critical micro-verify starting: ${microVerifyCandidates.length} candidates`
+            );
+            
+            for (const candidate of microVerifyCandidates) {
+              const result = await this.microVerifier.verify({
+                user: candidate.address,
+                trigger: 'head_critical',
+                currentHf: candidate.lastHF ?? undefined
+              });
+              
+              // If HF < 1.0, it will be emitted by the regular batch check
+              // The micro-verify just gives us an earlier read
+              if (result && result.success && result.hf < 1.0) {
+                // eslint-disable-next-line no-console
+                console.log(
+                  `[realtime-hf] head-critical hit user=${candidate.address.slice(0, 10)}... ` +
+                  `hf=${result.hf.toFixed(4)} latency=${result.latencyMs}ms`
+                );
+              }
+            }
+          }
           
           // Track latency (will be measured after batch processing completes)
           const headStartLatency = Date.now() - headStartTime;
@@ -2881,6 +2928,11 @@ export class RealTimeHFService extends EventEmitter {
             // Track HF delta and queue for pre-simulation if trending toward liquidation
             this.updateHfDeltaTracking(userAddress, healthFactor, blockNumber, totalDebtUsd);
             
+            // === SPRINTER INTEGRATION HOOK ===
+            // If SPRINTER_ENABLED and candidate has projHF < 1.0 with template ready,
+            // schedule immediate micro-verify (when Sprinter is fully integrated)
+            await this.maybeSprinterMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd);
+            
             // Track near-threshold users and schedule micro-verification if appropriate
             await this.maybeScheduleMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd, triggerType);
 
@@ -3164,6 +3216,62 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Track HF delta and queue for pre-simulation if trending toward liquidation
    */
+  /**
+   * Sprinter Integration Hook: Schedule micro-verification for pre-staged candidates.
+   * This is a placeholder integration point for when Sprinter is fully implemented.
+   */
+  private async maybeSprinterMicroVerify(
+    userAddress: string,
+    healthFactor: number,
+    blockNumber: number,
+    debtUsd: number
+  ): Promise<void> {
+    // Check if Sprinter is enabled
+    if (!config.sprinterEnabled || !this.microVerifier || !config.microVerifyEnabled) {
+      return;
+    }
+    
+    // Check if user has projected HF < 1.0 based on HF history
+    const state = this.userStates.get(userAddress);
+    if (!state?.hfHistory || state.hfHistory.length < 2) {
+      return;
+    }
+    
+    // Compute projection
+    const oldest = state.hfHistory[0];
+    const newest = state.hfHistory[state.hfHistory.length - 1];
+    const deltaHf = newest.hf - oldest.hf;
+    const deltaBlocks = newest.block - oldest.block;
+    
+    if (deltaBlocks === 0) return;
+    
+    const hfPerBlock = deltaHf / deltaBlocks;
+    const projectedHf = healthFactor + hfPerBlock;
+    
+    // If projected HF < 1.0 and meets debt threshold, schedule micro-verify
+    const prestageThreshold = config.prestageHfBps / 10000;
+    if (projectedHf < 1.0 && healthFactor < prestageThreshold && debtUsd >= config.preSimMinDebtUsd) {
+      // Schedule micro-verification
+      const result = await this.microVerifier.verify({
+        user: userAddress,
+        trigger: 'sprinter',
+        projectedHf,
+        currentHf: healthFactor
+      });
+      
+      if (result && result.success) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[realtime-hf] [sprinter] micro-verify user=${userAddress.slice(0, 10)}... ` +
+          `hf=${result.hf.toFixed(4)} projHf=${projectedHf.toFixed(4)} latency=${result.latencyMs}ms`
+        );
+        
+        // If HF < 1.0, emit immediately (handled by regular flow)
+        // The Sprinter would use the pre-staged template for instant execution
+      }
+    }
+  }
+  
   /**
    * Track near-threshold users and schedule micro-verification if conditions are met:
    * - Projection indicates projHF < 1.0, OR
