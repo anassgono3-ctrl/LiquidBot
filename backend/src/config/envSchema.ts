@@ -408,7 +408,20 @@ export const rawEnvSchema = z.object({
   // Multiple execution private keys (comma-separated)
   EXECUTION_PRIVATE_KEYS: z.string().optional(),
   // Template refresh index (BPS, e.g., 10000 = refresh every 10000 blocks)
-  TEMPLATE_REFRESH_INDEX_BPS: z.string().optional()
+  TEMPLATE_REFRESH_INDEX_BPS: z.string().optional(),
+  
+  // ==== REDIS L2 CACHE & COORDINATION ====
+  // Redis pipelining configuration
+  REDIS_ENABLE_PIPELINING: z.string().optional(),
+  REDIS_MAX_PIPELINE: z.string().optional(),
+  RISK_CACHE_COMPRESS: z.string().optional(),
+  
+  // ==== PREDICTIVE HEALTH FACTOR ENGINE ====
+  PREDICTIVE_ENABLED: z.string().optional(),
+  PREDICTIVE_HF_BUFFER_BPS: z.string().optional(),
+  PREDICTIVE_MAX_USERS_PER_TICK: z.string().optional(),
+  PREDICTIVE_HORIZON_SEC: z.string().optional(),
+  PREDICTIVE_SCENARIOS: z.string().optional()
 });
 
 export const env = (() => {
@@ -815,6 +828,21 @@ export const env = (() => {
       .split(',')
       .map(key => key.trim())
       .filter(key => key.length > 0),
-    templateRefreshIndexBps: Number(parsed.TEMPLATE_REFRESH_INDEX_BPS || 10000)
+    templateRefreshIndexBps: Number(parsed.TEMPLATE_REFRESH_INDEX_BPS || 10000),
+    
+    // ==== REDIS L2 CACHE & COORDINATION ====
+    redisEnablePipelining: (parsed.REDIS_ENABLE_PIPELINING || 'true').toLowerCase() === 'true',
+    redisMaxPipeline: Number(parsed.REDIS_MAX_PIPELINE || 500),
+    riskCacheCompress: (parsed.RISK_CACHE_COMPRESS || 'false').toLowerCase() === 'true',
+    
+    // ==== PREDICTIVE HEALTH FACTOR ENGINE ====
+    predictiveEnabled: (parsed.PREDICTIVE_ENABLED || 'false').toLowerCase() === 'true',
+    predictiveHfBufferBps: Number(parsed.PREDICTIVE_HF_BUFFER_BPS || 40), // 0.40%
+    predictiveMaxUsersPerTick: Number(parsed.PREDICTIVE_MAX_USERS_PER_TICK || 800),
+    predictiveHorizonSec: Number(parsed.PREDICTIVE_HORIZON_SEC || 180), // 3 minutes
+    predictiveScenarios: (parsed.PREDICTIVE_SCENARIOS || 'baseline,adverse,extreme')
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0)
   };
 })();

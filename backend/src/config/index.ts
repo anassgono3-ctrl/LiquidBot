@@ -414,5 +414,17 @@ export const config = {
   get optimisticEnabled() { return env.optimisticEnabled; },
   get optimisticEpsilonBps() { return env.optimisticEpsilonBps; },
   get executionPrivateKeys() { return env.executionPrivateKeys; },
-  get templateRefreshIndexBps() { return env.templateRefreshIndexBps; }
+  get templateRefreshIndexBps() { return env.templateRefreshIndexBps; },
+  
+  // Redis L2 Cache & Coordination
+  get redisEnablePipelining() { return env.redisEnablePipelining; },
+  get redisMaxPipeline() { return env.redisMaxPipeline; },
+  get riskCacheCompress() { return env.riskCacheCompress; },
+  
+  // Predictive Health Factor Engine
+  get predictiveEnabled() { return env.predictiveEnabled; },
+  get predictiveHfBufferBps() { return env.predictiveHfBufferBps; },
+  get predictiveMaxUsersPerTick() { return env.predictiveMaxUsersPerTick; },
+  get predictiveHorizonSec() { return env.predictiveHorizonSec; },
+  get predictiveScenarios() { return env.predictiveScenarios; }
 };
