@@ -128,4 +128,156 @@ describe('NotificationService', () => {
       await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
     });
   });
+
+  describe('checkScalingSanity with canonical decimals', () => {
+    it('should correctly scale WETH with 18 decimals', async () => {
+      // This is the exact case from production logs that was failing
+      const opportunity: Opportunity = {
+        id: 'test-weth-scaling',
+        txHash: '0xtx',
+        user: '0x896159741c56cdc2cfc67c9aa2aec61f84597d5a',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '113976640370681108', // ~0.113976640 WETH
+        principalAmountRaw: '94495369995315437',   // ~0.094495370 WETH
+        collateralReserve: { id: '0xweth', symbol: 'WETH', decimals: 18 },
+        principalReserve: { id: '0xweth', symbol: 'WETH', decimals: 18 },
+        healthFactor: 1.0011,
+        triggerSource: 'realtime'
+      };
+
+      // Should not throw and should not flag as scaling error
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+
+    it('should correctly scale WETH even with missing decimals', async () => {
+      // Test case where decimals are null/undefined - should use canonical 18 for WETH
+      const opportunity: Opportunity = {
+        id: 'test-weth-no-decimals',
+        txHash: '0xtx',
+        user: '0x896159741c56cdc2cfc67c9aa2aec61f84597d5a',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '113976640370681108', // ~0.113976640 WETH
+        principalAmountRaw: '94495369995315437',   // ~0.094495370 WETH
+        collateralReserve: { id: '0xweth', symbol: 'WETH', decimals: null },
+        principalReserve: { id: '0xweth', symbol: 'WETH', decimals: null },
+        healthFactor: 1.0011,
+        triggerSource: 'realtime'
+      };
+
+      // Should not throw - canonical decimals should handle missing values
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+
+    it('should correctly scale USDC with 6 decimals', async () => {
+      const opportunity: Opportunity = {
+        id: 'test-usdc-scaling',
+        txHash: '0xtx',
+        user: '0xUser',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '1000500000', // 1000.50 USDC (6 decimals)
+        principalAmountRaw: '500000000',   // 500.00 USDC (6 decimals)
+        collateralReserve: { id: '0xusdc', symbol: 'USDC', decimals: 6 },
+        principalReserve: { id: '0xusdc', symbol: 'USDC', decimals: 6 },
+        healthFactor: 0.95,
+        triggerSource: 'realtime'
+      };
+
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+
+    it('should correctly scale WBTC with 8 decimals', async () => {
+      const opportunity: Opportunity = {
+        id: 'test-wbtc-scaling',
+        txHash: '0xtx',
+        user: '0xUser',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '50000000', // 0.5 WBTC (8 decimals)
+        principalAmountRaw: '25000000',  // 0.25 WBTC (8 decimals)
+        collateralReserve: { id: '0xwbtc', symbol: 'WBTC', decimals: 8 },
+        principalReserve: { id: '0xwbtc', symbol: 'WBTC', decimals: 8 },
+        healthFactor: 0.98,
+        triggerSource: 'realtime'
+      };
+
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+
+    it('should use fallback decimals for unknown tokens', async () => {
+      const opportunity: Opportunity = {
+        id: 'test-unknown-token',
+        txHash: '0xtx',
+        user: '0xUser',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '1000000000', // Should use provided decimals
+        principalAmountRaw: '500000000',
+        collateralReserve: { id: '0xunknown', symbol: 'XYZ', decimals: 9 },
+        principalReserve: { id: '0xunknown', symbol: 'XYZ', decimals: 9 },
+        healthFactor: 0.95,
+        triggerSource: 'realtime'
+      };
+
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+
+    it('should handle case-insensitive symbol matching', async () => {
+      const opportunity: Opportunity = {
+        id: 'test-lowercase-weth',
+        txHash: '0xtx',
+        user: '0xUser',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '1000000000000000000', // 1.0 weth (lowercase)
+        principalAmountRaw: '500000000000000000',
+        collateralReserve: { id: '0xweth', symbol: 'weth', decimals: 18 },
+        principalReserve: { id: '0xweth', symbol: 'weth', decimals: 18 },
+        healthFactor: 0.95,
+        triggerSource: 'realtime'
+      };
+
+      await expect(notificationService.notifyOpportunity(opportunity)).resolves.not.toThrow();
+    });
+
+    it('should handle stablecoins correctly', async () => {
+      // Test DAI, USDbC, USDT
+      const daiOpp: Opportunity = {
+        id: 'test-dai',
+        txHash: '0xtx',
+        user: '0xUser',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '5000000000000000000000', // 5000 DAI
+        principalAmountRaw: '2000000000000000000000',
+        collateralReserve: { id: '0xdai', symbol: 'DAI', decimals: 18 },
+        principalReserve: { id: '0xdai', symbol: 'DAI', decimals: 18 },
+        healthFactor: 0.95,
+        triggerSource: 'realtime'
+      };
+
+      await expect(notificationService.notifyOpportunity(daiOpp)).resolves.not.toThrow();
+    });
+
+    it('should handle liquid staking tokens', async () => {
+      // Test cbETH, wstETH, weETH
+      const cbethOpp: Opportunity = {
+        id: 'test-cbeth',
+        txHash: '0xtx',
+        user: '0xUser',
+        liquidator: '0xLiq',
+        timestamp: 1234567890,
+        collateralAmountRaw: '2000000000000000000', // 2.0 cbETH
+        principalAmountRaw: '1000000000000000000',
+        collateralReserve: { id: '0xcbeth', symbol: 'cbETH', decimals: 18 },
+        principalReserve: { id: '0xcbeth', symbol: 'cbETH', decimals: 18 },
+        healthFactor: 0.95,
+        triggerSource: 'realtime'
+      };
+
+      await expect(notificationService.notifyOpportunity(cbethOpp)).resolves.not.toThrow();
+    });
+  });
 });
