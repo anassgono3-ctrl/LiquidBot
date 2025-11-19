@@ -448,6 +448,73 @@ export const hotlistSize = new Gauge({
   registers: [metricsRegistry]
 });
 
+// ==== TIER 0 + TIER 1 PERFORMANCE METRICS ====
+
+// Reserve event to first micro-verify timing
+export const reserveEventToMicroVerifyMs = new Histogram({
+  name: 'liquidbot_reserve_event_to_first_microverify_ms',
+  help: 'Time from ReserveDataUpdated event to first micro-verify completion (milliseconds)',
+  labelNames: ['reserve'],
+  buckets: [50, 100, 150, 200, 250, 300, 500, 1000],
+  registers: [metricsRegistry]
+});
+
+// Hedging metrics
+export const microVerifyHedgedTotal = new Counter({
+  name: 'liquidbot_microverify_hedged_total',
+  help: 'Total micro-verifications that used hedging',
+  labelNames: ['trigger'],
+  registers: [metricsRegistry]
+});
+
+export const microVerifyTimeoutsTotal = new Counter({
+  name: 'liquidbot_microverify_timeouts_total',
+  help: 'Total micro-verification timeouts',
+  labelNames: ['trigger'],
+  registers: [metricsRegistry]
+});
+
+// Subset metrics
+export const subsetIntersectionSize = new Histogram({
+  name: 'liquidbot_subset_intersection_size',
+  help: 'Size of near-threshold ∩ reserve borrowers intersection',
+  labelNames: ['trigger'],
+  buckets: [0, 1, 2, 5, 10, 20, 50, 100],
+  registers: [metricsRegistry]
+});
+
+export const subsetEnqueuedTotal = new Counter({
+  name: 'liquidbot_subset_enqueued_total',
+  help: 'Total subset micro-verifications enqueued',
+  labelNames: ['trigger'],
+  registers: [metricsRegistry]
+});
+
+export const subsetSkippedEmptyTotal = new Counter({
+  name: 'liquidbot_subset_skipped_empty_total',
+  help: 'Total subsets skipped due to empty intersection',
+  labelNames: ['trigger'],
+  registers: [metricsRegistry]
+});
+
+// Large sweep defer metrics
+export const largeSweepDeferMs = new Histogram({
+  name: 'liquidbot_large_sweep_defer_ms',
+  help: 'Time large sweep was deferred to allow subset completion (milliseconds)',
+  labelNames: ['reserve'],
+  buckets: [0, 50, 80, 100, 150, 200, 300],
+  registers: [metricsRegistry]
+});
+
+// Post-liquidation refresh metrics
+export const postLiquidationRefreshMs = new Histogram({
+  name: 'liquidbot_post_liquidation_refresh_ms',
+  help: 'Post-liquidation refresh latency (milliseconds)',
+  labelNames: ['removed'],
+  buckets: [50, 100, 150, 200, 300, 500],
+  registers: [metricsRegistry]
+});
+
 export const hotlistPromotedTotal = new Counter({
   name: 'liquidbot_hotlist_promoted_total',
   help: 'Total number of users promoted to hotlist',

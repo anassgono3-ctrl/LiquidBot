@@ -435,7 +435,28 @@ export const rawEnvSchema = z.object({
   // Maximum users in reserve fast-subset recheck
   RESERVE_FAST_SUBSET_MAX: z.string().optional(),
   // Head critical batch size for near-threshold segment
-  HEAD_CRITICAL_BATCH_SIZE: z.string().optional()
+  HEAD_CRITICAL_BATCH_SIZE: z.string().optional(),
+  
+  // ==== TIER 0 + TIER 1 PERFORMANCE UPGRADES ====
+  // Tier 0: Fast Subset Before Large Sweeps
+  RESERVE_FAST_SUBSET_SWEEP_DELAY_MS: z.string().optional(),
+  
+  // Tier 0: Disable Hedging For Single Micro-Verifies
+  MICRO_VERIFY_HEDGE_FOR_SINGLE: z.string().optional(),
+  MICRO_VERIFY_DEDICATED_RPC: z.string().optional(),
+  
+  // Tier 0: Post-Liquidation Refresh
+  POST_LIQUIDATION_REFRESH: z.string().optional(),
+  
+  // Tier 0: Address Normalization
+  ADDRESS_NORMALIZE_LOWERCASE: z.string().optional(),
+  
+  // Tier 1: Index Jump Prediction
+  INDEX_JUMP_BPS_TRIGGER: z.string().optional(),
+  HF_PRED_CRITICAL: z.string().optional(),
+  
+  // Tier 1: Risk Ordering Enhancement
+  RISK_ORDERING_SIMPLE: z.string().optional()
 });
 
 export const env = (() => {
@@ -865,6 +886,27 @@ export const env = (() => {
     microVerifyIntervalMs: Number(parsed.MICRO_VERIFY_INTERVAL_MS || 150),
     nearThresholdBandBps: Number(parsed.NEAR_THRESHOLD_BAND_BPS || 30), // 0.30%
     reserveFastSubsetMax: Number(parsed.RESERVE_FAST_SUBSET_MAX || 64),
-    headCriticalBatchSize: Number(parsed.HEAD_CRITICAL_BATCH_SIZE || 120)
+    headCriticalBatchSize: Number(parsed.HEAD_CRITICAL_BATCH_SIZE || 120),
+    
+    // ==== TIER 0 + TIER 1 PERFORMANCE UPGRADES ====
+    // Tier 0: Fast Subset Before Large Sweeps
+    reserveFastSubsetSweepDelayMs: Number(parsed.RESERVE_FAST_SUBSET_SWEEP_DELAY_MS || 80),
+    
+    // Tier 0: Disable Hedging For Single Micro-Verifies
+    microVerifyHedgeForSingle: (parsed.MICRO_VERIFY_HEDGE_FOR_SINGLE || 'false').toLowerCase() === 'true',
+    microVerifyDedicatedRpc: parsed.MICRO_VERIFY_DEDICATED_RPC,
+    
+    // Tier 0: Post-Liquidation Refresh
+    postLiquidationRefresh: (parsed.POST_LIQUIDATION_REFRESH || 'true').toLowerCase() === 'true',
+    
+    // Tier 0: Address Normalization
+    addressNormalizeLowercase: (parsed.ADDRESS_NORMALIZE_LOWERCASE || 'true').toLowerCase() === 'true',
+    
+    // Tier 1: Index Jump Prediction
+    indexJumpBpsTrigger: Number(parsed.INDEX_JUMP_BPS_TRIGGER || 3),
+    hfPredCritical: Number(parsed.HF_PRED_CRITICAL || 1.0008),
+    
+    // Tier 1: Risk Ordering Enhancement
+    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true'
   };
 })();
