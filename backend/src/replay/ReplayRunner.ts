@@ -182,8 +182,13 @@ export async function runReplay(
     }
   }
   
-  // Close NDJSON stream
-  ndjsonStream.end();
+  // Close NDJSON stream and wait for it to finish
+  await new Promise<void>((resolve, reject) => {
+    ndjsonStream.end((err: Error | null | undefined) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
   console.log(`[replay] Completed per-block metrics write to ${ndjsonPath}`);
   
   // Generate summary JSON
