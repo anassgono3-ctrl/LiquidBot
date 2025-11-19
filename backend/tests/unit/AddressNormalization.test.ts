@@ -115,27 +115,27 @@ describe('Address Normalization', () => {
 
   describe('assertIntersectionConsistency', () => {
     it('should not warn when intersection is non-empty', () => {
-      const setA = new Set(['0xabcd']);
-      const setB = new Set(['0xabcd']);
-      const intersection = new Set(['0xabcd']);
+      const setA = new Set<string>(['0xabcd']);
+      const setB = new Set<string>(['0xabcd']);
+      const intersection = new Set<string>(['0xabcd']);
       
       // Should not throw or log warning
       assertIntersectionConsistency(setA, setB, intersection, 'test');
     });
 
     it('should warn when intersection is empty but both sets are non-empty', () => {
-      const setA = new Set(['0xABCD']);
-      const setB = new Set(['0xEFGH']);
-      const intersection = new Set();
+      const setA = new Set<string>(['0xABCD']);
+      const setB = new Set<string>(['0xEFGH']);
+      const intersection = new Set<string>();
       
       // Should log warning (captured by console mock in actual test)
       assertIntersectionConsistency(setA, setB, intersection, 'test');
     });
 
     it('should not warn when one set is empty', () => {
-      const setA = new Set();
-      const setB = new Set(['0xabcd']);
-      const intersection = new Set();
+      const setA = new Set<string>();
+      const setB = new Set<string>(['0xabcd']);
+      const intersection = new Set<string>();
       
       // Should not warn
       assertIntersectionConsistency(setA, setB, intersection, 'test');

@@ -9,6 +9,8 @@
  * Prioritizes hot-set recomputes to reduce time-to-attempt for liquidations.
  */
 
+import { normalizeAddress } from '../utils/Address.js';
+
 export interface HotSetEntry {
   address: string;
   hf: number;
@@ -69,7 +71,7 @@ export class HotSetTracker {
     totalCollateralUsd: number,
     totalDebtUsd: number
   ): SetCategory {
-    const normalized = address.toLowerCase();
+    const normalized = normalizeAddress(address);
     const now = Date.now();
 
     const entry: HotSetEntry = {
@@ -167,7 +169,7 @@ export class HotSetTracker {
    * Remove a user entirely (e.g., when they repay and become safe)
    */
   remove(address: string): void {
-    const normalized = address.toLowerCase();
+    const normalized = normalizeAddress(address);
     this.removeFromAllSets(normalized);
   }
 
@@ -197,21 +199,21 @@ export class HotSetTracker {
    * Check if user is in hot set
    */
   isInHotSet(address: string): boolean {
-    return this.hotSet.has(address.toLowerCase());
+    return this.hotSet.has(normalizeAddress(address));
   }
 
   /**
    * Check if user is in warm set
    */
   isInWarmSet(address: string): boolean {
-    return this.warmSet.has(address.toLowerCase());
+    return this.warmSet.has(normalizeAddress(address));
   }
 
   /**
    * Get user's current category
    */
   getCategory(address: string): SetCategory | null {
-    const normalized = address.toLowerCase();
+    const normalized = normalizeAddress(address);
     
     if (this.hotSet.has(normalized)) {
       return 'hot';
