@@ -434,5 +434,15 @@ export const config = {
   get microVerifyIntervalMs() { return env.microVerifyIntervalMs; },
   get nearThresholdBandBps() { return env.nearThresholdBandBps; },
   get reserveFastSubsetMax() { return env.reserveFastSubsetMax; },
-  get headCriticalBatchSize() { return env.headCriticalBatchSize; }
+  get headCriticalBatchSize() { return env.headCriticalBatchSize; },
+  
+  // Tier 0 + Tier 1 Performance Upgrades
+  get reserveFastSubsetSweepDelayMs() { return env.reserveFastSubsetSweepDelayMs; },
+  get microVerifyHedgeForSingle() { return env.microVerifyHedgeForSingle; },
+  get microVerifyDedicatedRpc() { return env.microVerifyDedicatedRpc; },
+  get postLiquidationRefresh() { return env.postLiquidationRefresh; },
+  get addressNormalizeLowercase() { return env.addressNormalizeLowercase; },
+  get indexJumpBpsTrigger() { return env.indexJumpBpsTrigger; },
+  get hfPredCritical() { return env.hfPredCritical; },
+  get riskOrderingSimple() { return env.riskOrderingSimple; }
 };

@@ -14,9 +14,10 @@ import {
 
 export interface MicroVerifyCandidate {
   user: string;
-  trigger: 'projection_cross' | 'near_threshold' | 'reserve_fast' | 'head_critical' | 'sprinter';
+  trigger: 'projection_cross' | 'near_threshold' | 'reserve_fast' | 'head_critical' | 'sprinter' | 'index_jump' | 'price_shock' | 'liquidation_refresh' | 'proj_cross';
   projectedHf?: number;
   currentHf?: number;
+  hedge?: boolean; // Optional: override default hedging behavior
 }
 
 export interface MicroVerifyResult {
@@ -97,7 +98,7 @@ export class MicroVerifier {
    * Perform immediate single-user HF verification
    */
   async verify(candidate: MicroVerifyCandidate): Promise<MicroVerifyResult | null> {
-    const { user, trigger } = candidate;
+    const { user, trigger, hedge } = candidate;
     
     // Check if verification is allowed
     if (!this.canVerify(user)) {
@@ -108,10 +109,22 @@ export class MicroVerifier {
       return null;
     }
     
+    // Determine if hedging should be used
+    // Hedging disabled for single micro-verifies unless explicitly requested
+    const shouldHedge = hedge !== undefined 
+      ? hedge 
+      : config.microVerifyHedgeForSingle;
+    
+    // For fast-lane triggers (reserve_fast, index_jump, price_shock, liquidation_refresh),
+    // default to no hedging for minimal latency
+    const fastLaneTriggers = ['reserve_fast', 'index_jump', 'price_shock', 'liquidation_refresh', 'proj_cross'];
+    const useFastPath = fastLaneTriggers.includes(trigger) && !shouldHedge;
+    
     const startTime = Date.now();
     
     try {
       // Single getUserAccountData call
+      // TODO: If shouldHedge is true and dedicated RPC is configured, could implement hedge logic here
       const result = await this.aavePool.getUserAccountData(user);
       
       const latencyMs = Date.now() - startTime;
