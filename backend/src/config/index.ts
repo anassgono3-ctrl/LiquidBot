@@ -426,5 +426,13 @@ export const config = {
   get predictiveHfBufferBps() { return env.predictiveHfBufferBps; },
   get predictiveMaxUsersPerTick() { return env.predictiveMaxUsersPerTick; },
   get predictiveHorizonSec() { return env.predictiveHorizonSec; },
-  get predictiveScenarios() { return env.predictiveScenarios; }
+  get predictiveScenarios() { return env.predictiveScenarios; },
+  
+  // Micro-Verification Fast Path
+  get microVerifyEnabled() { return env.microVerifyEnabled; },
+  get microVerifyMaxPerBlock() { return env.microVerifyMaxPerBlock; },
+  get microVerifyIntervalMs() { return env.microVerifyIntervalMs; },
+  get nearThresholdBandBps() { return env.nearThresholdBandBps; },
+  get reserveFastSubsetMax() { return env.reserveFastSubsetMax; },
+  get headCriticalBatchSize() { return env.headCriticalBatchSize; }
 };
