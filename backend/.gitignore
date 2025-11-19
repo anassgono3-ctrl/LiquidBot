@@ -39,3 +39,6 @@ prisma/migrations/*_migration/
 tmp/
 temp/
 *.tmp
+
+# Replay outputs
+replay/
