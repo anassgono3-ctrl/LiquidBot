@@ -456,7 +456,13 @@ export const rawEnvSchema = z.object({
   HF_PRED_CRITICAL: z.string().optional(),
   
   // Tier 1: Risk Ordering Enhancement
-  RISK_ORDERING_SIMPLE: z.string().optional()
+  RISK_ORDERING_SIMPLE: z.string().optional(),
+  
+  // ==== HISTORICAL REPLAY MODE ====
+  // Enable historical replay mode (read-only deterministic liquidation detection)
+  REPLAY: z.string().optional(),
+  // Block range for replay in format: start-end (e.g., 38393176-38395221)
+  REPLAY_BLOCK_RANGE: z.string().optional()
 });
 
 export const env = (() => {
@@ -907,6 +913,10 @@ export const env = (() => {
     hfPredCritical: Number(parsed.HF_PRED_CRITICAL || 1.0008),
     
     // Tier 1: Risk Ordering Enhancement
-    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true'
+    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true',
+    
+    // ==== HISTORICAL REPLAY MODE ====
+    isReplay: (parsed.REPLAY || 'false').toLowerCase() === 'true',
+    replayBlockRange: parsed.REPLAY_BLOCK_RANGE
   };
 })();

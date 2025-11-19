@@ -444,5 +444,47 @@ export const config = {
   get addressNormalizeLowercase() { return env.addressNormalizeLowercase; },
   get indexJumpBpsTrigger() { return env.indexJumpBpsTrigger; },
   get hfPredCritical() { return env.hfPredCritical; },
-  get riskOrderingSimple() { return env.riskOrderingSimple; }
+  get riskOrderingSimple() { return env.riskOrderingSimple; },
+  
+  // Historical Replay Mode
+  get isReplay() { return env.isReplay; },
+  get replayBlockRange() { return env.replayBlockRange; },
+  
+  // Safety overrides for replay mode
+  get effectiveExecutionEnabled() { 
+    return this.isReplay ? false : env.executionEnabled; 
+  },
+  get effectiveDryRunExecution() { 
+    return this.isReplay ? true : env.dryRunExecution; 
+  },
+  get effectiveNotificationsEnabled() {
+    // Disable all notifications in replay mode
+    return !this.isReplay && !!(env.telegramBotToken && env.telegramChatId);
+  },
+  
+  // On-chain executor
+  get executorAddress() { return process.env.EXECUTOR_ADDRESS; },
+  get executionPrivateKey() { return process.env.EXECUTION_PRIVATE_KEY; },
+  get rpcUrl() { return process.env.RPC_URL; },
+  get chainId() { return env.chainId; },
+  get oneInchApiKey() { return process.env.ONEINCH_API_KEY; },
+  get oneInchBaseUrl() { return env.oneInchBaseUrl; },
+  get maxSlippageBps() { return env.maxSlippageBps; },
+  get closeFactorMode() { return env.closeFactorMode; },
+  get privateBundleRpc() { return env.privateBundleRpc; },
+  get maxGasPriceGwei() { return env.maxGasPriceGwei; },
+  get minProfitAfterGasUsd() { return env.minProfitAfterGasUsd; },
+  get maxPositionSizeUsd() { return env.maxPositionSizeUsd; },
+  get dailyLossLimitUsd() { return env.dailyLossLimitUsd; },
+  get blacklistedTokens() { return env.blacklistedTokens; },
+  
+  // Price fastpath
+  get priceFastpathEnabled() { return env.priceFastpathEnabled; },
+  get priceFastpathAssets() { return env.priceFastpathAssets; },
+  
+  // Gas strategy
+  get gasStrategy() { return env.gasStrategy; },
+  get gasMaxFeeMultiplier() { return env.gasMaxFeeMultiplier; },
+  get gasMinPriorityGwei() { return env.gasMinPriorityGwei; },
+  get usePrivateTx() { return env.usePrivateTx; }
 };

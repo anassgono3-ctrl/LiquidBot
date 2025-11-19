@@ -39,3 +39,7 @@ prisma/migrations/*_migration/
 tmp/
 temp/
 *.tmp
+
+# Replay output files
+replay/*.ndjson
+replay/*.json
