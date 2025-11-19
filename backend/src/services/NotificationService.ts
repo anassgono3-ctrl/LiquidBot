@@ -125,6 +125,54 @@ export class NotificationService {
   }
 
   /**
+   * Get canonical decimals for well-known token symbols.
+   * Falls back to provided decimals or 18 if unknown.
+   */
+  private getCanonicalDecimals(symbol?: string | null, fallback?: number | null): number {
+    const normalizedSymbol = symbol?.toUpperCase();
+    
+    switch (normalizedSymbol) {
+      case 'WETH':
+      case 'DAI':
+      case 'CBETH':
+      case 'WSTETH':
+      case 'WEETH':
+        return 18;
+      case 'USDC':
+      case 'USDBC':
+      case 'USDT':
+        return 6;
+      case 'WBTC':
+        return 8;
+      default:
+        return typeof fallback === 'number' ? fallback : 18;
+    }
+  }
+
+  /**
+   * Convert raw amount to human-readable using BigInt-safe math.
+   * @param raw - Raw amount (can be string, number, or bigint)
+   * @param decimals - Token decimals
+   * @returns Human-readable amount as number
+   */
+  private toHuman(raw: bigint | string | number | undefined | null, decimals: number): number {
+    if (raw === undefined || raw === null) {
+      return 0;
+    }
+    
+    try {
+      const bn = typeof raw === 'bigint' ? raw : BigInt(raw.toString());
+      const base = 10n ** BigInt(Math.max(0, decimals));
+      const integer = Number(bn / base);
+      const frac = Number(bn % base) / Number(base);
+      return integer + frac;
+    } catch {
+      // Fallback to simple conversion if BigInt conversion fails
+      return 0;
+    }
+  }
+
+  /**
    * Check for scaling issues in opportunity amounts.
    * Returns validation result with warnings if issues detected.
    * UPDATED: Now defers validation when price feeds not ready instead of immediately failing
@@ -136,10 +184,13 @@ export class NotificationService {
   }> {
     const warnings: string[] = [];
 
-    // Check collateral amount
+    // Check collateral amount using canonical decimals
     if (opportunity.collateralAmountRaw) {
-      const collateralDecimals = opportunity.collateralReserve.decimals ?? 18;
-      const humanCollateral = Number(opportunity.collateralAmountRaw) / (10 ** collateralDecimals);
+      const collateralDecimals = this.getCanonicalDecimals(
+        opportunity.collateralReserve.symbol,
+        opportunity.collateralReserve.decimals
+      );
+      const humanCollateral = this.toHuman(opportunity.collateralAmountRaw, collateralDecimals);
       const collateralValidation = validateAmount(humanCollateral, opportunity.collateralReserve.symbol || 'collateral');
       
       if (!collateralValidation.valid) {
@@ -147,10 +198,13 @@ export class NotificationService {
       }
     }
 
-    // Check debt amount
+    // Check debt amount using canonical decimals
     if (opportunity.principalAmountRaw) {
-      const principalDecimals = opportunity.principalReserve.decimals ?? 18;
-      const humanDebt = Number(opportunity.principalAmountRaw) / (10 ** principalDecimals);
+      const principalDecimals = this.getCanonicalDecimals(
+        opportunity.principalReserve.symbol,
+        opportunity.principalReserve.decimals
+      );
+      const humanDebt = this.toHuman(opportunity.principalAmountRaw, principalDecimals);
       const debtValidation = validateAmount(humanDebt, opportunity.principalReserve.symbol || 'debt');
       
       if (!debtValidation.valid) {
@@ -188,8 +242,11 @@ export class NotificationService {
             
             if (revalidatedPrice > 0) {
               // Price is now available! Update the opportunity
-              const collateralDecimals = opportunity.collateralReserve.decimals ?? 18;
-              const collateralAmountNum = Number(opportunity.collateralAmountRaw) / (10 ** collateralDecimals);
+              const collateralDecimals = this.getCanonicalDecimals(
+                opportunity.collateralReserve.symbol,
+                opportunity.collateralReserve.decimals
+              );
+              const collateralAmountNum = this.toHuman(opportunity.collateralAmountRaw, collateralDecimals);
               opportunity.collateralValueUsd = collateralAmountNum * revalidatedPrice;
               
               // eslint-disable-next-line no-console
