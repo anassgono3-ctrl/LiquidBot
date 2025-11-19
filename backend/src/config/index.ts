@@ -434,5 +434,23 @@ export const config = {
   get microVerifyIntervalMs() { return env.microVerifyIntervalMs; },
   get nearThresholdBandBps() { return env.nearThresholdBandBps; },
   get reserveFastSubsetMax() { return env.reserveFastSubsetMax; },
-  get headCriticalBatchSize() { return env.headCriticalBatchSize; }
+  get headCriticalBatchSize() { return env.headCriticalBatchSize; },
+
+  // Historical Replay Harness
+  get replay() { return env.replay; },
+  get replayBlockRange() { return env.replayBlockRange; },
+
+  // RPC URL (for replay and execution)
+  get rpcUrl() { return process.env.RPC_URL; },
+
+  // Execution config
+  get executorAddress() { return process.env.EXECUTOR_ADDRESS; },
+  get executionPrivateKey() { return process.env.EXECUTION_PRIVATE_KEY; },
+  get oneInchApiKey() { return process.env.ONEINCH_API_KEY; },
+  get chainId() { return parseInt(process.env.CHAIN_ID || '8453', 10); },
+  get maxGasPriceGwei() { return parseFloat(process.env.MAX_GAS_PRICE_GWEI || '50'); },
+  get minProfitAfterGasUsd() { return parseFloat(process.env.MIN_PROFIT_AFTER_GAS_USD || '10'); },
+  get maxPositionSizeUsd() { return parseFloat(process.env.MAX_POSITION_SIZE_USD || '5000'); },
+  get dailyLossLimitUsd() { return parseFloat(process.env.DAILY_LOSS_LIMIT_USD || '1000'); },
+  get blacklistedTokens() { return (process.env.BLACKLISTED_TOKENS || '').split(',').map(t => t.trim()).filter(t => t.length > 0); }
 };

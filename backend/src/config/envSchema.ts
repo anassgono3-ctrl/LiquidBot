@@ -435,7 +435,13 @@ export const rawEnvSchema = z.object({
   // Maximum users in reserve fast-subset recheck
   RESERVE_FAST_SUBSET_MAX: z.string().optional(),
   // Head critical batch size for near-threshold segment
-  HEAD_CRITICAL_BATCH_SIZE: z.string().optional()
+  HEAD_CRITICAL_BATCH_SIZE: z.string().optional(),
+
+  // ==== HISTORICAL REPLAY HARNESS ====
+  // Enable historical replay mode (0 or 1)
+  REPLAY: z.string().optional(),
+  // Block range for replay (format: start-end, e.g., 38393176-38395221)
+  REPLAY_BLOCK_RANGE: z.string().optional()
 });
 
 export const env = (() => {
@@ -865,6 +871,10 @@ export const env = (() => {
     microVerifyIntervalMs: Number(parsed.MICRO_VERIFY_INTERVAL_MS || 150),
     nearThresholdBandBps: Number(parsed.NEAR_THRESHOLD_BAND_BPS || 30), // 0.30%
     reserveFastSubsetMax: Number(parsed.RESERVE_FAST_SUBSET_MAX || 64),
-    headCriticalBatchSize: Number(parsed.HEAD_CRITICAL_BATCH_SIZE || 120)
+    headCriticalBatchSize: Number(parsed.HEAD_CRITICAL_BATCH_SIZE || 120),
+
+    // ==== HISTORICAL REPLAY HARNESS ====
+    replay: (parsed.REPLAY || '0') === '1',
+    replayBlockRange: parsed.REPLAY_BLOCK_RANGE
   };
 })();
