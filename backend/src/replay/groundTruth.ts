@@ -3,9 +3,8 @@
  */
 
 import { ethers } from 'ethers';
-import type { ReplayBlockRange, LiquidationEvent } from './types.js';
 
-const LIQUIDATION_CALL_SIGNATURE = 'LiquidationCall(address,address,address,uint256,uint256,address,bool)';
+import type { ReplayBlockRange, LiquidationEvent } from './types.js';
 
 /**
  * Fetch all LiquidationCall events in the given block range

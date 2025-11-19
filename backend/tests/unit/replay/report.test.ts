@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { generateSummary } from '../../../src/replay/report.js';
 import type { LiquidationAnalysis } from '../../../src/replay/types.js';
 

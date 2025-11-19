@@ -4,6 +4,7 @@
 
 import { writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
+
 import type { LiquidationAnalysis, ReplaySummary, MissReason } from './types.js';
 
 const OUTPUT_DIR = join(process.cwd(), 'replay', 'output');

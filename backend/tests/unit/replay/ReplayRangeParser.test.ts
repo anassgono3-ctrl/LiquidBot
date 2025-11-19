@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { ReplayRangeParser } from '../../../src/replay/ReplayRangeParser.js';
 
 describe('ReplayRangeParser', () => {

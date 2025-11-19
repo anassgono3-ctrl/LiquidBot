@@ -6,6 +6,7 @@
  */
 
 import { ethers } from 'ethers';
+
 import { config } from '../src/config/index.js';
 import { ReplayRangeParser } from '../src/replay/ReplayRangeParser.js';
 import { ReplayRunner } from '../src/replay/ReplayRunner.js';
