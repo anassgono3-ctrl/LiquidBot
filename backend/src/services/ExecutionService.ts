@@ -722,6 +722,15 @@ export class ExecutionService {
    * @returns Execution result (simulated or real)
    */
   async execute(opportunity: Opportunity): Promise<ExecutionResult> {
+    // Safety guard: never execute in replay mode
+    if (config.replay) {
+      return {
+        success: false,
+        simulated: true,
+        reason: 'replay_mode_active'
+      };
+    }
+    
     // Check if execution is enabled
     if (!executionConfig.executionEnabled) {
       return {

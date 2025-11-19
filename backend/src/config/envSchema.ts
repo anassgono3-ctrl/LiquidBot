@@ -2,11 +2,13 @@ import { z } from 'zod';
 
 const booleanString = z.enum(['true', 'false']).transform(v => v === 'true');
 const isTest = (process.env.NODE_ENV || '').toLowerCase() === 'test';
+const isReplay = process.env.REPLAY === '1';
 
 // Inject test defaults BEFORE schema parsing so Zod doesn't throw for test runs.
-if (isTest) {
-  if (!process.env.API_KEY) process.env.API_KEY = 'test-api-key';
-  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-jwt-secret';
+// Also inject dummy values for replay mode to avoid requiring production secrets.
+if (isTest || isReplay) {
+  if (!process.env.API_KEY) process.env.API_KEY = isReplay ? 'replay-dummy-key' : 'test-api-key';
+  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = isReplay ? 'replay-dummy-secret-12345678' : 'test-jwt-secret';
   if (!process.env.USE_MOCK_SUBGRAPH) process.env.USE_MOCK_SUBGRAPH = 'true';
 }
 
@@ -456,7 +458,13 @@ export const rawEnvSchema = z.object({
   HF_PRED_CRITICAL: z.string().optional(),
   
   // Tier 1: Risk Ordering Enhancement
-  RISK_ORDERING_SIMPLE: z.string().optional()
+  RISK_ORDERING_SIMPLE: z.string().optional(),
+  
+  // ==== REPLAY MODE (Historical validation) ====
+  // Enable replay mode (1 = enabled, any other value = disabled)
+  REPLAY: z.string().optional(),
+  // Block range for replay in format: START-END (e.g., 38393176-38395221)
+  REPLAY_BLOCK_RANGE: z.string().optional()
 });
 
 export const env = (() => {
@@ -468,6 +476,27 @@ export const env = (() => {
   if (useSubgraph && !useMock && !isTest) {
     if (!parsed.GRAPH_API_KEY) throw new Error('GRAPH_API_KEY required when USE_SUBGRAPH=true and USE_MOCK_SUBGRAPH=false');
     if (!parsed.SUBGRAPH_DEPLOYMENT_ID) throw new Error('SUBGRAPH_DEPLOYMENT_ID required when USE_SUBGRAPH=true and USE_MOCK_SUBGRAPH=false');
+  }
+  
+  // Validate replay configuration
+  if (isReplay) {
+    if (!parsed.REPLAY_BLOCK_RANGE) {
+      throw new Error('REPLAY_BLOCK_RANGE required when REPLAY=1 (format: START-END, e.g., 38393176-38395221)');
+    }
+    const rangeMatch = parsed.REPLAY_BLOCK_RANGE.match(/^(\d+)-(\d+)$/);
+    if (!rangeMatch) {
+      throw new Error(`Invalid REPLAY_BLOCK_RANGE format: "${parsed.REPLAY_BLOCK_RANGE}". Expected format: START-END (e.g., 38393176-38395221)`);
+    }
+    const start = Number(rangeMatch[1]);
+    const end = Number(rangeMatch[2]);
+    if (start > end) {
+      throw new Error(`Invalid REPLAY_BLOCK_RANGE: start block ${start} is greater than end block ${end}`);
+    }
+    const span = end - start + 1;
+    const maxSpan = 100000; // Maximum 100k blocks per replay
+    if (span > maxSpan) {
+      throw new Error(`REPLAY_BLOCK_RANGE span too large: ${span} blocks (max: ${maxSpan}). Use a smaller range.`);
+    }
   }
 
   return {
@@ -907,6 +936,10 @@ export const env = (() => {
     hfPredCritical: Number(parsed.HF_PRED_CRITICAL || 1.0008),
     
     // Tier 1: Risk Ordering Enhancement
-    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true'
+    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true',
+    
+    // ==== REPLAY MODE (Historical validation) ====
+    replay: parsed.REPLAY === '1',
+    replayBlockRange: parsed.REPLAY_BLOCK_RANGE
   };
 })();

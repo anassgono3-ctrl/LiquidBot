@@ -62,6 +62,11 @@ export class NotificationService {
    * UPDATED: Now handles deferred opportunities when price feeds not ready
    */
   async notifyOpportunity(opportunity: Opportunity): Promise<void> {
+    // Safety guard: never send notifications in replay mode
+    if (config.replay) {
+      return;
+    }
+    
     if (!this.enabled || !this.bot || !this.chatId) {
       return;
     }
@@ -411,6 +416,11 @@ export class NotificationService {
    * Send a health breach notification
    */
   async notifyHealthBreach(event: HealthBreachEvent): Promise<void> {
+    // Safety guard: never send notifications in replay mode
+    if (config.replay) {
+      return;
+    }
+    
     if (!this.enabled || !this.bot || !this.chatId) {
       return;
     }
@@ -565,6 +575,11 @@ export class NotificationService {
     estProfitUsd: number;
     blockNumber: number;
   }): Promise<void> {
+    // Safety guard: never send notifications in replay mode
+    if (config.replay) {
+      return;
+    }
+    
     if (!this.enabled || !this.bot || !this.chatId) {
       return;
     }
@@ -605,6 +620,11 @@ export class NotificationService {
     skipReason?: string;
     skipDetails?: string;
   }): Promise<void> {
+    // Safety guard: never send notifications in replay mode
+    if (config.replay) {
+      return;
+    }
+    
     if (!this.enabled || !this.bot || !this.chatId) {
       return;
     }
