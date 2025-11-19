@@ -444,6 +444,176 @@ Set `USE_REALTIME_HF=false` and restart. No data loss, no state corruption.
 
 ---
 
+## Micro-Verification Fast Path
+
+The Micro-Verification Fast Path reduces time-to-first sub-1.0 HF read for critical liquidation opportunities by performing immediate, single-user HF checks when specific conditions are met.
+
+### Overview
+
+Traditional batch checks may miss brief liquidation opportunities between sweeps. Micro-verification addresses this by:
+
+1. **Immediate Single-User Checks**: Direct `getUserAccountData()` calls for critical candidates
+2. **Near-Threshold Tracking**: Maintains a set of users with HF in near-threshold band and worsening
+3. **Projection-Based Triggers**: Schedules checks when HF projection crosses below 1.0
+4. **Reserve Fast-Subset**: Priority verification for near-threshold users on reserve events
+5. **Head Critical Slice**: Early micro-verification for critical candidates in head-start slice
+
+### Configuration
+
+Add these to your `.env` file:
+
+```bash
+# Enable micro-verification fast path (default: true)
+MICRO_VERIFY_ENABLED=true
+
+# Maximum micro-verifications per block (default: 25)
+MICRO_VERIFY_MAX_PER_BLOCK=25
+
+# Minimum interval between micro-verify runs in milliseconds (default: 150)
+MICRO_VERIFY_INTERVAL_MS=150
+
+# Near-threshold band in basis points (default: 30 = 0.30%)
+# Users with HF in [threshold, threshold + band] are tracked
+NEAR_THRESHOLD_BAND_BPS=30
+
+# Maximum users in reserve fast-subset recheck (default: 64)
+RESERVE_FAST_SUBSET_MAX=64
+
+# Head critical batch size for near-threshold segment (default: 120)
+HEAD_CRITICAL_BATCH_SIZE=120
+```
+
+### Triggers
+
+Micro-verification is scheduled when:
+
+1. **Projection Cross**: User's projected HF < 1.0 based on HF delta tracking
+2. **Near-Threshold Worsening**: User in [threshold, threshold + band] with negative HF delta
+3. **Reserve Fast-Subset**: Near-threshold user affected by ReserveDataUpdated event
+4. **Head Critical**: Critical candidate in head-start slice during batch check
+5. **Sprinter**: Pre-staged candidate with projHF < 1.0 (when Sprinter enabled)
+
+### How It Works
+
+#### Near-Threshold Tracking
+```typescript
+// Users tracked when HF ∈ [1.0000, 1.0030] with worsening trend
+const threshold = 1.0000;  // EXECUTION_HF_THRESHOLD_BPS / 10000
+const nearBand = 0.0030;    // NEAR_THRESHOLD_BAND_BPS / 10000
+const upperBound = threshold + nearBand;
+
+if (hf >= threshold && hf <= upperBound && hfDelta < 0) {
+  // Add to near-threshold set
+  // Schedule micro-verification
+}
+```
+
+#### Reserve Fast-Subset
+```typescript
+// On ReserveDataUpdated event:
+// 1. Get borrowers of affected reserve
+// 2. Build intersection with near-threshold users
+// 3. Micro-verify up to RESERVE_FAST_SUBSET_MAX users
+// 4. Run before large reserve batch sweep
+```
+
+#### Head Critical Slice
+```typescript
+// During head check:
+// 1. Identify critical candidates in head-start slice
+// 2. Use HEAD_CRITICAL_BATCH_SIZE for batch size
+// 3. Micro-verify critical candidates immediately
+// 4. Continue with normal batch check
+```
+
+### Performance Caps
+
+To prevent overload, micro-verification enforces:
+
+- **Per-Block Cap**: Maximum `MICRO_VERIFY_MAX_PER_BLOCK` checks per block
+- **Interval Throttling**: Minimum `MICRO_VERIFY_INTERVAL_MS` between checks
+- **De-duplication**: Each user checked at most once per block
+
+### Metrics
+
+Monitor micro-verification performance:
+
+```typescript
+// Prometheus metrics
+liquidbot_micro_verify_total{result="hit|miss|cap|error", trigger="projection|reserve_fast|head_critical|sprinter"}
+liquidbot_micro_verify_latency_ms  // Histogram
+liquidbot_reserve_fast_subset_total{asset}
+```
+
+### Logs
+
+Micro-verification events are logged:
+
+```
+[realtime-hf] micro-verify user=0x2DffF273... hf=0.9993 trigger=projection_cross latency=42ms
+[realtime-hf] emit liquidatable user=0x2DffF273... hf=0.9993 reason=micro_verify_projection_cross block=38391436
+[fast-lane] [reserve-fast-subset] asset=WETH size=12 via micro-verify (source=reserve)
+[fast-lane] [reserve-fast-subset] asset=WETH verifiedMs=89
+[realtime-hf] head-critical micro-verify starting: 8 candidates
+[realtime-hf] head-critical hit user=0x5e1d65a8... hf=0.9987 latency=38ms
+```
+
+### Recommended Settings
+
+For production on Base mainnet:
+
+```bash
+MICRO_VERIFY_ENABLED=true
+MICRO_VERIFY_MAX_PER_BLOCK=25
+MICRO_VERIFY_INTERVAL_MS=150
+NEAR_THRESHOLD_BAND_BPS=30
+RESERVE_FAST_SUBSET_MAX=64
+HEAD_CRITICAL_BATCH_SIZE=120
+
+# Related settings for optimal performance
+EXECUTION_HF_THRESHOLD_BPS=10000        # 1.0000
+RESERVE_RECHECK_TOP_N=400               # Reduced from 800
+REALTIME_INITIAL_BACKFILL_ENABLED=false # Keep disabled
+SPRINTER_ENABLED=true                   # Enable for prestaging
+PRESTAGE_HF_BPS=10150                   # 1.0150
+OPTIMISTIC_ENABLED=true                 # Enable optimistic dispatch
+```
+
+### Safety
+
+- **No Heavy Background Work**: Only schedules checks when conditions are met
+- **Respects Existing Guards**: Dust filters, profit thresholds, risk limits all apply
+- **Non-Breaking**: Can be disabled with `MICRO_VERIFY_ENABLED=false`
+- **Execution Unchanged**: Only reduces detection latency, doesn't modify execution flow
+
+### Integration with Existing Features
+
+Micro-verification works alongside:
+
+- **RealTimeHFService**: Integrated into batch check flow
+- **BorrowersIndexService**: Used for reserve fast-subset intersection
+- **HotSetTracker**: Near-threshold users tracked separately
+- **PrecomputeService**: Projection data used for triggers
+- **Sprinter**: Integration hook for pre-staged candidates
+
+### Troubleshooting
+
+**High per-block cap hits:**
+- Increase `MICRO_VERIFY_MAX_PER_BLOCK` if needed
+- Review `NEAR_THRESHOLD_BAND_BPS` (wider band = more users tracked)
+- Check logs for `micro-verify-skip (cap reached)` messages
+
+**Missed liquidations still occurring:**
+- Verify `MICRO_VERIFY_ENABLED=true`
+- Check `MICRO_VERIFY_INTERVAL_MS` isn't too high
+- Review `RESERVE_FAST_SUBSET_MAX` for reserve events
+- Monitor `liquidbot_micro_verify_total{result="hit"}` for hit rate
+
+**RPC pressure concerns:**
+- Reduce `MICRO_VERIFY_MAX_PER_BLOCK` to lower cap
+- Increase `MICRO_VERIFY_INTERVAL_MS` for throttling
+- Reduce `RESERVE_FAST_SUBSET_MAX` for reserve events
+
 ## Future Enhancements
 
 - **Auto Close Factor:** Dynamic computation based on asset type

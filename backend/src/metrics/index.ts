@@ -399,6 +399,28 @@ export const dirtySetSize = new Gauge({
   registers: [metricsRegistry]
 });
 
+// Micro-Verification Fast Path metrics
+export const microVerifyTotal = new Counter({
+  name: 'liquidbot_micro_verify_total',
+  help: 'Total micro-verification attempts',
+  labelNames: ['result', 'trigger'],
+  registers: [metricsRegistry]
+});
+
+export const microVerifyLatency = new Histogram({
+  name: 'liquidbot_micro_verify_latency_ms',
+  help: 'Micro-verification latency in milliseconds',
+  buckets: [10, 25, 50, 100, 250, 500, 1000],
+  registers: [metricsRegistry]
+});
+
+export const reserveFastSubsetTotal = new Counter({
+  name: 'liquidbot_reserve_fast_subset_total',
+  help: 'Total reserve fast-subset rechecks',
+  labelNames: ['asset'],
+  registers: [metricsRegistry]
+});
+
 export const dirtyMarkedTotal = new Counter({
   name: 'liquidbot_dirty_marked_total',
   help: 'Total number of users marked dirty',

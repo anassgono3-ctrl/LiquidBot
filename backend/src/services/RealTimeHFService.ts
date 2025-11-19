@@ -136,6 +136,7 @@ export class RealTimeHFService extends EventEmitter {
   private aaveDataService?: AaveDataService;
   private discoveredReserves: DiscoveredReserve[] = [];
   private priceService?: PriceService;
+  private microVerifier?: import('./MicroVerifier.js').MicroVerifier;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -250,6 +251,14 @@ export class RealTimeHFService extends EventEmitter {
   // Pre-simulation queue for hot users
   private preSimQueue: Map<string, PreSimQueueEntry> = new Map();
   private readonly PRE_SIM_HISTORY_WINDOW = 4; // N=4 observations for delta tracking
+  
+  // Near-threshold tracking for micro-verification
+  private nearThresholdUsers = new Map<string, {
+    hf: number;
+    lastHf: number;
+    block: number;
+    debtUsd: number;
+  }>();
 
   // Metrics
   private metrics = {
@@ -556,6 +565,17 @@ export class RealTimeHFService extends EventEmitter {
 
     this.multicall3 = new Contract(config.multicall3Address, MULTICALL3_ABI, this.provider);
     this.aavePool = new Contract(config.aavePool, AAVE_POOL_ABI, this.provider);
+    
+    // Initialize MicroVerifier for fast-path verification
+    if (config.microVerifyEnabled) {
+      const { MicroVerifier } = await import('./MicroVerifier.js');
+      this.microVerifier = new MicroVerifier(this.aavePool);
+      // eslint-disable-next-line no-console
+      console.log(
+        `[realtime-hf] MicroVerifier enabled: maxPerBlock=${config.microVerifyMaxPerBlock} ` +
+        `intervalMs=${config.microVerifyIntervalMs} nearThresholdBandBps=${config.nearThresholdBandBps}`
+      );
+    }
 
     // Setup optional secondary provider for head-check fallback (Goal 5)
     if (config.secondaryHeadRpcUrl) {
@@ -882,6 +902,11 @@ export class RealTimeHFService extends EventEmitter {
 
     this.metrics.blocksReceived++;
     realtimeBlocksReceived.inc();
+    
+    // Notify MicroVerifier of new block (resets per-block counters)
+    if (this.microVerifier) {
+      this.microVerifier.onNewBlock(blockNumber);
+    }
 
     // Request head check via serialization mechanism
     this.requestHeadCheck(blockNumber);
@@ -1752,9 +1777,28 @@ export class RealTimeHFService extends EventEmitter {
             return hfA - hfB;
           });
         
+        // === HEAD CRITICAL SLICE EARLY-BREAK ===
+        // For the head-start slice, check for critical candidates needing immediate micro-verification
+        const threshold = config.executionHfThresholdBps / 10000;
+        const nearThresholdBand = config.nearThresholdBandBps / 10000;
+        const upperBound = threshold + nearThresholdBand;
+        
+        // Identify critical candidates in the head-start slice
+        const criticalCandidates = lowHfCandidates
+          .slice(0, HEAD_START_SLICE_SIZE)
+          .filter(c => {
+            if (!c.lastHF) return false;
+            // Critical if: projected HF < 1.0 OR in near-threshold band
+            const inNearThreshold = c.lastHF >= threshold && c.lastHF <= upperBound;
+            return inNearThreshold;
+          });
+        
+        // Use HEAD_CRITICAL_BATCH_SIZE for near-threshold segment if configured
+        const criticalBatchSize = config.headCriticalBatchSize || HEAD_START_SLICE_SIZE;
+        
         // Take head-start slice for immediate processing
-        headStartSlice = lowHfCandidates.slice(0, HEAD_START_SLICE_SIZE);
-        remainingLowHf = lowHfCandidates.slice(HEAD_START_SLICE_SIZE);
+        headStartSlice = lowHfCandidates.slice(0, Math.min(criticalBatchSize, HEAD_START_SLICE_SIZE));
+        remainingLowHf = lowHfCandidates.slice(headStartSlice.length);
         
         // Log head-start metrics
         if (headStartSlice.length > 0) {
@@ -1770,8 +1814,36 @@ export class RealTimeHFService extends EventEmitter {
           // eslint-disable-next-line no-console
           console.log(
             `[realtime-hf] head-start slice size=${headStartSlice.length} ` +
-            `hf_range=[${minHf}, ${maxHf}] (risk-ordered)`
+            `hf_range=[${minHf}, ${maxHf}] critical=${criticalCandidates.length} (risk-ordered)`
           );
+          
+          // Perform micro-verification on critical candidates if enabled
+          if (this.microVerifier && config.microVerifyEnabled && criticalCandidates.length > 0) {
+            const microVerifyCandidates = criticalCandidates.slice(0, config.microVerifyMaxPerBlock);
+            
+            // eslint-disable-next-line no-console
+            console.log(
+              `[realtime-hf] head-critical micro-verify starting: ${microVerifyCandidates.length} candidates`
+            );
+            
+            for (const candidate of microVerifyCandidates) {
+              const result = await this.microVerifier.verify({
+                user: candidate.address,
+                trigger: 'head_critical',
+                currentHf: candidate.lastHF ?? undefined
+              });
+              
+              // If HF < 1.0, it will be emitted by the regular batch check
+              // The micro-verify just gives us an earlier read
+              if (result && result.success && result.hf < 1.0) {
+                // eslint-disable-next-line no-console
+                console.log(
+                  `[realtime-hf] head-critical hit user=${candidate.address.slice(0, 10)}... ` +
+                  `hf=${result.hf.toFixed(4)} latency=${result.latencyMs}ms`
+                );
+              }
+            }
+          }
           
           // Track latency (will be measured after batch processing completes)
           const headStartLatency = Date.now() - headStartTime;
@@ -1973,6 +2045,69 @@ export class RealTimeHFService extends EventEmitter {
       if (borrowers.length === 0) {
         return;
       }
+      
+      // Resolve symbol for logging and metrics
+      const reserve = this.discoveredReserves.find(r => r.asset.toLowerCase() === reserveAddr.toLowerCase());
+      const symbol = reserve?.symbol || reserveAddr.slice(0, 10);
+      
+      // === RESERVE FAST-SUBSET: Check near-threshold users first ===
+      if (config.microVerifyEnabled && this.nearThresholdUsers.size > 0) {
+        // Build intersection: near-threshold users who are also borrowers of this reserve
+        const borrowerSet = new Set(borrowers.map(addr => addr.toLowerCase()));
+        const fastSubset: string[] = [];
+        
+        for (const [user] of this.nearThresholdUsers) {
+          if (borrowerSet.has(user.toLowerCase())) {
+            fastSubset.push(user);
+          }
+        }
+        
+        // Limit to configured max
+        const limitedSubset = fastSubset.slice(0, Math.min(fastSubset.length, config.reserveFastSubsetMax));
+        
+        if (limitedSubset.length > 0) {
+          const startTime = Date.now();
+          
+          // Use micro-verify for fast subset (single calls)
+          if (this.microVerifier && limitedSubset.length <= 10) {
+            // eslint-disable-next-line no-console
+            console.log(
+              `[fast-lane] [reserve-fast-subset] asset=${symbol} size=${limitedSubset.length} ` +
+              `via micro-verify (source=${source})`
+            );
+            
+            const { reserveFastSubsetTotal } = await import('../metrics/index.js');
+            reserveFastSubsetTotal.inc({ asset: symbol });
+            
+            for (const user of limitedSubset) {
+              await this.microVerifier.verify({
+                user,
+                trigger: 'reserve_fast',
+                currentHf: this.nearThresholdUsers.get(user)?.hf
+              });
+            }
+          } else {
+            // Use small multicall for larger fast subset
+            // eslint-disable-next-line no-console
+            console.log(
+              `[fast-lane] [reserve-fast-subset] asset=${symbol} size=${limitedSubset.length} ` +
+              `via multicall (source=${source})`
+            );
+            
+            const { reserveFastSubsetTotal } = await import('../metrics/index.js');
+            reserveFastSubsetTotal.inc({ asset: symbol });
+            
+            await this.batchCheckCandidatesWithPending(limitedSubset, source, blockTag);
+          }
+          
+          const elapsedMs = Date.now() - startTime;
+          
+          // eslint-disable-next-line no-console
+          console.log(
+            `[fast-lane] [reserve-fast-subset] asset=${symbol} verifiedMs=${elapsedMs}`
+          );
+        }
+      }
 
       // Select top N borrowers to recheck (randomized or by some priority)
       const topN = config.reserveRecheckTopN;
@@ -1981,10 +2116,6 @@ export class RealTimeHFService extends EventEmitter {
       // Shuffle for fairness and take top N
       const shuffled = [...borrowers].sort(() => Math.random() - 0.5);
       const selected = shuffled.slice(0, Math.min(topN, maxBatch, borrowers.length));
-      
-      // Resolve symbol for logging and metrics
-      const reserve = this.discoveredReserves.find(r => r.asset.toLowerCase() === reserveAddr.toLowerCase());
-      const symbol = reserve?.symbol || reserveAddr.slice(0, 10);
       
       // eslint-disable-next-line no-console
       console.log(
@@ -2796,6 +2927,14 @@ export class RealTimeHFService extends EventEmitter {
 
             // Track HF delta and queue for pre-simulation if trending toward liquidation
             this.updateHfDeltaTracking(userAddress, healthFactor, blockNumber, totalDebtUsd);
+            
+            // === SPRINTER INTEGRATION HOOK ===
+            // If SPRINTER_ENABLED and candidate has projHF < 1.0 with template ready,
+            // schedule immediate micro-verify (when Sprinter is fully integrated)
+            await this.maybeSprinterMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd);
+            
+            // Track near-threshold users and schedule micro-verification if appropriate
+            await this.maybeScheduleMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd, triggerType);
 
             // Check if we should emit based on edge-triggering and hysteresis
             const emitDecision = this.shouldEmit(userAddress, healthFactor, blockNumber);
@@ -3077,6 +3216,172 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Track HF delta and queue for pre-simulation if trending toward liquidation
    */
+  /**
+   * Sprinter Integration Hook: Schedule micro-verification for pre-staged candidates.
+   * This is a placeholder integration point for when Sprinter is fully implemented.
+   */
+  private async maybeSprinterMicroVerify(
+    userAddress: string,
+    healthFactor: number,
+    blockNumber: number,
+    debtUsd: number
+  ): Promise<void> {
+    // Check if Sprinter is enabled
+    if (!config.sprinterEnabled || !this.microVerifier || !config.microVerifyEnabled) {
+      return;
+    }
+    
+    // Check if user has projected HF < 1.0 based on HF history
+    const state = this.userStates.get(userAddress);
+    if (!state?.hfHistory || state.hfHistory.length < 2) {
+      return;
+    }
+    
+    // Compute projection
+    const oldest = state.hfHistory[0];
+    const newest = state.hfHistory[state.hfHistory.length - 1];
+    const deltaHf = newest.hf - oldest.hf;
+    const deltaBlocks = newest.block - oldest.block;
+    
+    if (deltaBlocks === 0) return;
+    
+    const hfPerBlock = deltaHf / deltaBlocks;
+    const projectedHf = healthFactor + hfPerBlock;
+    
+    // If projected HF < 1.0 and meets debt threshold, schedule micro-verify
+    const prestageThreshold = config.prestageHfBps / 10000;
+    if (projectedHf < 1.0 && healthFactor < prestageThreshold && debtUsd >= config.preSimMinDebtUsd) {
+      // Schedule micro-verification
+      const result = await this.microVerifier.verify({
+        user: userAddress,
+        trigger: 'sprinter',
+        projectedHf,
+        currentHf: healthFactor
+      });
+      
+      if (result && result.success) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[realtime-hf] [sprinter] micro-verify user=${userAddress.slice(0, 10)}... ` +
+          `hf=${result.hf.toFixed(4)} projHf=${projectedHf.toFixed(4)} latency=${result.latencyMs}ms`
+        );
+        
+        // If HF < 1.0, emit immediately (handled by regular flow)
+        // The Sprinter would use the pre-staged template for instant execution
+      }
+    }
+  }
+  
+  /**
+   * Track near-threshold users and schedule micro-verification if conditions are met:
+   * - Projection indicates projHF < 1.0, OR
+   * - actualHF in [threshold, threshold + NEAR_THRESHOLD_BAND] and HF delta is negative (worsening)
+   */
+  private async maybeScheduleMicroVerify(
+    userAddress: string,
+    healthFactor: number,
+    blockNumber: number,
+    debtUsd: number,
+    triggerType: 'event' | 'head' | 'price'
+  ): Promise<void> {
+    if (!this.microVerifier || !config.microVerifyEnabled) return;
+    
+    const threshold = config.executionHfThresholdBps / 10000; // e.g., 1.0000
+    const nearThresholdBand = config.nearThresholdBandBps / 10000; // e.g., 0.0030 (30 bps)
+    const upperBound = threshold + nearThresholdBand;
+    
+    // Get previous state for delta calculation
+    const prevState = this.nearThresholdUsers.get(userAddress);
+    const prevHf = prevState?.hf ?? healthFactor;
+    const hfDelta = healthFactor - prevHf;
+    const isWorsening = hfDelta < 0;
+    
+    // Update near-threshold tracking if in band
+    if (healthFactor >= threshold && healthFactor <= upperBound) {
+      this.nearThresholdUsers.set(userAddress, {
+        hf: healthFactor,
+        lastHf: prevHf,
+        block: blockNumber,
+        debtUsd
+      });
+    } else {
+      // Remove from near-threshold set if outside band
+      this.nearThresholdUsers.delete(userAddress);
+    }
+    
+    // Check projection for sub-1.0 cross
+    let shouldMicroVerify = false;
+    let trigger: 'projection_cross' | 'near_threshold' = 'near_threshold';
+    
+    // Check if projection shows crossing below 1.0
+    const state = this.userStates.get(userAddress);
+    if (state?.hfHistory && state.hfHistory.length >= 2) {
+      const oldest = state.hfHistory[0];
+      const newest = state.hfHistory[state.hfHistory.length - 1];
+      const deltaHf = newest.hf - oldest.hf;
+      const deltaBlocks = newest.block - oldest.block;
+      
+      if (deltaBlocks > 0) {
+        const hfPerBlock = deltaHf / deltaBlocks;
+        const projectedHf = healthFactor + hfPerBlock;
+        
+        if (projectedHf < 1.0) {
+          shouldMicroVerify = true;
+          trigger = 'projection_cross';
+        }
+      }
+    }
+    
+    // Check if in near-threshold band and worsening
+    if (!shouldMicroVerify && healthFactor >= threshold && healthFactor <= upperBound && isWorsening) {
+      shouldMicroVerify = true;
+      trigger = 'near_threshold';
+    }
+    
+    // Schedule micro-verification
+    if (shouldMicroVerify) {
+      const result = await this.microVerifier.verify({
+        user: userAddress,
+        trigger,
+        projectedHf: trigger === 'projection_cross' ? healthFactor : undefined,
+        currentHf: healthFactor
+      });
+      
+      if (result && result.success) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[realtime-hf] micro-verify user=${userAddress.slice(0, 10)}... ` +
+          `hf=${result.hf.toFixed(4)} trigger=${trigger} latency=${result.latencyMs}ms`
+        );
+        
+        // If HF < 1.0, emit immediately
+        if (result.hf < 1.0 && !this.seenUsersThisBlock.has(userAddress)) {
+          this.seenUsersThisBlock.add(userAddress);
+          
+          // eslint-disable-next-line no-console
+          console.log(
+            `[realtime-hf] emit liquidatable user=${userAddress} hf=${result.hf.toFixed(4)} ` +
+            `reason=micro_verify_${trigger} block=${blockNumber}`
+          );
+          
+          this.lastEmitBlock.set(userAddress, blockNumber);
+          
+          this.emit('liquidatable', {
+            userAddress,
+            healthFactor: result.hf,
+            blockNumber,
+            triggerType,
+            timestamp: Date.now()
+          } as LiquidatableEvent);
+          
+          this.metrics.triggersProcessed++;
+          realtimeTriggersProcessed.inc({ trigger_type: `micro_${trigger}` });
+          liquidatableEdgeTriggersTotal.inc({ reason: `micro_verify_${trigger}` });
+        }
+      }
+    }
+  }
+  
   private updateHfDeltaTracking(userAddress: string, healthFactor: number, blockNumber: number, debtUsd: number): void {
     if (!config.preSimEnabled) return;
 

@@ -421,7 +421,21 @@ export const rawEnvSchema = z.object({
   PREDICTIVE_HF_BUFFER_BPS: z.string().optional(),
   PREDICTIVE_MAX_USERS_PER_TICK: z.string().optional(),
   PREDICTIVE_HORIZON_SEC: z.string().optional(),
-  PREDICTIVE_SCENARIOS: z.string().optional()
+  PREDICTIVE_SCENARIOS: z.string().optional(),
+  
+  // ==== MICRO-VERIFICATION FAST PATH ====
+  // Enable micro-verification for immediate single-user HF checks
+  MICRO_VERIFY_ENABLED: z.string().optional(),
+  // Maximum micro-verifications per block
+  MICRO_VERIFY_MAX_PER_BLOCK: z.string().optional(),
+  // Minimum interval between micro-verify runs (ms)
+  MICRO_VERIFY_INTERVAL_MS: z.string().optional(),
+  // Near-threshold band in basis points (e.g., 30 = 0.30%)
+  NEAR_THRESHOLD_BAND_BPS: z.string().optional(),
+  // Maximum users in reserve fast-subset recheck
+  RESERVE_FAST_SUBSET_MAX: z.string().optional(),
+  // Head critical batch size for near-threshold segment
+  HEAD_CRITICAL_BATCH_SIZE: z.string().optional()
 });
 
 export const env = (() => {
@@ -843,6 +857,14 @@ export const env = (() => {
     predictiveScenarios: (parsed.PREDICTIVE_SCENARIOS || 'baseline,adverse,extreme')
       .split(',')
       .map(s => s.trim())
-      .filter(s => s.length > 0)
+      .filter(s => s.length > 0),
+    
+    // ==== MICRO-VERIFICATION FAST PATH ====
+    microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
+    microVerifyMaxPerBlock: Number(parsed.MICRO_VERIFY_MAX_PER_BLOCK || 25),
+    microVerifyIntervalMs: Number(parsed.MICRO_VERIFY_INTERVAL_MS || 150),
+    nearThresholdBandBps: Number(parsed.NEAR_THRESHOLD_BAND_BPS || 30), // 0.30%
+    reserveFastSubsetMax: Number(parsed.RESERVE_FAST_SUBSET_MAX || 64),
+    headCriticalBatchSize: Number(parsed.HEAD_CRITICAL_BATCH_SIZE || 120)
   };
 })();
