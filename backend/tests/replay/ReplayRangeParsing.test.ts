@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+
 import { parseReplayRange } from '../../src/replay/validation.js';
 
 describe('parseReplayRange', () => {

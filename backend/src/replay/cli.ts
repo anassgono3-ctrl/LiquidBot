@@ -7,7 +7,9 @@
  */
 
 import dotenv from 'dotenv';
+
 import { env } from '../config/envSchema.js';
+
 import { runReplay } from './runReplay.js';
 
 // Load environment variables
