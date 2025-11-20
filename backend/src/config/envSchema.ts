@@ -456,7 +456,29 @@ export const rawEnvSchema = z.object({
   HF_PRED_CRITICAL: z.string().optional(),
   
   // Tier 1: Risk Ordering Enhancement
-  RISK_ORDERING_SIMPLE: z.string().optional()
+  RISK_ORDERING_SIMPLE: z.string().optional(),
+  
+  // ==== HISTORICAL REPLAY MODE ====
+  REPLAY_ENABLED: z.string().optional(),
+  REPLAY_MODE: z.string().optional(),
+  REPLAY_START_BLOCK: z.string().optional(),
+  REPLAY_END_BLOCK: z.string().optional(),
+  REPLAY_CHAIN_ID: z.string().optional(),
+  REPLAY_SPEED: z.string().optional(),
+  REPLAY_BLOCK_STEP: z.string().optional(),
+  REPLAY_SLEEP_MS: z.string().optional(),
+  REPLAY_PRICE_SOURCE: z.string().optional(),
+  REPLAY_EXPORT_DIR: z.string().optional(),
+  REPLAY_COMPARE_WITH_ONCHAIN: z.string().optional(),
+  REPLAY_LOG_CALDATA: z.string().optional(),
+  REPLAY_LOG_MISSED: z.string().optional(),
+  REPLAY_PAUSE_ON_ERROR: z.string().optional(),
+  REPLAY_MAX_BLOCK_ERRORS: z.string().optional(),
+  REPLAY_INCLUDE_LOW_DEBT: z.string().optional(),
+  REPLAY_FORCE_MIN_DEBT_USD: z.string().optional(),
+  REPLAY_FORCE_MIN_PROFIT_USD: z.string().optional(),
+  REPLAY_LOCAL_FORK_URL: z.string().optional(),
+  REPLAY_FORK_AUTO_ADVANCE: z.string().optional()
 });
 
 export const env = (() => {

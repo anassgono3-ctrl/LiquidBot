@@ -64,6 +64,6 @@ yarn-error.log*
 .cache/
 .parcel-cache/
 
-# Replay outputs
-replay/
-backend/replay/
+# Replay outputs (data/artifacts only, not source code)
+/replay/
+/backend/replay/out/
