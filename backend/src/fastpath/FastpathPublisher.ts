@@ -13,7 +13,7 @@ export interface FastpathEvent {
   block: number;
   hfRay: string;
   ts: number;
-  triggerType?: 'event' | 'head' | 'price';
+  triggerType?: string; // 'event', 'head', 'price', 'micro_*', etc.
 }
 
 /**

@@ -57,6 +57,8 @@ import { DecisionTraceStore } from './DecisionTraceStore.js';
 import { FeedDiscoveryService, type DiscoveredReserve } from './FeedDiscoveryService.js';
 import { PerAssetTriggerConfig } from './PerAssetTriggerConfig.js';
 import { AaveDataService } from './AaveDataService.js';
+import { FastpathPublisher } from '../fastpath/FastpathPublisher.js';
+import { createRedisClient } from '../redis/RedisClientFactory.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -137,6 +139,7 @@ export class RealTimeHFService extends EventEmitter {
   private discoveredReserves: DiscoveredReserve[] = [];
   private priceService?: PriceService;
   private microVerifier?: import('./MicroVerifier.js').MicroVerifier;
+  private fastpathPublisher?: FastpathPublisher;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -365,6 +368,19 @@ export class RealTimeHFService extends EventEmitter {
           .filter((s: string) => s.length > 0)
           .map((s: string) => this.normalizeAssetSymbol(s))
       );
+    }
+    
+    // Initialize fastpath publisher if enabled
+    if (config.fastpathEventPublish && !this.skipWsConnection) {
+      try {
+        const redis = createRedisClient();
+        this.fastpathPublisher = new FastpathPublisher(redis);
+        // eslint-disable-next-line no-console
+        console.log('[realtime-hf] FastpathPublisher initialized');
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.error('[realtime-hf] Failed to initialize FastpathPublisher:', err);
+      }
     }
   }
 
@@ -2968,6 +2984,19 @@ export class RealTimeHFService extends EventEmitter {
                 timestamp: Date.now()
               } as LiquidatableEvent);
 
+              // Publish to fastpath channel if HF < 1.0
+              if (this.fastpathPublisher && healthFactor < 1.0) {
+                this.fastpathPublisher.publish({
+                  user: userAddress,
+                  block: blockNumber,
+                  hfRay: (BigInt(Math.floor(healthFactor * 1e18))).toString(),
+                  ts: Date.now(),
+                  triggerType
+                }).catch(err => {
+                  console.error('[realtime-hf] Failed to publish fastpath event:', err);
+                });
+              }
+
               this.metrics.triggersProcessed++;
               realtimeTriggersProcessed.inc({ trigger_type: triggerType });
               liquidatableEdgeTriggersTotal.inc({ reason: emitDecision.reason || 'unknown' });
@@ -3373,6 +3402,19 @@ export class RealTimeHFService extends EventEmitter {
             triggerType,
             timestamp: Date.now()
           } as LiquidatableEvent);
+          
+          // Publish to fastpath channel if HF < 1.0
+          if (this.fastpathPublisher && result.hf < 1.0) {
+            this.fastpathPublisher.publish({
+              user: userAddress,
+              block: blockNumber,
+              hfRay: (BigInt(Math.floor(result.hf * 1e18))).toString(),
+              ts: Date.now(),
+              triggerType: `micro_${trigger}`
+            }).catch(err => {
+              console.error('[realtime-hf] Failed to publish fastpath event:', err);
+            });
+          }
           
           this.metrics.triggersProcessed++;
           realtimeTriggersProcessed.inc({ trigger_type: `micro_${trigger}` });
