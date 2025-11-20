@@ -456,7 +456,17 @@ export const rawEnvSchema = z.object({
   HF_PRED_CRITICAL: z.string().optional(),
   
   // Tier 1: Risk Ordering Enhancement
-  RISK_ORDERING_SIMPLE: z.string().optional()
+  RISK_ORDERING_SIMPLE: z.string().optional(),
+  
+  // ==== CRITICAL LANE FOR SUB-1.0 HF LIQUIDATIONS ====
+  // Enable critical lane fast path for HF < 1.0
+  CRITICAL_LANE_ENABLED: z.string().optional(),
+  // Minimum profit threshold in USD (0 allows all, for testing)
+  CRITICAL_LANE_PROFIT_MIN_USD: z.string().optional(),
+  // Allow unprofitable execution on first attempt (for reliability testing)
+  CRITICAL_LANE_ALLOW_UNPROFITABLE_INITIAL: z.string().optional(),
+  // Latency warning threshold in milliseconds
+  CRITICAL_LANE_LATENCY_WARN_MS: z.string().optional()
 });
 
 export const env = (() => {
@@ -907,6 +917,12 @@ export const env = (() => {
     hfPredCritical: Number(parsed.HF_PRED_CRITICAL || 1.0008),
     
     // Tier 1: Risk Ordering Enhancement
-    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true'
+    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true',
+    
+    // ==== CRITICAL LANE FOR SUB-1.0 HF LIQUIDATIONS ====
+    criticalLaneEnabled: (parsed.CRITICAL_LANE_ENABLED || 'true').toLowerCase() === 'true',
+    criticalLaneProfitMinUsd: Number(parsed.CRITICAL_LANE_PROFIT_MIN_USD || 0),
+    criticalLaneAllowUnprofitableInitial: (parsed.CRITICAL_LANE_ALLOW_UNPROFITABLE_INITIAL || 'false').toLowerCase() === 'true',
+    criticalLaneLatencyWarnMs: Number(parsed.CRITICAL_LANE_LATENCY_WARN_MS || 250)
   };
 })();

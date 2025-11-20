@@ -444,5 +444,11 @@ export const config = {
   get addressNormalizeLowercase() { return env.addressNormalizeLowercase; },
   get indexJumpBpsTrigger() { return env.indexJumpBpsTrigger; },
   get hfPredCritical() { return env.hfPredCritical; },
-  get riskOrderingSimple() { return env.riskOrderingSimple; }
+  get riskOrderingSimple() { return env.riskOrderingSimple; },
+  
+  // Critical Lane for Sub-1.0 HF Liquidations
+  get criticalLaneEnabled() { return env.criticalLaneEnabled; },
+  get criticalLaneProfitMinUsd() { return env.criticalLaneProfitMinUsd; },
+  get criticalLaneAllowUnprofitableInitial() { return env.criticalLaneAllowUnprofitableInitial; },
+  get criticalLaneLatencyWarnMs() { return env.criticalLaneLatencyWarnMs; }
 };
