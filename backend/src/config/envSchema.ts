@@ -448,6 +448,32 @@ export const rawEnvSchema = z.object({
   // Tier 0: Post-Liquidation Refresh
   POST_LIQUIDATION_REFRESH: z.string().optional(),
   
+  // ==== REPLAY MODE CONFIGURATION ====
+  // Enable replay mode
+  REPLAY_ENABLED: z.string().optional(),
+  // Replay mode: pipeline (full scan)
+  REPLAY_MODE: z.string().optional(),
+  // Block range for replay: start-end (e.g., 38393176-38395221)
+  REPLAY_BLOCK_RANGE: z.string().optional(),
+  // Scan strategy: full (every block in range)
+  REPLAY_SCAN_STRATEGY: z.string().optional(),
+  // HF threshold to keep tracking users (default: 1.02)
+  REPLAY_NEAR_HF: z.string().optional(),
+  // HF above which eviction counter increments (default: 1.08)
+  REPLAY_EVICT_HF: z.string().optional(),
+  // Consecutive blocks above EVICT_HF before removal (default: 5)
+  REPLAY_EVICT_CONSECUTIVE: z.string().optional(),
+  // Simulate liquidation at first detection (default: true)
+  REPLAY_SIMULATE_FIRST_DETECTION: z.string().optional(),
+  // Simulate liquidation at liquidation block (default: true)
+  REPLAY_SIMULATE_LIQUIDATION_BLOCK: z.string().optional(),
+  // Output directory for replay artifacts (default: ./replay/out)
+  REPLAY_OUTPUT_DIR: z.string().optional(),
+  // Safety cap on accounts per block (default: 50000)
+  REPLAY_MAX_ACCOUNTS_PER_BLOCK: z.string().optional(),
+  // Fallback gas cost for profit estimation (default: 0.1 USD)
+  REPLAY_PROFIT_GAS_FALLBACK_USD: z.string().optional(),
+  
   // Tier 0: Address Normalization
   ADDRESS_NORMALIZE_LOWERCASE: z.string().optional(),
   
@@ -907,6 +933,20 @@ export const env = (() => {
     hfPredCritical: Number(parsed.HF_PRED_CRITICAL || 1.0008),
     
     // Tier 1: Risk Ordering Enhancement
-    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true'
+    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true',
+    
+    // ==== REPLAY MODE CONFIGURATION ====
+    replayEnabled: (parsed.REPLAY_ENABLED || 'false').toLowerCase() === 'true',
+    replayMode: parsed.REPLAY_MODE || 'pipeline',
+    replayBlockRange: parsed.REPLAY_BLOCK_RANGE || '',
+    replayScanStrategy: parsed.REPLAY_SCAN_STRATEGY || 'full',
+    replayNearHf: Number(parsed.REPLAY_NEAR_HF || 1.02),
+    replayEvictHf: Number(parsed.REPLAY_EVICT_HF || 1.08),
+    replayEvictConsecutive: Number(parsed.REPLAY_EVICT_CONSECUTIVE || 5),
+    replaySimulateFirstDetection: (parsed.REPLAY_SIMULATE_FIRST_DETECTION || 'true').toLowerCase() === 'true',
+    replaySimulateLiquidationBlock: (parsed.REPLAY_SIMULATE_LIQUIDATION_BLOCK || 'true').toLowerCase() === 'true',
+    replayOutputDir: parsed.REPLAY_OUTPUT_DIR || './replay/out',
+    replayMaxAccountsPerBlock: Number(parsed.REPLAY_MAX_ACCOUNTS_PER_BLOCK || 50000),
+    replayProfitGasFallbackUsd: Number(parsed.REPLAY_PROFIT_GAS_FALLBACK_USD || 0.1)
   };
 })();

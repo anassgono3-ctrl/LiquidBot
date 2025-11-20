@@ -444,5 +444,19 @@ export const config = {
   get addressNormalizeLowercase() { return env.addressNormalizeLowercase; },
   get indexJumpBpsTrigger() { return env.indexJumpBpsTrigger; },
   get hfPredCritical() { return env.hfPredCritical; },
-  get riskOrderingSimple() { return env.riskOrderingSimple; }
+  get riskOrderingSimple() { return env.riskOrderingSimple; },
+  
+  // Replay Mode Configuration
+  get replayEnabled() { return env.replayEnabled; },
+  get replayMode() { return env.replayMode; },
+  get replayBlockRange() { return env.replayBlockRange; },
+  get replayScanStrategy() { return env.replayScanStrategy; },
+  get replayNearHf() { return env.replayNearHf; },
+  get replayEvictHf() { return env.replayEvictHf; },
+  get replayEvictConsecutive() { return env.replayEvictConsecutive; },
+  get replaySimulateFirstDetection() { return env.replaySimulateFirstDetection; },
+  get replaySimulateLiquidationBlock() { return env.replaySimulateLiquidationBlock; },
+  get replayOutputDir() { return env.replayOutputDir; },
+  get replayMaxAccountsPerBlock() { return env.replayMaxAccountsPerBlock; },
+  get replayProfitGasFallbackUsd() { return env.replayProfitGasFallbackUsd; }
 };
