@@ -456,7 +456,12 @@ export const rawEnvSchema = z.object({
   HF_PRED_CRITICAL: z.string().optional(),
   
   // Tier 1: Risk Ordering Enhancement
-  RISK_ORDERING_SIMPLE: z.string().optional()
+  RISK_ORDERING_SIMPLE: z.string().optional(),
+  
+  // ==== REPLAY MODE CONFIGURATION ====
+  REPLAY: z.string().optional(),
+  REPLAY_BLOCK_RANGE: z.string().optional(),
+  REPLAY_RPC_URL: z.string().optional()
 });
 
 export const env = (() => {
@@ -907,6 +912,11 @@ export const env = (() => {
     hfPredCritical: Number(parsed.HF_PRED_CRITICAL || 1.0008),
     
     // Tier 1: Risk Ordering Enhancement
-    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true'
+    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true',
+    
+    // ==== REPLAY MODE CONFIGURATION ====
+    replayEnabled: (parsed.REPLAY || 'false').toLowerCase() === 'true',
+    replayBlockRange: parsed.REPLAY_BLOCK_RANGE || '',
+    replayRpcUrl: parsed.REPLAY_RPC_URL || parsed.RPC_URL || ''
   };
 })();
