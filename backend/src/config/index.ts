@@ -444,5 +444,8 @@ export const config = {
   get addressNormalizeLowercase() { return env.addressNormalizeLowercase; },
   get indexJumpBpsTrigger() { return env.indexJumpBpsTrigger; },
   get hfPredCritical() { return env.hfPredCritical; },
-  get riskOrderingSimple() { return env.riskOrderingSimple; }
+  get riskOrderingSimple() { return env.riskOrderingSimple; },
+  
+  // Replay mode
+  get replay() { return env.replay; }
 };

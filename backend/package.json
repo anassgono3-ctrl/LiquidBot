@@ -21,6 +21,7 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
+    "replay": "tsx -r dotenv/config src/replay/cli.ts",
     "postinstall": "prisma generate",
     "prepare": "husky install",
     "migrate": "node scripts/migrate.js",

@@ -1,13 +1,23 @@
 import { z } from 'zod';
+import { parseReplayRange } from '../replay/validation.js';
+import type { ReplayContext } from '../replay/types.js';
 
 const booleanString = z.enum(['true', 'false']).transform(v => v === 'true');
 const isTest = (process.env.NODE_ENV || '').toLowerCase() === 'test';
+const isReplay = process.env.REPLAY === '1' || process.env.REPLAY === 'true';
 
 // Inject test defaults BEFORE schema parsing so Zod doesn't throw for test runs.
 if (isTest) {
   if (!process.env.API_KEY) process.env.API_KEY = 'test-api-key';
   if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'test-jwt-secret';
   if (!process.env.USE_MOCK_SUBGRAPH) process.env.USE_MOCK_SUBGRAPH = 'true';
+}
+
+// Inject dummy secrets for replay mode to avoid Zod validation failures
+// Replay mode doesn't need real secrets but schema requires them
+if (isReplay) {
+  if (!process.env.API_KEY) process.env.API_KEY = 'replay-dummy-api-key';
+  if (!process.env.JWT_SECRET) process.env.JWT_SECRET = 'replay-dummy-jwt-secret';
 }
 
 export const rawEnvSchema = z.object({
@@ -456,7 +466,15 @@ export const rawEnvSchema = z.object({
   HF_PRED_CRITICAL: z.string().optional(),
   
   // Tier 1: Risk Ordering Enhancement
-  RISK_ORDERING_SIMPLE: z.string().optional()
+  RISK_ORDERING_SIMPLE: z.string().optional(),
+  
+  // ==== REPLAY MODE ====
+  // Enable replay mode for historical data analysis
+  REPLAY: z.string().optional(),
+  // Block range for replay in format "START-END" (e.g., "38393480-38393500")
+  REPLAY_BLOCK_RANGE: z.string().optional(),
+  // Optional separate RPC URL for replay (defaults to RPC_URL if not set)
+  REPLAY_RPC_URL: z.string().optional()
 });
 
 export const env = (() => {
@@ -907,6 +925,42 @@ export const env = (() => {
     hfPredCritical: Number(parsed.HF_PRED_CRITICAL || 1.0008),
     
     // Tier 1: Risk Ordering Enhancement
-    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true'
+    riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true',
+    
+    // ==== REPLAY MODE ====
+    replay: (() => {
+      // Only construct replay context if REPLAY=1
+      if (!isReplay) {
+        return undefined;
+      }
+      
+      // Validate REPLAY_BLOCK_RANGE is provided
+      const blockRange = parsed.REPLAY_BLOCK_RANGE;
+      if (!blockRange) {
+        throw new Error('REPLAY_BLOCK_RANGE is required when REPLAY=1');
+      }
+      
+      // Parse and validate the block range
+      const range = parseReplayRange(blockRange);
+      
+      // Construct replay context
+      const replayContext: ReplayContext = {
+        startBlock: range.startBlock,
+        endBlock: range.endBlock,
+        span: range.span,
+        raw: range.raw,
+        cachePrefix: `replay:${range.startBlock}-${range.endBlock}`,
+        execute: false, // Replay is read-only by default
+        dryRun: true,   // Replay is always dry run
+        rpcUrl: parsed.REPLAY_RPC_URL // Optional separate RPC for replay
+      };
+      
+      return replayContext;
+    })()
   };
 })();
+
+/**
+ * Full configuration type including optional replay context
+ */
+export type FullConfig = typeof env;
