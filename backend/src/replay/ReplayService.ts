@@ -234,15 +234,14 @@ export class ReplayService {
     let minHF: number | null = null;
 
     for (const userAddr of affectedUsers) {
-      // In a real implementation, this would call getUserAccountData
-      // For now, we simulate detection logic
-      const hf = await this.simulateHealthFactorCheck(userAddr, blockNumber);
+      // Get actual health factor at this block
+      const hf = await this.getHealthFactorAtBlock(userAddr, blockNumber);
       
-      if (hf !== null) {
+      if (hf !== null && hf > 0) {
         this.userHealthFactors.set(userAddr, hf);
         
         if (hf < 1.0) {
-          // User is liquidatable
+          // User is liquidatable - record first detection
           this.metricsCollector.recordFirstDetection(userAddr, blockNumber);
           newHFEntrants.push(userAddr);
         }
@@ -299,18 +298,35 @@ export class ReplayService {
   }
 
   /**
-   * Simulate health factor check (placeholder)
-   * In a real implementation, this would call getUserAccountData from the contract
+   * Get user health factor at a specific block
+   * Uses eth_call with block number override to query historical state
    */
-  private async simulateHealthFactorCheck(userAddr: string, blockNumber: number): Promise<number | null> {
-    // This is a placeholder. In a real implementation:
-    // 1. Use eth_call with blockNumber override to getUserAccountData
-    // 2. Parse the health factor
-    // 3. Return the HF value
-    
-    // For now, return null to indicate we can't determine HF without proper implementation
-    // The actual implementation would need to integrate with the Aave Pool contract
-    return null;
+  private async getHealthFactorAtBlock(userAddr: string, blockNumber: number): Promise<number | null> {
+    try {
+      // Create contract instance
+      const { Contract, Interface } = await import('ethers');
+      const poolInterface = new Interface([
+        'function getUserAccountData(address user) external view returns (uint256 totalCollateralBase, uint256 totalDebtBase, uint256 availableBorrowsBase, uint256 currentLiquidationThreshold, uint256 ltv, uint256 healthFactor)'
+      ]);
+
+      const poolContract = new Contract(config.aavePoolAddress, poolInterface, this.provider);
+
+      // Call getUserAccountData with block tag override
+      const result = await poolContract.getUserAccountData(userAddr, { blockTag: blockNumber });
+
+      // result is a tuple: [totalCollateralBase, totalDebtBase, availableBorrowsBase, currentLiquidationThreshold, ltv, healthFactor]
+      const healthFactor = result[5]; // 6th element is healthFactor
+
+      // Health factor is returned as uint256 with 18 decimals (1e18 = HF 1.0)
+      // Convert to normal number
+      const hfNumber = Number(healthFactor) / 1e18;
+      
+      return hfNumber;
+    } catch (error) {
+      // User might not exist or have no position
+      logger.debug(`[replay] Failed to get HF for ${userAddr} at block ${blockNumber}:`, error);
+      return null;
+    }
   }
 
   /**
