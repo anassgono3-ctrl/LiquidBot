@@ -31,17 +31,20 @@ describe('PriceCache', () => {
   });
 
   it('should expire old entries', async () => {
+    vi.useFakeTimers();
     const token = '0x1234';
     const price = BigInt('100000000');
 
     cache.set(token, price);
     expect(cache.get(token)).toBe(price);
 
-    // Wait for TTL to expire
-    await new Promise(resolve => setTimeout(resolve, 1100));
+    // Fast-forward time to expire TTL
+    vi.advanceTimersByTime(1100);
 
     expect(cache.get(token)).toBe(null);
     expect(cache.has(token)).toBe(false);
+    
+    vi.useRealTimers();
   });
 
   it('should clear all entries', () => {
@@ -81,14 +84,17 @@ describe('GasCache', () => {
   });
 
   it('should expire old entries', async () => {
+    vi.useFakeTimers();
     cache.set(50);
     expect(cache.get()).toBe(50);
 
-    // Wait for TTL to expire
-    await new Promise(resolve => setTimeout(resolve, 1100));
+    // Fast-forward time to expire TTL
+    vi.advanceTimersByTime(1100);
 
     expect(cache.get()).toBe(null);
     expect(cache.has()).toBe(false);
+    
+    vi.useRealTimers();
   });
 
   it('should clear all entries', () => {

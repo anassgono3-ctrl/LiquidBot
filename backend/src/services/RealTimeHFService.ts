@@ -3404,6 +3404,8 @@ export class RealTimeHFService extends EventEmitter {
           } as LiquidatableEvent);
           
           // Publish to fastpath channel if HF < 1.0
+          // Note: Using floating-point conversion here. For precise ray value,
+          // MicroVerifier would need to return the raw BigInt value.
           if (this.fastpathPublisher && result.hf < 1.0) {
             this.fastpathPublisher.publish({
               user: userAddress,

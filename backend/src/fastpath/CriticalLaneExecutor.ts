@@ -465,7 +465,10 @@ export class CriticalLaneExecutor {
   }
   
   /**
-   * Call ExecutionService fast-path method (bypasses pre-sim)
+   * Call fast-path execution (currently uses buildLiquidationPlan)
+   * 
+   * TODO: Integrate with ExecutionService.prepareActionableOpportunityFastpath()
+   * when that method is implemented for full pre-sim bypass
    */
   private async callFastpathExecution(user: string, snapshot: UserSnapshot): Promise<{
     plan?: {
@@ -477,9 +480,7 @@ export class CriticalLaneExecutor {
     };
     skipReason?: string;
   }> {
-    // For now, fall back to buildLiquidationPlan
-    // TODO: When ExecutionService.prepareActionableOpportunityFastpath() is implemented,
-    // call it here instead
+    // Use buildLiquidationPlan for now - already bypasses heavy operations
     const plan = await this.buildLiquidationPlan(snapshot);
     if (!plan) {
       return { skipReason: 'no_viable_plan' };
