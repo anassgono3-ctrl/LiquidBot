@@ -53,14 +53,14 @@ export class HistoricalStateProvider {
   /**
    * Create a contract instance with historical block tag support.
    */
-  getContract(address: string, abi: any[]): Contract {
+  getContract(address: string, abi: string[]): Contract {
     return new Contract(address, abi, this.provider);
   }
   
   /**
    * Execute a contract call at the current replay block.
    */
-  async call(contract: Contract, method: string, args: any[]): Promise<any> {
+  async call(contract: Contract, method: string, args: unknown[]): Promise<unknown> {
     const blockTag = this.currentBlock;
     return contract[method](...args, { blockTag });
   }

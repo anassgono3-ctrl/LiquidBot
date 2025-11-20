@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // CLI entry point for historical replay mode
 import { JsonRpcProvider } from 'ethers';
+
 import { parseReplayConfig, validateReplayConfig } from '../replay/ReplayConfig.js';
 import { ReplayController, type ReplayCandidateDetector } from '../replay/ReplayController.js';
 import { HistoricalStateProvider } from '../replay/HistoricalStateProvider.js';

@@ -1,6 +1,7 @@
 // ReplayController: Main loop driving block-by-block replay execution
-import { JsonRpcProvider } from 'ethers';
 import { setTimeout as sleep } from 'timers/promises';
+
+import { JsonRpcProvider } from 'ethers';
 
 import type { ReplayConfigType } from './ReplayConfig.js';
 import { getSleepDuration } from './ReplayConfig.js';
@@ -57,7 +58,7 @@ export class ReplayController {
         
         // Convert to format expected by Comparator
         const allEvents: GroundTruthEvent[] = [];
-        for (const [block, events] of this.groundTruthEvents.entries()) {
+        for (const [, events] of this.groundTruthEvents.entries()) {
           for (const event of events) {
             allEvents.push({
               user: event.user,

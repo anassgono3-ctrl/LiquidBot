@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+
 import { Comparator, type Candidate, type GroundTruthEvent } from '../../../src/replay/Comparator.js';
 
 describe('Comparator', () => {

@@ -1,7 +1,9 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'fs';
-import { join } from 'path';
 import { tmpdir } from 'os';
+import { join } from 'path';
+
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+
 import { Reporter, type BlockMetrics, type CandidateMetrics, type MissedLiquidation } from '../../../src/replay/Reporter.js';
 
 describe('Reporter', () => {

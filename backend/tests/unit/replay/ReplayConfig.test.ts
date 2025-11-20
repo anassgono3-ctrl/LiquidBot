@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+
 import { parseReplayConfig, validateReplayConfig, getSleepDuration } from '../../../src/replay/ReplayConfig.js';
 
 describe('ReplayConfig', () => {

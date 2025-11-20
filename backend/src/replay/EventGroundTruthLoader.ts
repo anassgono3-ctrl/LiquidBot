@@ -84,7 +84,20 @@ export class EventGroundTruthLoader {
         }
       `;
       
-      const result: any = await client.request(query, {
+      const result = await client.request<{
+        liquidationCalls?: Array<{
+          id: string;
+          blockNumber: number;
+          txHash?: string;
+          user: string;
+          liquidator: string;
+          collateralReserve?: { id: string; symbol: string };
+          principalReserve?: { id: string; symbol: string };
+          collateralAmount?: string;
+          principalAmount?: string;
+          timestamp?: number;
+        }>;
+      }>(query, {
         startBlock,
         endBlock,
         skip,
