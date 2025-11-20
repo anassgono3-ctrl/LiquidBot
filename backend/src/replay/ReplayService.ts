@@ -8,13 +8,14 @@ import { createLogger, format, transports } from 'winston';
 import { createClient as createRedisClient, RedisClientType } from 'redis';
 
 import { config } from '../config/index.js';
+import { CandidateManager } from '../services/CandidateManager.js';
+import { HotSetTracker } from '../services/HotSetTracker.js';
+import { PrecomputeService } from '../services/PrecomputeService.js';
+
 import { HistoricalEventFetcher } from './HistoricalEventFetcher.js';
 import { ReplayMetricsCollector } from './ReplayMetricsCollector.js';
 import { ReplayOutputWriter } from './ReplayOutputWriter.js';
 import type { ReplayConfig, BlockMetrics, HistoricalEvent } from './types.js';
-import { CandidateManager } from '../services/CandidateManager.js';
-import { HotSetTracker } from '../services/HotSetTracker.js';
-import { PrecomputeService } from '../services/PrecomputeService.js';
 
 const logger = createLogger({
   level: 'info',

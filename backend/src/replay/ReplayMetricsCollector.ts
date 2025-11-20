@@ -81,7 +81,6 @@ export class ReplayMetricsCollector {
   generateSummary(startBlock: number, endBlock: number): ReplaySummary {
     const allDetections = Array.from(this.detections.values());
     const detectedCount = allDetections.filter(d => d.firstDetectBlock !== null).length;
-    const missedCount = allDetections.filter(d => d.firstDetectBlock === null).length;
     
     // Calculate median detection lag (excluding misses)
     const lags = allDetections

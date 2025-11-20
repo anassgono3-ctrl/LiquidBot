@@ -6,6 +6,7 @@ import { JsonRpcProvider, EventLog, Log, Interface } from 'ethers';
 import { createLogger, format, transports } from 'winston';
 
 import { aaveV3Interface, chainlinkInterface } from '../abi/aaveV3PoolEvents.js';
+
 import type { HistoricalEvent } from './types.js';
 
 const logger = createLogger({

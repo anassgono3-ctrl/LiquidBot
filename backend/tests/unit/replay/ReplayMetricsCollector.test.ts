@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { ReplayMetricsCollector } from '../../../src/replay/ReplayMetricsCollector.js';
 
 describe('ReplayMetricsCollector', () => {
