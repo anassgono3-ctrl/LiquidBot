@@ -144,14 +144,15 @@ export class RedisPipelineBuilder {
   }
   
   /**
-   * Set hash multiple fields
+   * Set hash multiple fields (uses hset for Redis 4.0+ compatibility)
    */
   hmset(key: string, data: Record<string, string | number>): this {
     const flat: (string | number)[] = [];
     for (const [field, value] of Object.entries(data)) {
       flat.push(field, String(value));
     }
-    this.pipeline.hmset(key, ...flat);
+    // Use hset instead of deprecated hmset for Redis 4.0+ compatibility
+    this.pipeline.hset(key, ...flat);
     return this;
   }
   

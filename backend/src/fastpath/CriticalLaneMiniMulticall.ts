@@ -50,9 +50,10 @@ export class CriticalLaneMiniMulticall {
   private poolAddress: string;
   private dataProviderAddress: string;
   
-  constructor(provider: JsonRpcProvider) {
+  constructor(provider: JsonRpcProvider, multicall3Address?: string) {
     this.provider = provider;
-    this.multicall3Address = '0xcA11bde05977b3631167028862bE2a173976CA11'; // Multicall3 on Base
+    // Multicall3 address: configurable for different networks, defaults to Base mainnet
+    this.multicall3Address = multicall3Address || '0xcA11bde05977b3631167028862bE2a173976CA11';
     this.poolAddress = config.aavePoolAddress;
     this.dataProviderAddress = config.aaveProtocolDataProvider;
   }

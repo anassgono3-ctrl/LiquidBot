@@ -266,15 +266,15 @@ export class CriticalLaneExecutor {
       config.criticalLaneMaxReverifyReserves
     );
     
-    // Update Redis snapshot
-    await this.redis.hmset(userKey, {
-      lastHFRay: snapshot.healthFactor.toString(),
-      totalDebtBase: snapshot.totalDebtBase.toString(),
-      totalCollateralBase: snapshot.totalCollateralBase.toString(),
-      lastBlock: snapshot.blockNumber.toString(),
-      updatedTs: snapshot.timestamp.toString(),
-      reservesJson: JSON.stringify(snapshot.reserves)
-    });
+    // Update Redis snapshot (using hset for Redis 4.0+ compatibility)
+    await this.redis.hset(userKey,
+      'lastHFRay', snapshot.healthFactor.toString(),
+      'totalDebtBase', snapshot.totalDebtBase.toString(),
+      'totalCollateralBase', snapshot.totalCollateralBase.toString(),
+      'lastBlock', snapshot.blockNumber.toString(),
+      'updatedTs', snapshot.timestamp.toString(),
+      'reservesJson', JSON.stringify(snapshot.reserves)
+    );
     
     await this.redis.expire(userKey, Math.floor(config.userSnapshotTtlMs / 1000) + 10);
     
@@ -342,17 +342,26 @@ export class CriticalLaneExecutor {
   
   /**
    * Submit transaction via ExecutionService fast path
+   * 
+   * TODO: Integration with ExecutionService required
+   * This is a placeholder that should be replaced with actual execution logic:
+   * - Build liquidation calldata
+   * - Estimate gas
+   * - Submit to private RPC or public provider
+   * - Handle revert scenarios
    */
   private async submitTransaction(plan: {
     debtAsset: string;
     collateralAsset: string;
     debtToCover: bigint;
   }): Promise<{ success: boolean; raced?: boolean; txHash?: string }> {
-    // Placeholder - integration with ExecutionService
-    // In real implementation, this would call executionService.executeFastPath(...)
-    console.log('[critical-executor] Would submit tx:', plan);
+    // LIMITATION: Transaction submission not yet integrated with ExecutionService
+    // The critical lane will detect opportunities but not execute them
+    // This requires integration with the existing execution pipeline
+    console.log('[critical-executor] Transaction submission not implemented:', plan);
+    console.log('[critical-executor] Integration with ExecutionService required for actual execution');
     
-    // For now, return simulated result
+    // Return simulated result - in production, this would attempt actual transaction
     return { success: false, raced: false };
   }
   

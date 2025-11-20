@@ -45,6 +45,9 @@ export function expandVariableDebt(
  * @param priceDecimals - Price feed decimals (e.g., 8 for Chainlink, 18 for Aave oracle base)
  * @returns USD value as number (JavaScript safe number, bounded check recommended)
  * 
+ * Note: For very large amounts (>1e15), precision may be affected by JavaScript Number limits.
+ * The result is accurate for typical liquidation amounts up to ~$1 quadrillion.
+ * 
  * @example
  * // 1000.50 USDC (6 decimals) at $1.00 (8 decimals)
  * computeUsd(1000500000n, 6, 100000000n, 8) // => 1000.50
@@ -149,8 +152,10 @@ export function detectSuspiciousScaling(
   decimals: number,
   usdValue: number
 ): boolean {
-  // Threshold: amount > 10^(decimals-2) (e.g., > 0.01 tokens for USDC, > 0.01 for WETH)
-  const minSignificantAmount = 10n ** BigInt(Math.max(0, decimals - 2));
+  // Handle edge case: tokens with very few decimals (0-2)
+  // For these tokens, use a minimum threshold of 10^decimals instead
+  const exponent = decimals >= 2 ? decimals - 2 : decimals;
+  const minSignificantAmount = 10n ** BigInt(exponent);
   
   // If amount is significant but USD is tiny, flag as suspicious
   return rawAmount > minSignificantAmount && usdValue < 0.01;

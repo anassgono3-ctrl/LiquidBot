@@ -608,6 +608,7 @@ export class LiquidationAuditService {
 
   /**
    * Check for suspicious USD scaling that might indicate decimal mismatch
+   * Uses TokenMetadataResolver for consistency across the system
    */
   private async checkSuspiciousScaling(
     asset: string,
@@ -615,18 +616,19 @@ export class LiquidationAuditService {
     usdValue: number
   ): Promise<void> {
     try {
-      // Get decimals for the asset
+      // Use TokenMetadataResolver if available, fallback to local implementation
+      // TODO: Inject TokenMetadataResolver via constructor for better consistency
       const decimals = await this.getTokenDecimals(asset);
+      const symbol = await this.getTokenSymbol(asset);
       
       if (detectSuspiciousScaling(rawAmount, decimals, usdValue)) {
         // Log warning
         console.warn(
-          `[audit] suspicious_usd_scaling: asset=${asset} rawAmount=${rawAmount} ` +
-          `decimals=${decimals} usdValue=${usdValue.toFixed(6)}`
+          `[audit] suspicious_usd_scaling: asset=${asset} symbol=${symbol} ` +
+          `rawAmount=${rawAmount} decimals=${decimals} usdValue=${usdValue.toFixed(6)}`
         );
         
         // Increment metric with asset label
-        const symbol = await this.getTokenSymbol(asset);
         auditUsdScalingSuspectTotal.inc({ asset: symbol });
       }
     } catch (err) {
