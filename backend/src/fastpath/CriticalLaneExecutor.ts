@@ -117,9 +117,9 @@ export class CriticalLaneExecutor {
           recordMiniMulticall();
         }
         
-        // 3. Check if still liquidatable
-        const hf = Number(snapshot.healthFactor) / 1e18;
-        if (hf >= config.criticalLaneMinExecuteHf) {
+        // 3. Check if still liquidatable (use BigInt for precision)
+        const thresholdRay = BigInt(Math.floor(config.criticalLaneMinExecuteHf * 1e18));
+        if (snapshot.healthFactor >= thresholdRay) {
           recordSkip('hf_above_threshold');
           latencyPhases.totalMs = timer.elapsed();
           logFastpathLatency(event.user, snapshotStale, latencyPhases);

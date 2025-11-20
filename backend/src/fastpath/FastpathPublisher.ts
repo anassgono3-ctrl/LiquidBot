@@ -45,9 +45,10 @@ export class FastpathPublisher {
       return false;
     }
     
-    // Check HF threshold
-    const hf = Number(event.hfRay) / 1e18;
-    if (hf >= this.publishMinHf) {
+    // Check HF threshold (use BigInt for precision)
+    const hfRay = BigInt(event.hfRay);
+    const thresholdRay = BigInt(Math.floor(this.publishMinHf * 1e18));
+    if (hfRay >= thresholdRay) {
       return false;
     }
     
@@ -56,7 +57,8 @@ export class FastpathPublisher {
       const receivers = await this.redis.publish(this.channelName, payload);
       
       if (config.fastpathLogDetail) {
-        console.log(`[fastpath-publisher] Published event: user=${event.user} hf=${hf.toFixed(4)} receivers=${receivers}`);
+        const hfDisplay = (Number(hfRay) / 1e18).toFixed(4);
+        console.log(`[fastpath-publisher] Published event: user=${event.user} hf=${hfDisplay} receivers=${receivers}`);
       }
       
       return receivers > 0;

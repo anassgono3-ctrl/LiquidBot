@@ -2984,12 +2984,12 @@ export class RealTimeHFService extends EventEmitter {
                 timestamp: Date.now()
               } as LiquidatableEvent);
 
-              // Publish to fastpath channel if HF < 1.0
+              // Publish to fastpath channel if HF < 1.0 (use original ray value for precision)
               if (this.fastpathPublisher && healthFactor < 1.0) {
                 this.fastpathPublisher.publish({
                   user: userAddress,
                   block: blockNumber,
-                  hfRay: (BigInt(Math.floor(healthFactor * 1e18))).toString(),
+                  hfRay: healthFactorRaw.toString(),
                   ts: Date.now(),
                   triggerType
                 }).catch(err => {
