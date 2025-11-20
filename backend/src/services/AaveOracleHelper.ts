@@ -8,6 +8,7 @@
 import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
+import { computeUsd } from '../utils/CanonicalUsdMath.js';
 
 // Aave AddressesProvider ABI (minimal)
 const ADDRESSES_PROVIDER_ABI = [
@@ -240,20 +241,9 @@ export class AaveOracleHelper {
       return null;
     }
 
-    // Convert: (rawAmount / 10^decimals) * (price / 10^8)
-    // Simplified: (rawAmount * price) / (10^decimals * 10^8)
+    // Use canonical USD computation (ensures consistency across the system)
     try {
-      const tokenDivisor = 10n ** BigInt(decimals);
-      const priceDivisor = BASE_CURRENCY_UNIT;
-      
-      // Use bigint arithmetic for precision
-      const numerator = rawAmount * price;
-      const denominator = tokenDivisor * priceDivisor;
-      
-      // Convert to float
-      const usdValue = Number(numerator) / Number(denominator);
-      
-      return usdValue;
+      return computeUsd(rawAmount, decimals, price, 8);
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(`[aave-oracle] Failed to convert to USD for ${tokenAddress}:`, error);
