@@ -1086,3 +1086,10 @@ export const projectionCandidatesFlagged = new Counter({
   labelNames: ['likelihood'],
   registers: [metricsRegistry]
 });
+
+// Re-export critical lane metrics for convenience
+export const criticalLaneExecutedTotal = () => getExecutionMetrics().criticalLaneExecutedTotal;
+export const criticalLaneSkippedTotal = () => getExecutionMetrics().criticalLaneSkippedTotal;
+export const criticalLaneDetectMs = () => getExecutionMetrics().criticalLaneDetectMs;
+export const criticalLaneIntentMs = () => getExecutionMetrics().criticalLaneIntentMs;
+export const criticalLaneSubmitMs = () => getExecutionMetrics().criticalLaneSubmitMs;

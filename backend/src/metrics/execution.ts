@@ -51,6 +51,13 @@ export interface ExecutionMetrics {
   sprinterEventToSendMs: Histogram<string>;
   sprinterTemplatePatchMs: Histogram<string>;
   sprinterPublishFanoutMs: Histogram<string>;
+  
+  // Critical Lane metrics
+  criticalLaneExecutedTotal: Counter<string>;
+  criticalLaneSkippedTotal: Counter<string>;
+  criticalLaneDetectMs: Histogram<string>;
+  criticalLaneIntentMs: Histogram<string>;
+  criticalLaneSubmitMs: Histogram<string>;
 }
 
 /**
@@ -293,6 +300,41 @@ export function createExecutionMetrics(registry: Registry): ExecutionMetrics {
     registers: [registry]
   });
 
+  // Critical Lane Metrics
+  const criticalLaneExecutedTotal = new Counter({
+    name: 'liquidbot_critical_lane_executed_total',
+    help: 'Total critical lane executions',
+    registers: [registry]
+  });
+
+  const criticalLaneSkippedTotal = new Counter({
+    name: 'liquidbot_critical_lane_skipped_total',
+    help: 'Total critical lane skips with reason',
+    labelNames: ['reason'],
+    registers: [registry]
+  });
+
+  const criticalLaneDetectMs = new Histogram({
+    name: 'liquidbot_critical_lane_detect_ms',
+    help: 'Critical lane detection latency (milliseconds)',
+    buckets: [1, 5, 10, 25, 50, 100, 250],
+    registers: [registry]
+  });
+
+  const criticalLaneIntentMs = new Histogram({
+    name: 'liquidbot_critical_lane_intent_ms',
+    help: 'Critical lane intent building latency (milliseconds)',
+    buckets: [1, 5, 10, 25, 50, 100, 250],
+    registers: [registry]
+  });
+
+  const criticalLaneSubmitMs = new Histogram({
+    name: 'liquidbot_critical_lane_submit_ms',
+    help: 'Critical lane submission latency (milliseconds)',
+    buckets: [1, 5, 10, 25, 50, 100, 250],
+    registers: [registry]
+  });
+
   return {
     intentBuildLatencyMs,
     intentCacheHits,
@@ -327,6 +369,11 @@ export function createExecutionMetrics(registry: Registry): ExecutionMetrics {
     sprinterVerifyLatencyMs,
     sprinterEventToSendMs,
     sprinterTemplatePatchMs,
-    sprinterPublishFanoutMs
+    sprinterPublishFanoutMs,
+    criticalLaneExecutedTotal,
+    criticalLaneSkippedTotal,
+    criticalLaneDetectMs,
+    criticalLaneIntentMs,
+    criticalLaneSubmitMs
   };
 }
