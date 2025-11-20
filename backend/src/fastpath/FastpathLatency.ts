@@ -6,6 +6,7 @@
  */
 
 import { config } from '../config/index.js';
+import { recordFastpathPhase } from './CriticalLaneMetrics.js';
 
 export interface LatencyPhases {
   eventToPublishMs?: number;
@@ -112,31 +113,50 @@ export function logFastpathLatency(
   snapshotStale: boolean,
   phases: LatencyPhases
 ): void {
-  if (!config.fastpathLatencyEnabled || !config.fastpathLogDetail) {
+  if (!config.fastpathLatencyEnabled) {
     return;
   }
   
-  const parts = [
-    `[fastpath-latency]`,
-    `user=${user}`,
-    `snapshotStale=${snapshotStale}`
-  ];
+  // Record metrics if enabled
+  if (config.fastpathLatencyMetrics) {
+    if (phases.miniMulticallMs !== undefined) {
+      recordFastpathPhase('mini_multicall', phases.miniMulticallMs);
+    }
+    if (phases.planBuildMs !== undefined) {
+      recordFastpathPhase('plan_build', phases.planBuildMs);
+    }
+    if (phases.priceGasMs !== undefined) {
+      recordFastpathPhase('price_gas', phases.priceGasMs);
+    }
+    if (phases.submitMs !== undefined) {
+      recordFastpathPhase('submit', phases.submitMs);
+    }
+  }
   
-  if (phases.miniMulticallMs !== undefined) {
-    parts.push(`miniMulticallMs=${phases.miniMulticallMs}`);
+  // Log if detail logging enabled
+  if (config.fastpathLogDetail) {
+    const parts = [
+      `[fastpath-latency]`,
+      `user=${user}`,
+      `snapshotStale=${snapshotStale}`
+    ];
+    
+    if (phases.miniMulticallMs !== undefined) {
+      parts.push(`miniMulticallMs=${phases.miniMulticallMs}`);
+    }
+    if (phases.planBuildMs !== undefined) {
+      parts.push(`planBuildMs=${phases.planBuildMs}`);
+    }
+    if (phases.priceGasMs !== undefined) {
+      parts.push(`priceGasMs=${phases.priceGasMs}`);
+    }
+    if (phases.submitMs !== undefined) {
+      parts.push(`submitMs=${phases.submitMs}`);
+    }
+    parts.push(`totalMs=${phases.totalMs}`);
+    
+    console.log(parts.join(' '));
   }
-  if (phases.planBuildMs !== undefined) {
-    parts.push(`planBuildMs=${phases.planBuildMs}`);
-  }
-  if (phases.priceGasMs !== undefined) {
-    parts.push(`priceGasMs=${phases.priceGasMs}`);
-  }
-  if (phases.submitMs !== undefined) {
-    parts.push(`submitMs=${phases.submitMs}`);
-  }
-  parts.push(`totalMs=${phases.totalMs}`);
-  
-  console.log(parts.join(' '));
 }
 
 /**
