@@ -32,6 +32,7 @@ export const rawEnvSchema = z.object({
   SUBGRAPH_RETRY_BASE_MS: z.string().optional(),
   SUBGRAPH_RATE_LIMIT_CAPACITY: z.string().optional(),
   SUBGRAPH_RATE_LIMIT_INTERVAL_MS: z.string().optional(),
+  SUBGRAPH_REQUEST_INTERVAL_MS: z.string().optional(),
 
   AAVE_POOL_ADDRESS: z.string().optional(),
   
@@ -199,6 +200,10 @@ export const rawEnvSchema = z.object({
 
   // Subgraph paging (when USE_SUBGRAPH=true)
   SUBGRAPH_PAGE_SIZE: z.string().optional(),
+
+  // Replay mode configuration (optional)
+  SUBGRAPH_MAX_PAGES: z.string().optional(),
+  REPLAY_SUBGRAPH_ABORT_ON_AUTH_ERROR: z.string().optional(),
 
   // Head-check paging/rotation
   HEAD_CHECK_PAGE_STRATEGY: z.string().optional(),
