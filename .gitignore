@@ -63,3 +63,7 @@ yarn-error.log*
 # Misc
 .cache/
 .parcel-cache/
+
+# Replay outputs
+replay/
+backend/replay/
