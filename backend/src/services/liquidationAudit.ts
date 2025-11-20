@@ -14,8 +14,10 @@ import {
   liquidationAuditReasonNotInWatchSet,
   liquidationAuditReasonRaced,
   liquidationAuditErrors,
-  watchMissCount
+  watchMissCount,
+  auditUsdScalingSuspectTotal
 } from '../metrics/index.js';
+import { detectSuspiciousScaling } from '../utils/CanonicalUsdMath.js';
 
 import { NotificationService } from './NotificationService.js';
 import { PriceService } from './PriceService.js';
@@ -330,6 +332,14 @@ export class LiquidationAuditService {
           this.aaveOracleHelper.toUsd(liquidatedCollateralAmount, collateralAsset, blockNumber)
         ]);
         
+        // Check for suspicious USD scaling
+        if (debtUsd !== null) {
+          await this.checkSuspiciousScaling(debtAsset, debtToCover, debtUsd);
+        }
+        if (collateralUsd !== null) {
+          await this.checkSuspiciousScaling(collateralAsset, liquidatedCollateralAmount, collateralUsd);
+        }
+        
         return { debtUsd, collateralUsd };
       }
 
@@ -594,5 +604,36 @@ export class LiquidationAuditService {
    */
   private formatNumber(value: number): string {
     return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  /**
+   * Check for suspicious USD scaling that might indicate decimal mismatch
+   * Uses TokenMetadataResolver for consistency across the system
+   */
+  private async checkSuspiciousScaling(
+    asset: string,
+    rawAmount: bigint,
+    usdValue: number
+  ): Promise<void> {
+    try {
+      // Use TokenMetadataResolver if available, fallback to local implementation
+      // TODO: Inject TokenMetadataResolver via constructor for better consistency
+      const decimals = await this.getTokenDecimals(asset);
+      const symbol = await this.getTokenSymbol(asset);
+      
+      if (detectSuspiciousScaling(rawAmount, decimals, usdValue)) {
+        // Log warning
+        console.warn(
+          `[audit] suspicious_usd_scaling: asset=${asset} symbol=${symbol} ` +
+          `rawAmount=${rawAmount} decimals=${decimals} usdValue=${usdValue.toFixed(6)}`
+        );
+        
+        // Increment metric with asset label
+        auditUsdScalingSuspectTotal.inc({ asset: symbol });
+      }
+    } catch (err) {
+      // Don't fail audit on suspicion check error
+      console.error('[audit] Error checking suspicious scaling:', err);
+    }
   }
 }

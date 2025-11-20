@@ -466,7 +466,33 @@ export const rawEnvSchema = z.object({
   // Allow unprofitable execution on first attempt (for reliability testing)
   CRITICAL_LANE_ALLOW_UNPROFITABLE_INITIAL: z.string().optional(),
   // Latency warning threshold in milliseconds
-  CRITICAL_LANE_LATENCY_WARN_MS: z.string().optional()
+  CRITICAL_LANE_LATENCY_WARN_MS: z.string().optional(),
+  // Load shedding: suppress head sweeps while critical attempts in-flight
+  CRITICAL_LANE_LOAD_SHED: z.string().optional(),
+  // Reverification mode: snapshot_only | mini_multicall
+  CRITICAL_LANE_REVERIFY_MODE: z.string().optional(),
+  // Maximum reserves to include in mini-multicall reverify
+  CRITICAL_LANE_MAX_REVERIFY_RESERVES: z.string().optional(),
+  // Abort attempt if latency exceeds this threshold (ms)
+  CRITICAL_LANE_LATENCY_ABORT_MS: z.string().optional(),
+  // Override minimum debt USD for fast path
+  CRITICAL_LANE_MIN_DEBT_USD: z.string().optional(),
+  // Override minimum profit USD for fast path
+  CRITICAL_LANE_MIN_PROFIT_USD: z.string().optional(),
+  // Price fast TTL (ms) - how long prices from snapshot are valid
+  PRICE_FAST_TTL_MS: z.string().optional(),
+  // User snapshot TTL (ms) - how long user snapshots are valid
+  USER_SNAPSHOT_TTL_MS: z.string().optional(),
+  // Template refresh interval (ms) - how often to refresh calldata templates
+  TEMPLATE_REFRESH_INTERVAL_MS: z.string().optional(),
+  // Fast gas mode: cache_then_estimate | estimate_only | cache_only
+  FAST_GAS_MODE: z.string().optional(),
+  // Private TX RPC URL for builder submission
+  PRIVATE_TX_RPC: z.string().optional(),
+  // Private TX mode: bundle | direct | disabled
+  PRIVATE_TX_MODE: z.string().optional(),
+  // Redis pipeline enabled for batch operations
+  REDIS_PIPELINE_ENABLED: z.string().optional()
 });
 
 export const env = (() => {
@@ -923,6 +949,19 @@ export const env = (() => {
     criticalLaneEnabled: (parsed.CRITICAL_LANE_ENABLED || 'true').toLowerCase() === 'true',
     criticalLaneProfitMinUsd: Number(parsed.CRITICAL_LANE_PROFIT_MIN_USD || 0),
     criticalLaneAllowUnprofitableInitial: (parsed.CRITICAL_LANE_ALLOW_UNPROFITABLE_INITIAL || 'false').toLowerCase() === 'true',
-    criticalLaneLatencyWarnMs: Number(parsed.CRITICAL_LANE_LATENCY_WARN_MS || 250)
+    criticalLaneLatencyWarnMs: Number(parsed.CRITICAL_LANE_LATENCY_WARN_MS || 250),
+    criticalLaneLoadShed: (parsed.CRITICAL_LANE_LOAD_SHED || 'true').toLowerCase() === 'true',
+    criticalLaneReverifyMode: parsed.CRITICAL_LANE_REVERIFY_MODE || 'mini_multicall',
+    criticalLaneMaxReverifyReserves: Number(parsed.CRITICAL_LANE_MAX_REVERIFY_RESERVES || 6),
+    criticalLaneLatencyAbortMs: Number(parsed.CRITICAL_LANE_LATENCY_ABORT_MS || 600),
+    criticalLaneMinDebtUsd: Number(parsed.CRITICAL_LANE_MIN_DEBT_USD || 50),
+    criticalLaneMinProfitUsd: Number(parsed.CRITICAL_LANE_MIN_PROFIT_USD || 10),
+    priceFastTtlMs: Number(parsed.PRICE_FAST_TTL_MS || 5000),
+    userSnapshotTtlMs: Number(parsed.USER_SNAPSHOT_TTL_MS || 4000),
+    templateRefreshIntervalMs: Number(parsed.TEMPLATE_REFRESH_INTERVAL_MS || 60000),
+    fastGasMode: parsed.FAST_GAS_MODE || 'cache_then_estimate',
+    privateTxRpc: parsed.PRIVATE_TX_RPC,
+    privateTxMode: parsed.PRIVATE_TX_MODE || 'disabled',
+    redisPipelineEnabled: (parsed.REDIS_PIPELINE_ENABLED || 'true').toLowerCase() === 'true'
   };
 })();

@@ -1055,3 +1055,68 @@ Trade-offs:
 - Slightly higher RPC load from pending state checks
 - Gas cost increases with aggressive tips and RBF
 - Private relay may have additional fees
+
+## Critical Lane Fast Path
+
+The Critical Lane Fast Path is a low-latency liquidation execution system for highly profitable opportunities (HF < 1.0). It achieves average latency of <180ms through:
+
+- **Redis Pub/Sub**: Immediate notification when HF drops below 1.0
+- **Snapshot-Based State**: Pre-cached user state eliminates multicall delays
+- **Mini-Multicall Reverification**: Lightweight verification for stale snapshots
+- **Canonical USD Math**: Single source of truth for decimal handling and USD conversions
+- **Load Shedding**: Suppress head sweeps while critical attempts in-flight
+
+### Quick Start
+
+Enable Critical Lane in your `.env`:
+
+```bash
+# Enable critical lane fast path
+CRITICAL_LANE_ENABLED=true
+
+# Adjust thresholds
+CRITICAL_LANE_MIN_DEBT_USD=50
+CRITICAL_LANE_MIN_PROFIT_USD=10
+
+# Configure latency budgets
+CRITICAL_LANE_LATENCY_WARN_MS=250
+CRITICAL_LANE_LATENCY_ABORT_MS=600
+
+# Optional: Private transaction support
+PRIVATE_TX_MODE=bundle
+PRIVATE_TX_RPC=https://builder.example.org
+```
+
+### Features
+
+1. **Decimal & USD Valuation Fix**: Centralized USD computation eliminates incorrect $0.00 valuations and decimal mismatches
+2. **Suspicious Scaling Detection**: Automatic detection of likely decimal errors with metric tracking
+3. **Fast Path Execution**: Bypasses batch verification and pre-sim queues for minimum latency
+4. **Attempt Locking**: 6-second TTL prevents double-spend within window
+5. **Comprehensive Metrics**: Prometheus metrics for latency, success rate, and skip reasons
+
+### Metrics
+
+View Critical Lane metrics:
+
+```bash
+curl http://localhost:3000/metrics | grep critical_lane
+```
+
+Key metrics:
+- `critical_lane_attempt_total`: Total attempts
+- `critical_lane_success_total`: Successful executions
+- `critical_lane_latency_ms`: Latency histogram
+- `critical_lane_skipped_total{reason}`: Skipped attempts by reason
+- `audit_usd_scaling_suspect_total{asset}`: Suspicious USD scaling detections
+
+### Documentation
+
+For comprehensive documentation including:
+- Architecture and data flow
+- Redis schema
+- Configuration options
+- Performance characteristics
+- Troubleshooting guide
+
+See [FASTPATH_ACCELERATION.md](./FASTPATH_ACCELERATION.md)

@@ -2,6 +2,7 @@ import { Counter, Gauge, Histogram } from 'prom-client';
 
 import { metricsRegistry } from './registry.js';
 import { createExecutionMetrics, type ExecutionMetrics } from './execution.js';
+import { registerCriticalLaneMetrics } from '../fastpath/CriticalLaneMetrics.js';
 
 // Singleton execution metrics instance
 let _executionMetrics: ExecutionMetrics | null = null;
@@ -13,6 +14,10 @@ let _executionMetrics: ExecutionMetrics | null = null;
 export function initMetricsOnce(): ExecutionMetrics {
   if (_executionMetrics) return _executionMetrics;
   _executionMetrics = createExecutionMetrics(metricsRegistry);
+  
+  // Register Critical Lane metrics
+  registerCriticalLaneMetrics(metricsRegistry);
+  
   return _executionMetrics;
 }
 
@@ -596,6 +601,13 @@ export const liquidationAuditReasonRaced = new Counter({
 export const liquidationAuditErrors = new Counter({
   name: 'liquidbot_liquidation_audit_errors',
   help: 'Count of errors during liquidation audit',
+  registers: [metricsRegistry]
+});
+
+export const auditUsdScalingSuspectTotal = new Counter({
+  name: 'audit_usd_scaling_suspect_total',
+  help: 'Count of suspicious USD scaling detections (likely decimal mismatch)',
+  labelNames: ['asset'],
   registers: [metricsRegistry]
 });
 

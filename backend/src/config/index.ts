@@ -450,5 +450,18 @@ export const config = {
   get criticalLaneEnabled() { return env.criticalLaneEnabled; },
   get criticalLaneProfitMinUsd() { return env.criticalLaneProfitMinUsd; },
   get criticalLaneAllowUnprofitableInitial() { return env.criticalLaneAllowUnprofitableInitial; },
-  get criticalLaneLatencyWarnMs() { return env.criticalLaneLatencyWarnMs; }
+  get criticalLaneLatencyWarnMs() { return env.criticalLaneLatencyWarnMs; },
+  get criticalLaneLoadShed() { return env.criticalLaneLoadShed; },
+  get criticalLaneReverifyMode() { return env.criticalLaneReverifyMode; },
+  get criticalLaneMaxReverifyReserves() { return env.criticalLaneMaxReverifyReserves; },
+  get criticalLaneLatencyAbortMs() { return env.criticalLaneLatencyAbortMs; },
+  get criticalLaneMinDebtUsd() { return env.criticalLaneMinDebtUsd; },
+  get criticalLaneMinProfitUsd() { return env.criticalLaneMinProfitUsd; },
+  get priceFastTtlMs() { return env.priceFastTtlMs; },
+  get userSnapshotTtlMs() { return env.userSnapshotTtlMs; },
+  get templateRefreshIntervalMs() { return env.templateRefreshIntervalMs; },
+  get fastGasMode() { return env.fastGasMode; },
+  get privateTxRpc() { return env.privateTxRpc; },
+  get privateTxMode() { return env.privateTxMode; },
+  get redisPipelineEnabled() { return env.redisPipelineEnabled; }
 };
