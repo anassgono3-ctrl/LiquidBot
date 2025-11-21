@@ -5,7 +5,7 @@
  * of missed liquidations.
  */
 
-export type DecisionAction = 'attempt' | 'skip';
+export type DecisionAction = 'attempt' | 'skip' | 'attempt_fastpath_watched';
 
 export type SkipReason =
   | 'min_debt'
