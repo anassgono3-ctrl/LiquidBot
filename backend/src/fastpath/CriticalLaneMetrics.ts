@@ -14,6 +14,8 @@ export interface CriticalLaneMetricsInterface {
   snapshotStaleTotal: Counter;
   miniMulticallInvocationsTotal: Counter;
   latencyMsHistogram: Histogram;
+  fastpathPhaseDurationMs: Histogram;
+  fastpathAttemptTotal: Counter;
 }
 
 let metricsInstance: CriticalLaneMetricsInterface | null = null;
@@ -70,6 +72,21 @@ export function registerCriticalLaneMetrics(registry?: Registry): CriticalLaneMe
     registers: registry ? [registry] : undefined
   });
 
+  const fastpathPhaseDurationMs = new Histogram({
+    name: 'fastpath_phase_duration_ms',
+    help: 'Duration of each fast-path phase in milliseconds',
+    labelNames: ['phase'],
+    buckets: [10, 25, 50, 75, 100, 150, 200, 300, 500],
+    registers: registry ? [registry] : undefined
+  });
+
+  const fastpathAttemptTotal = new Counter({
+    name: 'fastpath_attempt_total',
+    help: 'Total fast-path attempts by outcome',
+    labelNames: ['outcome'],
+    registers: registry ? [registry] : undefined
+  });
+
   metricsInstance = {
     attemptTotal,
     successTotal,
@@ -77,7 +94,9 @@ export function registerCriticalLaneMetrics(registry?: Registry): CriticalLaneMe
     skippedTotal,
     snapshotStaleTotal,
     miniMulticallInvocationsTotal,
-    latencyMsHistogram
+    latencyMsHistogram,
+    fastpathPhaseDurationMs,
+    fastpathAttemptTotal
   };
 
   return metricsInstance;
@@ -145,4 +164,20 @@ export function recordSnapshotStale(): void {
 export function recordMiniMulticall(): void {
   const metrics = getCriticalLaneMetrics();
   metrics.miniMulticallInvocationsTotal.inc();
+}
+
+/**
+ * Record fast-path phase duration
+ */
+export function recordFastpathPhase(phase: string, durationMs: number): void {
+  const metrics = getCriticalLaneMetrics();
+  metrics.fastpathPhaseDurationMs.observe({ phase }, durationMs);
+}
+
+/**
+ * Record fast-path attempt outcome
+ */
+export function recordFastpathAttempt(outcome: 'success' | 'raced' | 'skip'): void {
+  const metrics = getCriticalLaneMetrics();
+  metrics.fastpathAttemptTotal.inc({ outcome });
 }

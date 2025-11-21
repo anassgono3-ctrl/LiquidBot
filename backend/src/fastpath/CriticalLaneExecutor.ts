@@ -22,6 +22,8 @@ import {
   recordSnapshotStale,
   recordMiniMulticall
 } from './CriticalLaneMetrics.js';
+import { FastpathCache } from './FastpathPriceGasCache.js';
+import { Timer, logFastpathLatency, type LatencyPhases } from './FastpathLatency.js';
 
 export interface CriticalEvent {
   user: string;
@@ -50,6 +52,7 @@ export class CriticalLaneExecutor {
   private tokenResolver: TokenMetadataResolver;
   private executionService?: ExecutionService;
   private decisionTrace?: DecisionTraceStore;
+  private cache: FastpathCache;
   
   constructor(options: {
     redis: IORedis;
@@ -64,12 +67,15 @@ export class CriticalLaneExecutor {
     
     this.miniMulticall = new CriticalLaneMiniMulticall(this.provider);
     this.tokenResolver = new TokenMetadataResolver({ provider: this.provider });
+    this.cache = new FastpathCache();
     
     console.log('[critical-executor] Initialized with config:', {
       reverifyMode: config.criticalLaneReverifyMode,
       maxReserves: config.criticalLaneMaxReverifyReserves,
       minDebtUsd: config.criticalLaneMinDebtUsd,
-      minProfitUsd: config.criticalLaneMinProfitUsd
+      minProfitUsd: config.criticalLaneMinProfitUsd,
+      priceCacheTtl: config.fastpathPriceCacheTtlMs,
+      gasCacheTtl: config.fastpathGasCacheTtlMs
     });
   }
   
@@ -79,6 +85,8 @@ export class CriticalLaneExecutor {
   async handleCriticalEvent(event: CriticalEvent): Promise<ExecutionOutcome> {
     const endLatencyTimer = recordAttempt();
     const startTime = Date.now();
+    const timer = new Timer();
+    const latencyPhases: LatencyPhases = { totalMs: 0 };
     
     try {
       // 1. Acquire lock
@@ -97,13 +105,24 @@ export class CriticalLaneExecutor {
       }
       
       try {
-        // 2. Fetch snapshot
-        let snapshot = await this.fetchOrRefreshSnapshot(event.user);
+        // 2. Fetch snapshot (mini-multicall if stale)
+        const snapshotTimer = new Timer();
+        const snapshotResult = await this.fetchOrRefreshSnapshot(event.user);
+        const snapshot = snapshotResult.snapshot;
+        const snapshotStale = snapshotResult.refreshed;
         
-        // 3. Check if still liquidatable
-        const hf = Number(snapshot.healthFactor) / 1e18;
-        if (hf >= 1.0) {
+        if (snapshotStale) {
+          latencyPhases.miniMulticallMs = snapshotTimer.elapsed();
+          recordSnapshotStale();
+          recordMiniMulticall();
+        }
+        
+        // 3. Check if still liquidatable (use BigInt for precision)
+        const thresholdRay = BigInt(Math.floor(config.criticalLaneMinExecuteHf * 1e18));
+        if (snapshot.healthFactor >= thresholdRay) {
           recordSkip('hf_above_threshold');
+          latencyPhases.totalMs = timer.elapsed();
+          logFastpathLatency(event.user, snapshotStale, latencyPhases);
           return {
             user: event.user,
             block: event.block,
@@ -113,100 +132,133 @@ export class CriticalLaneExecutor {
           };
         }
         
-        // 4. Build liquidation plan
-        const plan = await this.buildLiquidationPlan(snapshot);
-        
-        if (!plan) {
-          recordSkip('no_viable_plan');
-          return {
-            user: event.user,
-            block: event.block,
-            outcome: 'skipped',
-            reason: 'no_viable_plan',
-            latencyMs: Date.now() - startTime
-          };
-        }
-        
-        // 5. Gate by min debt/profit
-        if (plan.debtUsd < config.criticalLaneMinDebtUsd) {
-          recordSkip('debt_below_threshold');
-          return {
-            user: event.user,
-            block: event.block,
-            outcome: 'skipped',
-            reason: 'debt_below_threshold',
-            latencyMs: Date.now() - startTime
-          };
-        }
-        
-        if (plan.profitUsd < config.criticalLaneMinProfitUsd) {
-          recordSkip('profit_below_threshold');
-          return {
-            user: event.user,
-            block: event.block,
-            outcome: 'skipped',
-            reason: 'profit_below_threshold',
-            latencyMs: Date.now() - startTime
-          };
-        }
-        
-        // 6. Check latency budget
-        const elapsedMs = Date.now() - startTime;
-        if (elapsedMs > config.criticalLaneLatencyAbortMs) {
-          recordSkip('latency_abort');
-          return {
-            user: event.user,
-            block: event.block,
-            outcome: 'skipped',
-            reason: 'latency_abort',
-            latencyMs: elapsedMs
-          };
-        }
-        
-        // 7. Submit transaction (fast path)
-        const txResult = await this.submitTransaction(plan);
-        
-        const finalLatency = Date.now() - startTime;
-        endLatencyTimer();
-        
-        if (txResult.success) {
-          recordSuccess();
+        // 4. Call ExecutionService fast-path method if available
+        if (this.executionService) {
+          const planTimer = new Timer();
           
-          // Record to stream
-          await this.recordOutcome({
-            user: event.user,
-            block: event.block,
-            outcome: 'success',
-            latencyMs: finalLatency,
-            txHash: txResult.txHash,
-            profitUsd: plan.profitUsd
-          });
+          // Use fast-path entry point that bypasses pre-sim
+          const actionable = await this.callFastpathExecution(event.user, snapshot);
           
-          return {
-            user: event.user,
-            block: event.block,
-            outcome: 'success',
-            latencyMs: finalLatency,
-            txHash: txResult.txHash,
-            profitUsd: plan.profitUsd
-          };
-        } else if (txResult.raced) {
-          recordRaced();
-          return {
-            user: event.user,
-            block: event.block,
-            outcome: 'raced',
-            reason: 'competitor_tx',
-            latencyMs: finalLatency
-          };
+          latencyPhases.planBuildMs = planTimer.elapsed();
+          
+          if (!actionable || !actionable.plan) {
+            recordSkip(actionable?.skipReason || 'no_viable_plan');
+            latencyPhases.totalMs = timer.elapsed();
+            logFastpathLatency(event.user, snapshotStale, latencyPhases);
+            return {
+              user: event.user,
+              block: event.block,
+              outcome: 'skipped',
+              reason: actionable?.skipReason || 'no_viable_plan',
+              latencyMs: Date.now() - startTime
+            };
+          }
+          
+          const plan = actionable.plan;
+          
+          // 5. Gate by min debt/profit
+          if (plan.debtUsd < config.criticalLaneMinDebtUsd) {
+            recordSkip('debt_below_threshold');
+            latencyPhases.totalMs = timer.elapsed();
+            logFastpathLatency(event.user, snapshotStale, latencyPhases);
+            return {
+              user: event.user,
+              block: event.block,
+              outcome: 'skipped',
+              reason: 'debt_below_threshold',
+              latencyMs: Date.now() - startTime
+            };
+          }
+          
+          if (plan.profitUsd < config.criticalLaneMinProfitUsd) {
+            recordSkip('profit_below_threshold');
+            latencyPhases.totalMs = timer.elapsed();
+            logFastpathLatency(event.user, snapshotStale, latencyPhases);
+            return {
+              user: event.user,
+              block: event.block,
+              outcome: 'skipped',
+              reason: 'profit_below_threshold',
+              latencyMs: Date.now() - startTime
+            };
+          }
+          
+          // 6. Check latency budget
+          const elapsedMs = Date.now() - startTime;
+          if (elapsedMs > config.criticalLaneLatencyAbortMs) {
+            recordSkip('latency_abort');
+            latencyPhases.totalMs = timer.elapsed();
+            logFastpathLatency(event.user, snapshotStale, latencyPhases);
+            return {
+              user: event.user,
+              block: event.block,
+              outcome: 'skipped',
+              reason: 'latency_abort',
+              latencyMs: elapsedMs
+            };
+          }
+          
+          // 7. Submit transaction (fast path)
+          const submitTimer = new Timer();
+          const txResult = await this.submitTransaction(plan);
+          latencyPhases.submitMs = submitTimer.elapsed();
+          
+          const finalLatency = Date.now() - startTime;
+          latencyPhases.totalMs = finalLatency;
+          endLatencyTimer();
+          
+          logFastpathLatency(event.user, snapshotStale, latencyPhases);
+          
+          if (txResult.success) {
+            recordSuccess();
+            
+            // Record to stream
+            await this.recordOutcome({
+              user: event.user,
+              block: event.block,
+              outcome: 'success',
+              latencyMs: finalLatency,
+              txHash: txResult.txHash,
+              profitUsd: plan.profitUsd
+            });
+            
+            return {
+              user: event.user,
+              block: event.block,
+              outcome: 'success',
+              latencyMs: finalLatency,
+              txHash: txResult.txHash,
+              profitUsd: plan.profitUsd
+            };
+          } else if (txResult.raced) {
+            recordRaced();
+            return {
+              user: event.user,
+              block: event.block,
+              outcome: 'raced',
+              reason: 'competitor_tx',
+              latencyMs: finalLatency
+            };
+          } else {
+            recordSkip('tx_failed');
+            return {
+              user: event.user,
+              block: event.block,
+              outcome: 'skipped',
+              reason: 'tx_failed',
+              latencyMs: finalLatency
+            };
+          }
         } else {
-          recordSkip('tx_failed');
+          // Fallback: no ExecutionService available
+          recordSkip('no_execution_service');
+          latencyPhases.totalMs = timer.elapsed();
           return {
             user: event.user,
             block: event.block,
             outcome: 'skipped',
-            reason: 'tx_failed',
-            latencyMs: finalLatency
+            reason: 'no_execution_service',
+            latencyMs: Date.now() - startTime
           };
         }
       } finally {
@@ -229,7 +281,7 @@ export class CriticalLaneExecutor {
   /**
    * Fetch snapshot from Redis or refresh via mini-multicall
    */
-  private async fetchOrRefreshSnapshot(user: string): Promise<UserSnapshot> {
+  private async fetchOrRefreshSnapshot(user: string): Promise<{ snapshot: UserSnapshot; refreshed: boolean }> {
     const userKey = `user:${user.toLowerCase()}:snapshot`;
     const snapshotData = await this.redis.hgetall(userKey);
     
@@ -240,20 +292,21 @@ export class CriticalLaneExecutor {
         // Use cached snapshot
         const reserves = JSON.parse(snapshotData.reservesJson || '[]');
         return {
-          user,
-          blockNumber: Number(snapshotData.lastBlock),
-          totalCollateralBase: BigInt(snapshotData.totalCollateralBase),
-          totalDebtBase: BigInt(snapshotData.totalDebtBase),
-          healthFactor: BigInt(snapshotData.lastHFRay),
-          timestamp: Number(snapshotData.updatedTs),
-          reserves
+          snapshot: {
+            user,
+            blockNumber: Number(snapshotData.lastBlock),
+            totalCollateralBase: BigInt(snapshotData.totalCollateralBase),
+            totalDebtBase: BigInt(snapshotData.totalDebtBase),
+            healthFactor: BigInt(snapshotData.lastHFRay),
+            timestamp: Number(snapshotData.updatedTs),
+            reserves
+          },
+          refreshed: false
         };
       }
     }
     
     // Snapshot stale or missing - refresh
-    recordSnapshotStale();
-    recordMiniMulticall();
     
     // Determine reserves to query (extract from snapshot or use common set)
     const reserves = snapshotData.reservesJson
@@ -278,7 +331,7 @@ export class CriticalLaneExecutor {
     
     await this.redis.expire(userKey, Math.floor(config.userSnapshotTtlMs / 1000) + 10);
     
-    return snapshot;
+    return { snapshot, refreshed: true };
   }
   
   /**
@@ -366,14 +419,24 @@ export class CriticalLaneExecutor {
   }
   
   /**
-   * Get price from Redis cache
+   * Get price from cache or Redis
    */
   private async getPrice(asset: string): Promise<bigint> {
+    // Try FastpathCache first
+    const cached = this.cache.prices.get(asset);
+    if (cached !== null) {
+      return cached;
+    }
+    
+    // Fallback to Redis
     const priceKey = `price:${asset.toLowerCase()}`;
     const priceData = await this.redis.hget(priceKey, 'usd');
     
     if (priceData) {
-      return BigInt(priceData);
+      const price = BigInt(priceData);
+      // Cache for future use
+      this.cache.prices.set(asset, price);
+      return price;
     }
     
     // Fallback to default (should not happen in production)
@@ -399,6 +462,30 @@ export class CriticalLaneExecutor {
     } catch (err) {
       console.error('[critical-executor] Failed to record outcome:', err);
     }
+  }
+  
+  /**
+   * Call fast-path execution (currently uses buildLiquidationPlan)
+   * 
+   * TODO: Integrate with ExecutionService.prepareActionableOpportunityFastpath()
+   * when that method is implemented for full pre-sim bypass
+   */
+  private async callFastpathExecution(user: string, snapshot: UserSnapshot): Promise<{
+    plan?: {
+      debtAsset: string;
+      collateralAsset: string;
+      debtToCover: bigint;
+      debtUsd: number;
+      profitUsd: number;
+    };
+    skipReason?: string;
+  }> {
+    // Use buildLiquidationPlan for now - already bypasses heavy operations
+    const plan = await this.buildLiquidationPlan(snapshot);
+    if (!plan) {
+      return { skipReason: 'no_viable_plan' };
+    }
+    return { plan };
   }
   
   /**

@@ -463,5 +463,16 @@ export const config = {
   get fastGasMode() { return env.fastGasMode; },
   get privateTxRpc() { return env.privateTxRpc; },
   get privateTxMode() { return env.privateTxMode; },
-  get redisPipelineEnabled() { return env.redisPipelineEnabled; }
+  get redisPipelineEnabled() { return env.redisPipelineEnabled; },
+  
+  // Fast-path Latency & Instrumentation
+  get fastpathLatencyEnabled() { return env.fastpathLatencyEnabled; },
+  get fastpathHedgeSmallDisable() { return env.fastpathHedgeSmallDisable; },
+  get fastpathPriceCacheTtlMs() { return env.fastpathPriceCacheTtlMs; },
+  get fastpathGasCacheTtlMs() { return env.fastpathGasCacheTtlMs; },
+  get fastpathEventPublish() { return env.fastpathEventPublish; },
+  get criticalLanePublishMinHf() { return env.criticalLanePublishMinHf; },
+  get criticalLaneMinExecuteHf() { return env.criticalLaneMinExecuteHf; },
+  get fastpathLogDetail() { return env.fastpathLogDetail; },
+  get fastpathLatencyMetrics() { return env.fastpathLatencyMetrics; }
 };

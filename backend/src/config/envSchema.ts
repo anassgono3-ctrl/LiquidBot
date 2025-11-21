@@ -492,7 +492,27 @@ export const rawEnvSchema = z.object({
   // Private TX mode: bundle | direct | disabled
   PRIVATE_TX_MODE: z.string().optional(),
   // Redis pipeline enabled for batch operations
-  REDIS_PIPELINE_ENABLED: z.string().optional()
+  REDIS_PIPELINE_ENABLED: z.string().optional(),
+  
+  // ==== FASTPATH LATENCY & INSTRUMENTATION ====
+  // Enable fast-path latency instrumentation
+  FASTPATH_LATENCY_ENABLED: z.string().optional(),
+  // Enable hedge suppression for small chunks (≤5 calls)
+  FASTPATH_HEDGE_SMALL_DISABLE: z.string().optional(),
+  // Price cache TTL for fast-path (milliseconds)
+  FASTPATH_PRICE_CACHE_TTL_MS: z.string().optional(),
+  // Gas cache TTL for fast-path (milliseconds)
+  FASTPATH_GAS_CACHE_TTL_MS: z.string().optional(),
+  // Enable event publishing to critical_lane.events channel
+  FASTPATH_EVENT_PUBLISH: z.string().optional(),
+  // Minimum HF threshold for publishing to critical lane (default: 1.0)
+  CRITICAL_LANE_PUBLISH_MIN_HF: z.string().optional(),
+  // Minimum HF threshold for executing via critical lane (default: 1.0)
+  CRITICAL_LANE_MIN_EXECUTE_HF: z.string().optional(),
+  // Enable detailed fast-path logging
+  FASTPATH_LOG_DETAIL: z.string().optional(),
+  // Enable fast-path latency metrics (Prometheus)
+  FASTPATH_LATENCY_METRICS: z.string().optional()
 });
 
 export const env = (() => {
@@ -962,6 +982,17 @@ export const env = (() => {
     fastGasMode: parsed.FAST_GAS_MODE || 'cache_then_estimate',
     privateTxRpc: parsed.PRIVATE_TX_RPC,
     privateTxMode: parsed.PRIVATE_TX_MODE || 'disabled',
-    redisPipelineEnabled: (parsed.REDIS_PIPELINE_ENABLED || 'true').toLowerCase() === 'true'
+    redisPipelineEnabled: (parsed.REDIS_PIPELINE_ENABLED || 'true').toLowerCase() === 'true',
+    
+    // ==== FASTPATH LATENCY & INSTRUMENTATION ====
+    fastpathLatencyEnabled: (parsed.FASTPATH_LATENCY_ENABLED || 'true').toLowerCase() === 'true',
+    fastpathHedgeSmallDisable: (parsed.FASTPATH_HEDGE_SMALL_DISABLE || 'true').toLowerCase() === 'true',
+    fastpathPriceCacheTtlMs: Number(parsed.FASTPATH_PRICE_CACHE_TTL_MS || 5000),
+    fastpathGasCacheTtlMs: Number(parsed.FASTPATH_GAS_CACHE_TTL_MS || 4000),
+    fastpathEventPublish: (parsed.FASTPATH_EVENT_PUBLISH || 'true').toLowerCase() === 'true',
+    criticalLanePublishMinHf: Number(parsed.CRITICAL_LANE_PUBLISH_MIN_HF || 1.0),
+    criticalLaneMinExecuteHf: Number(parsed.CRITICAL_LANE_MIN_EXECUTE_HF || 1.0),
+    fastpathLogDetail: (parsed.FASTPATH_LOG_DETAIL || 'true').toLowerCase() === 'true',
+    fastpathLatencyMetrics: (parsed.FASTPATH_LATENCY_METRICS || 'true').toLowerCase() === 'true'
   };
 })();
