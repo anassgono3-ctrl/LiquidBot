@@ -21,7 +21,7 @@ export interface MissRow {
   
   // Classification
   reasonCode: ClassifiedReason;
-  decisionAction?: 'attempt' | 'skip';
+  decisionAction?: 'attempt' | 'skip' | 'attempt_fastpath_watched';
   skipReason?: string;
   
   // Health factor
