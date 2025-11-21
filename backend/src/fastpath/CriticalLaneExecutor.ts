@@ -140,19 +140,25 @@ export class CriticalLaneExecutor {
           let actionable;
           // Watched fast-path: use prepareActionableOpportunityFastpath (bypasses pre-sim/micro-verify)
           if (event.triggerType === 'watched_fastpath') {
-            const result = await (this.executionService as any).prepareActionableOpportunityFastpath(event.user, 'watched_fastpath');
-            if (result.success) {
-              actionable = {
-                plan: {
-                  debtAsset: result.plan.debtAsset,
-                  collateralAsset: result.plan.collateralAsset,
-                  debtToCover: result.plan.debtToCover,
-                  debtUsd: result.plan.debtToCoverUsd,
-                  profitUsd: result.plan.liquidationBonusPct * result.plan.debtToCoverUsd / 100 - result.plan.debtToCoverUsd
-                }
-              };
+            // Check if method exists (it's a new method added to ExecutionService)
+            if ('prepareActionableOpportunityFastpath' in this.executionService) {
+              const result = await (this.executionService as any).prepareActionableOpportunityFastpath(event.user, 'watched_fastpath');
+              if (result.success) {
+                actionable = {
+                  plan: {
+                    debtAsset: result.plan.debtAsset,
+                    collateralAsset: result.plan.collateralAsset,
+                    debtToCover: result.plan.debtToCover,
+                    debtUsd: result.plan.debtToCoverUsd,
+                    profitUsd: result.plan.liquidationBonusPct * result.plan.debtToCoverUsd / 100 - result.plan.debtToCoverUsd
+                  }
+                };
+              } else {
+                actionable = { skipReason: result.skipReason };
+              }
             } else {
-              actionable = { skipReason: result.skipReason };
+              // Fallback: method not available, use standard path
+              actionable = await this.callFastpathExecution(event.user, snapshot);
             }
           } else {
             // Normal fast-path: use existing method

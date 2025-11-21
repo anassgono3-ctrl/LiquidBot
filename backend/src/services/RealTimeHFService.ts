@@ -40,6 +40,7 @@ import {
   headstartLatencyMs
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
+import { normalizeAddress } from '../utils/Address.js';
 import { maybeShadowExecute, type ShadowExecCandidate } from '../exec/shadowExecution.js';
 
 import { CandidateManager } from './CandidateManager.js';
@@ -1225,8 +1226,16 @@ export class RealTimeHFService extends EventEmitter {
         if (users.length > 0) {
           // Watched fast-path: immediately check watched users without batching
           if (this.watchSet) {
-            const watchedUsers = users.filter(u => this.watchSet!.isWatched(u));
-            const unwatchedUsers = users.filter(u => !this.watchSet!.isWatched(u));
+            // Partition users in single pass to avoid duplicate isWatched calls
+            const watchedUsers: string[] = [];
+            const unwatchedUsers: string[] = [];
+            for (const user of users) {
+              if (this.watchSet.isWatched(user)) {
+                watchedUsers.push(user);
+              } else {
+                unwatchedUsers.push(user);
+              }
+            }
             
             // Immediately check watched users (no batching, no coalescing)
             for (const watchedUser of watchedUsers) {
@@ -2039,7 +2048,7 @@ export class RealTimeHFService extends EventEmitter {
   private async checkWatchedUserFastpath(address: string, blockNumber: number): Promise<void> {
     if (!this.multicall3 || !this.aavePool) return;
 
-    const normalized = address.toLowerCase();
+    const normalized = normalizeAddress(address);
     
     try {
       // Single-user mini-multicall (no batching, no hedging)

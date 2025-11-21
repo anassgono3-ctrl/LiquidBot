@@ -716,6 +716,10 @@ export class ExecutionService {
     }
   }
 
+  // Watched fast-path threshold clamps (code-side, no new env vars)
+  private static readonly WATCHED_MIN_DEBT_CLAMP = 25;
+  private static readonly WATCHED_MIN_PROFIT_CLAMP = 0;
+
   /**
    * Watched Fast-Path: Prepare actionable opportunity with bypassed pre-sim/micro-verify
    * Applies code-side clamped thresholds for watched users
@@ -745,8 +749,14 @@ export class ExecutionService {
     details?: string;
   }> {
     // Watched fast-path: apply clamped thresholds (code-side only, no new env vars)
-    const minDebtUsd_watched = Math.min(config.criticalLaneMinDebtUsd || 50, 25);
-    const minProfitUsd_watched = Math.min(config.criticalLaneMinProfitUsd || 10, 0);
+    const minDebtUsd_watched = Math.min(
+      config.criticalLaneMinDebtUsd || 50, 
+      ExecutionService.WATCHED_MIN_DEBT_CLAMP
+    );
+    const minProfitUsd_watched = Math.min(
+      config.criticalLaneMinProfitUsd || 10, 
+      ExecutionService.WATCHED_MIN_PROFIT_CLAMP
+    );
 
     // eslint-disable-next-line no-console
     console.log(

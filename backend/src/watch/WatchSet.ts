@@ -59,10 +59,10 @@ export class WatchSet {
   getWatchedUsers(): string[] {
     const watched = new Set<string>();
     
-    // Add hot set users
+    // Add hot set users (normalize addresses)
     if (this.hotSetTracker) {
       const hotUsers = this.hotSetTracker.getHotSet();
-      hotUsers.forEach(entry => watched.add(entry.address));
+      hotUsers.forEach(entry => watched.add(normalizeAddress(entry.address)));
     }
     
     // Add low HF tracked users with HF <= 1.03

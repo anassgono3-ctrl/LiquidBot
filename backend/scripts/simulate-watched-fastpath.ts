@@ -80,7 +80,8 @@ async function main() {
 
   // Query on-chain HF
   console.log('[3/5] Querying on-chain health factor...');
-  const rpcUrl = config.wsRpcUrl || process.env.RPC_URL;
+  // Use config module for RPC URL instead of direct process.env access
+  const rpcUrl = config.wsRpcUrl;
   if (!rpcUrl) {
     console.error('  ✗ No RPC URL configured. Set WS_RPC_URL or RPC_URL environment variable.');
     process.exit(1);
