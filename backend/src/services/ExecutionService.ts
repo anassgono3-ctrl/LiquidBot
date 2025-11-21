@@ -717,6 +717,83 @@ export class ExecutionService {
   }
 
   /**
+   * Watched Fast-Path: Prepare actionable opportunity with bypassed pre-sim/micro-verify
+   * Applies code-side clamped thresholds for watched users
+   * 
+   * @param userAddress User to prepare liquidation for
+   * @param source Source indicator (should be 'watched_fastpath')
+   * @returns Actionable plan or skip reason
+   */
+  async prepareActionableOpportunityFastpath(
+    userAddress: string,
+    source: string = 'watched_fastpath'
+  ): Promise<{
+    success: true;
+    plan: {
+      debtAsset: string;
+      debtAssetSymbol: string;
+      totalDebt: bigint;
+      debtToCover: bigint;
+      debtToCoverUsd: number;
+      liquidationBonusPct: number;
+      collateralAsset: string;
+      collateralSymbol: string;
+    };
+  } | {
+    success: false;
+    skipReason: string;
+    details?: string;
+  }> {
+    // Watched fast-path: apply clamped thresholds (code-side only, no new env vars)
+    const minDebtUsd_watched = Math.min(config.criticalLaneMinDebtUsd || 50, 25);
+    const minProfitUsd_watched = Math.min(config.criticalLaneMinProfitUsd || 10, 0);
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[watched-fastpath-attempt] user=${userAddress} source=${source} ` +
+      `minDebtUsd=${minDebtUsd_watched} minProfitUsd=${minProfitUsd_watched}`
+    );
+
+    // Call the existing prepareActionableOpportunityWithReason method
+    const result = await this.prepareActionableOpportunityWithReason(userAddress);
+
+    if (!result.success) {
+      return result;
+    }
+
+    // Apply watched-specific threshold checks (more aggressive than normal)
+    if (result.plan.debtToCoverUsd < minDebtUsd_watched) {
+      return {
+        success: false,
+        skipReason: 'watched_min_debt',
+        details: `Debt ${result.plan.debtToCoverUsd.toFixed(2)} < min ${minDebtUsd_watched}`
+      };
+    }
+
+    // For watched users, we skip profit check if minProfitUsd_watched is 0
+    // This allows execution even if temporarily unprofitable
+    if (minProfitUsd_watched > 0) {
+      // Estimate rough profit (bonus - debt)
+      const estimatedProfit = (result.plan.debtToCoverUsd * result.plan.liquidationBonusPct / 100) - result.plan.debtToCoverUsd;
+      if (estimatedProfit < minProfitUsd_watched) {
+        return {
+          success: false,
+          skipReason: 'watched_min_profit',
+          details: `Est profit ${estimatedProfit.toFixed(2)} < min ${minProfitUsd_watched}`
+        };
+      }
+    }
+
+    // eslint-disable-next-line no-console
+    console.log(
+      `[watched-fastpath-submit] user=${userAddress} debtUsd=${result.plan.debtToCoverUsd.toFixed(2)} ` +
+      `provider=${config.privateTxRpcUrl ? 'private' : 'direct'}`
+    );
+
+    return result;
+  }
+
+  /**
    * Execute a liquidation opportunity with all safety checks
    * @param opportunity The opportunity to execute
    * @returns Execution result (simulated or real)
