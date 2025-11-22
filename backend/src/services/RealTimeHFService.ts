@@ -40,6 +40,7 @@ import {
   headstartLatencyMs
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
+import { normalizeAddress } from '../utils/Address.js';
 import { maybeShadowExecute, type ShadowExecCandidate } from '../exec/shadowExecution.js';
 
 import { CandidateManager } from './CandidateManager.js';
@@ -59,6 +60,7 @@ import { PerAssetTriggerConfig } from './PerAssetTriggerConfig.js';
 import { AaveDataService } from './AaveDataService.js';
 import { FastpathPublisher } from '../fastpath/FastpathPublisher.js';
 import { createRedisClient } from '../redis/RedisClientFactory.js';
+import { WatchSet } from '../watch/WatchSet.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -140,6 +142,7 @@ export class RealTimeHFService extends EventEmitter {
   private priceService?: PriceService;
   private microVerifier?: import('./MicroVerifier.js').MicroVerifier;
   private fastpathPublisher?: FastpathPublisher;
+  private watchSet?: WatchSet;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -368,6 +371,16 @@ export class RealTimeHFService extends EventEmitter {
           .filter((s: string) => s.length > 0)
           .map((s: string) => this.normalizeAssetSymbol(s))
       );
+    }
+    
+    // Initialize WatchSet for watched fast-path
+    if (this.hotSetTracker || this.lowHfTracker) {
+      this.watchSet = new WatchSet({
+        hotSetTracker: this.hotSetTracker,
+        lowHFTracker: this.lowHfTracker
+      });
+      // eslint-disable-next-line no-console
+      console.log('[realtime-hf] WatchSet initialized for watched fast-path');
     }
     
     // Initialize fastpath publisher if enabled
@@ -1209,13 +1222,58 @@ export class RealTimeHFService extends EventEmitter {
           }
         }
         
-        // For all user-affecting events, enqueue with coalescing
+        // For all user-affecting events, check for watched users first
         if (users.length > 0) {
-          // Enqueue event batch with coalescing (pass event name for fast-lane)
-          this.enqueueEventBatch(users, reserve, blockNumber, decoded.name);
+          // Watched fast-path: immediately check watched users without batching
+          if (this.watchSet) {
+            // Partition users in single pass to avoid duplicate isWatched calls
+            const watchedUsers: string[] = [];
+            const unwatchedUsers: string[] = [];
+            for (const user of users) {
+              if (this.watchSet.isWatched(user)) {
+                watchedUsers.push(user);
+              } else {
+                unwatchedUsers.push(user);
+              }
+            }
+            
+            // Immediately check watched users (no batching, no coalescing)
+            for (const watchedUser of watchedUsers) {
+              // Fire-and-forget to avoid blocking
+              this.checkWatchedUserFastpath(watchedUser, blockNumber).catch(err => {
+                // eslint-disable-next-line no-console
+                console.error(`[watched-fastpath] Error checking watched user ${watchedUser}:`, err);
+              });
+            }
+            
+            // Enqueue unwatched users with normal batching
+            if (unwatchedUsers.length > 0) {
+              this.enqueueEventBatch(unwatchedUsers, reserve, blockNumber, decoded.name);
+            }
+          } else {
+            // No watch set, use normal batching for all
+            this.enqueueEventBatch(users, reserve, blockNumber, decoded.name);
+          }
         } else {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
+            // Watched fast-path: check watched users with exposure to this reserve
+            if (this.watchSet) {
+              const watchedUsers = this.watchSet.getWatchedUsers();
+              const usersWithReserve = new Set(this.candidateManager.getUsersForReserve(reserve));
+              
+              // Find intersection: watched users who have this reserve
+              const affectedWatched = watchedUsers.filter(user => usersWithReserve.has(user.toLowerCase()));
+              
+              // Immediately check affected watched users
+              for (const watchedUser of affectedWatched) {
+                this.checkWatchedUserFastpath(watchedUser, blockNumber).catch(err => {
+                  // eslint-disable-next-line no-console
+                  console.error(`[watched-fastpath] Error checking watched user ${watchedUser}:`, err);
+                });
+              }
+            }
+            
             // Enqueue a batch check for low-HF candidates (fast-lane for ReserveDataUpdated)
             this.enqueueEventBatch([], reserve, blockNumber, decoded.name);
           }
@@ -1981,6 +2039,92 @@ export class RealTimeHFService extends EventEmitter {
    */
   private async checkCandidate(address: string, triggerType: 'event' | 'head' | 'price', blockTag?: number): Promise<void> {
     await this.batchCheckCandidates([address], triggerType, blockTag);
+  }
+
+  /**
+   * Watched fast-path: Single-user HF recompute for watched users
+   * Bypasses batching and immediately publishes to fast-path if HF < 1.0
+   */
+  private async checkWatchedUserFastpath(address: string, blockNumber: number): Promise<void> {
+    if (!this.multicall3 || !this.aavePool) return;
+
+    const normalized = normalizeAddress(address);
+    
+    try {
+      // Single-user mini-multicall (no batching, no hedging)
+      const callData = this.aavePool.interface.encodeFunctionData('getUserAccountData', [normalized]);
+      const call = {
+        target: await this.aavePool.getAddress(),
+        allowFailure: false,
+        callData
+      };
+
+      const startTime = Date.now();
+      const results = await this.multicall3.aggregate3.staticCall([call]);
+      const latency = Date.now() - startTime;
+
+      if (!results || results.length === 0) return;
+
+      const result = results[0];
+      if (!result.success) return;
+
+      // Decode result
+      const decoded = this.aavePool.interface.decodeFunctionResult('getUserAccountData', result.returnData);
+      const healthFactorRaw = decoded.healthFactor;
+      const totalDebtBase = decoded.totalDebtBase;
+
+      // Skip if zero debt (not liquidatable)
+      if (isZero(totalDebtBase)) return;
+
+      const healthFactor = Number(healthFactorRaw) / 1e18;
+      const hfRay = healthFactorRaw.toString();
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[watched-fastpath-publish] user=${normalized} hf=${healthFactor.toFixed(4)} ` +
+        `block=${blockNumber} latency=${latency}ms`
+      );
+
+      // Update user state for edge triggering
+      const prevState = this.userStates.get(normalized);
+      this.userStates.set(normalized, {
+        status: healthFactor < 1.0 ? 'liq' : 'safe',
+        lastHf: healthFactor,
+        lastBlock: blockNumber
+      });
+
+      // Publish to fast-path if HF < execution threshold
+      const executionThreshold = config.executionHfThresholdBps / 10000;
+      if (healthFactor < executionThreshold && this.fastpathPublisher) {
+        const published = await this.fastpathPublisher.publish({
+          user: normalized,
+          block: blockNumber,
+          hfRay,
+          ts: Date.now(),
+          triggerType: 'watched_fastpath'
+        });
+
+        if (published) {
+          // eslint-disable-next-line no-console
+          console.log(`[watched-fastpath-attempt] user=${normalized} hf=${healthFactor.toFixed(4)} published=true`);
+        }
+      }
+
+      // Emit liquidatable event if crossing below 1.0 (edge-triggered)
+      const crossedBelow = prevState && prevState.status === 'safe' && healthFactor < 1.0;
+      if (crossedBelow || (!prevState && healthFactor < 1.0)) {
+        this.emit('liquidatable', {
+          userAddress: normalized,
+          healthFactor,
+          blockNumber,
+          triggerType: 'watched_fastpath',
+          timestamp: Date.now()
+        });
+      }
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[watched-fastpath] Error checking user ${normalized}:`, err);
+    }
   }
 
   /**

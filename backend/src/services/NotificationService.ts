@@ -593,6 +593,46 @@ export class NotificationService {
   /**
    * Send liquidation outcome notification (fast-lane)
    */
+  /**
+   * Notify about watched fast-path liquidation attempt at start time (before execution)
+   * This provides visibility into watched user liquidations as soon as they're attempted
+   */
+  async notifyWatchedFastpathAttempt(data: {
+    user: string;
+    healthFactor: number;
+    blockNumber: number;
+    debtUsd: number;
+    collateralAsset: string;
+    debtAsset: string;
+  }): Promise<void> {
+    if (!this.enabled || !this.bot || !this.chatId) {
+      return;
+    }
+
+    try {
+      const userAddr = this.sanitizeAddress(data.user);
+      const hfDisplay = data.healthFactor.toFixed(4);
+      
+      const message = `🎯 <b>[Liquidation Opportunity]</b> (Fast-path: watched)
+
+👤 User: <code>${userAddr}</code>
+📊 Health Factor: ${hfDisplay}
+🔢 Block: ${data.blockNumber}
+💰 Debt: $${this.formatUsdValue(data.debtUsd)}
+🏦 Collateral: ${data.collateralAsset}
+💸 Debt Asset: ${data.debtAsset}
+
+⚡ Attempting fast-path execution...
+
+⏰ ${new Date().toISOString()}`;
+
+      await this.bot.sendMessage(this.chatId, message, { parse_mode: 'HTML' });
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error('[notification] Failed to send watched fast-path attempt notification:', err);
+    }
+  }
+
   async notifyLiquidationOutcome(outcome: {
     type: 'executed' | 'raced' | 'skipped';
     user: string;
@@ -604,6 +644,7 @@ export class NotificationService {
     timeDeltaMs?: number;
     skipReason?: string;
     skipDetails?: string;
+    source?: string; // 'watched_fastpath' to suppress raced notifications
   }): Promise<void> {
     if (!this.enabled || !this.bot || !this.chatId) {
       return;
@@ -629,6 +670,13 @@ export class NotificationService {
 ⏰ ${new Date().toISOString()}`;
 
       } else if (outcome.type === 'raced') {
+        // Suppress raced notifications for watched fast-path users
+        if (outcome.source === 'watched_fastpath') {
+          // eslint-disable-next-line no-console
+          console.log(`[notification] Suppressing raced notification for watched user ${userAddr} (source=${outcome.source})`);
+          return;
+        }
+        
         const competingLink = outcome.competingTxHash
           ? `<a href="https://basescan.org/tx/${outcome.competingTxHash}">${this.sanitizeAddress(outcome.competingTxHash)}</a>`
           : 'N/A';

@@ -30,6 +30,7 @@ export interface CriticalEvent {
   block: number;
   hfRay: string;
   ts: number;
+  triggerType?: string; // 'watched_fastpath', 'event', 'head', etc.
 }
 
 export interface ExecutionOutcome {
@@ -136,8 +137,33 @@ export class CriticalLaneExecutor {
         if (this.executionService) {
           const planTimer = new Timer();
           
-          // Use fast-path entry point that bypasses pre-sim
-          const actionable = await this.callFastpathExecution(event.user, snapshot);
+          let actionable;
+          // Watched fast-path: use prepareActionableOpportunityFastpath (bypasses pre-sim/micro-verify)
+          if (event.triggerType === 'watched_fastpath') {
+            // Check if method exists (it's a new method added to ExecutionService)
+            if ('prepareActionableOpportunityFastpath' in this.executionService) {
+              const result = await (this.executionService as any).prepareActionableOpportunityFastpath(event.user, 'watched_fastpath');
+              if (result.success) {
+                actionable = {
+                  plan: {
+                    debtAsset: result.plan.debtAsset,
+                    collateralAsset: result.plan.collateralAsset,
+                    debtToCover: result.plan.debtToCover,
+                    debtUsd: result.plan.debtToCoverUsd,
+                    profitUsd: result.plan.liquidationBonusPct * result.plan.debtToCoverUsd / 100 - result.plan.debtToCoverUsd
+                  }
+                };
+              } else {
+                actionable = { skipReason: result.skipReason };
+              }
+            } else {
+              // Fallback: method not available, use standard path
+              actionable = await this.callFastpathExecution(event.user, snapshot);
+            }
+          } else {
+            // Normal fast-path: use existing method
+            actionable = await this.callFastpathExecution(event.user, snapshot);
+          }
           
           latencyPhases.planBuildMs = planTimer.elapsed();
           
@@ -156,8 +182,10 @@ export class CriticalLaneExecutor {
           
           const plan = actionable.plan;
           
-          // 5. Gate by min debt/profit
-          if (plan.debtUsd < config.criticalLaneMinDebtUsd) {
+          // 5. Gate by min debt/profit (skip for watched fast-path, already gated in ExecutionService)
+          const isWatchedFastpath = event.triggerType === 'watched_fastpath';
+          
+          if (!isWatchedFastpath && plan.debtUsd < config.criticalLaneMinDebtUsd) {
             recordSkip('debt_below_threshold');
             latencyPhases.totalMs = timer.elapsed();
             logFastpathLatency(event.user, snapshotStale, latencyPhases);
@@ -170,7 +198,7 @@ export class CriticalLaneExecutor {
             };
           }
           
-          if (plan.profitUsd < config.criticalLaneMinProfitUsd) {
+          if (!isWatchedFastpath && plan.profitUsd < config.criticalLaneMinProfitUsd) {
             recordSkip('profit_below_threshold');
             latencyPhases.totalMs = timer.elapsed();
             logFastpathLatency(event.user, snapshotStale, latencyPhases);

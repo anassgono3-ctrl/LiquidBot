@@ -363,6 +363,150 @@ System gracefully degrades:
 - Snapshot stale rate (target: <20%)
 - Suspicious USD scaling (target: 0)
 
+## Watched Fast-Path Dominance
+
+### Overview
+
+The Watched Fast-Path is an enhancement that provides **ultra-low latency execution** for users in the watched set (hot set users with HF near liquidation threshold). These users receive:
+- **Immediate single-user HF checks** on any relevant event (bypasses batching)
+- **Direct fast-path publication** when HF < execution threshold
+- **Bypassed pre-sim and micro-verify stages** for minimal latency
+- **Aggressive threshold clamping** (min $25 debt, min $0 profit)
+- **Private/direct submission preference** to reduce mempool races
+- **Suppressed "raced" notifications** to reduce noise
+
+### How It Works
+
+```
+1. Aave event (Supply/Borrow/Repay/ReserveDataUpdated) occurs
+   ↓
+2. RealTimeHFService checks if user is WATCHED
+   ↓
+3. If watched: immediate single-user multicall (no batching)
+   ↓
+4. If HF < threshold: publish to critical_lane.events with triggerType='watched_fastpath'
+   ↓
+5. CriticalLaneExecutor detects watched source
+   ↓
+6. ExecutionService.prepareActionableOpportunityFastpath
+   - Bypasses pre-sim and micro-verify
+   - Applies clamped thresholds: min($25, CRITICAL_LANE_MIN_DEBT_USD), min($0, CRITICAL_LANE_MIN_PROFIT_USD)
+   ↓
+7. Prefer private/direct submission (PRIVATE_TX_RPC_URL if configured)
+   ↓
+8. Send "Liquidation Opportunity (Fast-path: watched)" notification BEFORE execution
+   ↓
+9. Suppress "raced" notification spam for watched users
+```
+
+### Watched Set Criteria
+
+A user is in the watched set if they meet ANY of:
+1. **Hot Set**: HF ≤ HOTLIST_MAX_HF (default 1.03)
+2. **Low HF Tracker**: Historically observed with HF ≤ 1.03
+
+### Configuration
+
+**No new environment variables required!** The watched fast-path reuses existing configuration:
+
+```bash
+# Watched users are automatically identified from:
+HOTLIST_ENABLED=true
+HOTLIST_MAX_HF=1.03
+LOW_HF_TRACKER_ENABLED=true
+
+# Fast-path behavior governed by existing flags:
+CRITICAL_LANE_ENABLED=true
+CRITICAL_LANE_LOAD_SHED=true
+CRITICAL_LANE_MIN_DEBT_USD=50      # Watched clamps to min($25, this)
+CRITICAL_LANE_MIN_PROFIT_USD=10    # Watched clamps to min($0, this)
+EXECUTION_HF_THRESHOLD_BPS=9800    # 0.98 - publish threshold
+FASTPATH_HEDGE_SMALL_DISABLE=true  # Disable hedging for single-user checks
+
+# Optional: Private/direct submission to reduce races
+PRIVATE_TX_RPC_URL=https://builder.example.org
+TX_SUBMIT_MODE=private             # or 'direct'
+GAS_TIP_GWEI_FAST=0.05            # Fast gas tip for watched attempts
+```
+
+### Log Markers
+
+Look for these log patterns to observe watched fast-path behavior:
+
+```
+[watched-fastpath-publish] user=0x... hf=0.9850 block=12345 latency=45ms
+[watched-fastpath-attempt] user=0x... source=watched_fastpath minDebtUsd=25 minProfitUsd=0
+[watched-fastpath-submit] user=0x... debtUsd=150.00 provider=private
+[watched-fastpath-outcome] user=0x... outcome=executed latencyMs=178
+```
+
+### Testing & Simulation
+
+Use the provided CLI tool to test watched fast-path flow:
+
+```bash
+# Simulate watched fast-path for a specific user
+tsx scripts/simulate-watched-fastpath.ts 0x1234...
+
+# Expected output:
+# 1. Check if user is watched
+# 2. Query on-chain HF
+# 3. Simulate ExecutionService.prepareActionableOpportunityFastpath
+# 4. Show expected log sequence
+# 5. Display notification behavior
+```
+
+### Performance Targets
+
+- **Detection to submission**: p95 < 250ms (local test)
+- **Success rate**: >90% for watched users (vs. ~70% for non-watched)
+- **Spam reduction**: 0 "raced" notifications for watched users
+
+### Load Shedding
+
+When `CRITICAL_LANE_LOAD_SHED=true` and a watched fast-path attempt is in-flight:
+- Head sweeps temporarily reduced/paused
+- Reserve rechecks scaled back
+- Price-trigger scans for non-watched users deferred
+
+This ensures maximum resources for the watched user's liquidation attempt.
+
+### Notification Behavior
+
+**Before watched fast-path:**
+- ❌ Generic opportunity notification at detection
+- ❌ "Raced" spam when competitor wins
+
+**With watched fast-path:**
+- ✅ "Liquidation Opportunity (Fast-path: watched)" at attempt start
+- ✅ Suppressed "raced" notifications
+- ✅ Focus on success/attempt visibility
+
+### Adding Users to Watch Set
+
+Users are automatically added to the watch set when:
+1. Their HF drops to ≤ 1.03 in any HF check
+2. They appear in the hot set tracker
+3. They're recorded in the low HF tracker with HF ≤ 1.03
+
+**No manual configuration required!** The watch set is dynamically maintained based on observed HF.
+
+### Troubleshooting
+
+**Q: User is watched but fast-path not triggered?**
+- Check HF > EXECUTION_HF_THRESHOLD_BPS/10000 (default 0.98)
+- Verify CRITICAL_LANE_ENABLED=true
+- Look for [watched-fastpath-publish] logs
+
+**Q: Still seeing "raced" notifications?**
+- Verify source='watched_fastpath' in outcome
+- Check NotificationService logs for suppression messages
+
+**Q: Latency still high?**
+- Ensure FASTPATH_HEDGE_SMALL_DISABLE=true
+- Check CRITICAL_LANE_LOAD_SHED=true
+- Review network latency to PRIVATE_TX_RPC_URL
+
 ## Support & Feedback
 
 For issues or questions:
@@ -373,6 +517,6 @@ For issues or questions:
 
 ---
 
-**Version**: 1.0.0  
-**Last Updated**: 2025-11-20  
-**Status**: Production Ready (Phases 1 & 2 Complete)
+**Version**: 1.1.0  
+**Last Updated**: 2025-11-21  
+**Status**: Production Ready (Phases 1, 2, & Watched Fast-Path Complete)
