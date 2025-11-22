@@ -43,7 +43,8 @@ export class PrometheusExporter {
     this.config = config;
   }
 
-  public export(results: any): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
+  public export(_results: any): Promise<void> {
     throw new Error('PrometheusExporter not yet implemented. See TODO comments.');
   }
 

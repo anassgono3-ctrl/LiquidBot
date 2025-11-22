@@ -27,6 +27,7 @@ interface BenchmarkConfig {
 interface MethodWeight {
   method: string;
   weight: number;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   params: any[];
 }
 
@@ -65,6 +66,8 @@ interface BenchmarkResults {
 }
 
 // Weighted method selection to emulate production mix
+// Note: eth_call uses Aave V3 Pool address (0xA238Dd80C259a72e81d7e4664a9801593F98d1c5) on Base
+// and totalSupply() selector (0x18160ddd) as a representative contract call
 const METHOD_WEIGHTS: MethodWeight[] = [
   { method: 'eth_blockNumber', weight: 30, params: [] },
   { method: 'eth_getBlockByNumber', weight: 25, params: ['latest', false] },
@@ -99,6 +102,7 @@ class HttpBenchmark {
     return METHOD_WEIGHTS[idx >= 0 ? idx : METHOD_WEIGHTS.length - 1];
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private async callRpc(url: string, method: string, params: any[]): Promise<CallResult> {
     const startTime = Date.now();
     const payload = JSON.stringify({
@@ -203,7 +207,7 @@ class HttpBenchmark {
       }
     };
 
-    const workers = Array(concurrency).fill(null).map(() => workerLoop());
+    const workers = Array.from({ length: concurrency }, () => workerLoop());
     await Promise.all(workers);
   }
 
@@ -366,7 +370,12 @@ async function main() {
   console.log('=============================\n');
 }
 
-if (require.main === module) {
+// Check if running as main module (ES module style)
+const isMainModule = process.argv[1] && (
+  process.argv[1].endsWith('http_benchmark.ts') || 
+  process.argv[1].endsWith('http_benchmark.js')
+);
+if (isMainModule) {
   main().catch(err => {
     console.error('Fatal error:', err);
     process.exit(1);

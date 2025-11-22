@@ -13,6 +13,7 @@
  */
 
 import * as fs from 'fs';
+
 import { Redis } from 'ioredis';
 
 interface RedisAuditConfig {
@@ -62,19 +63,21 @@ class RedisAudit {
     this.client = new Redis(config.redisUrl);
   }
 
+  // Cache-like key patterns
+  private static readonly CACHE_PATTERNS = [
+    /^cache:/i,
+    /^temp:/i,
+    /^session:/i,
+    /^sess:/i,
+    /:cache$/i,
+    /:temp$/i,
+    /_cache_/i,
+    /_temp_/i,
+    /^tmp:/i
+  ];
+
   private isCacheLikeKey(key: string): boolean {
-    const patterns = [
-      /^cache:/i,
-      /^temp:/i,
-      /^session:/i,
-      /^sess:/i,
-      /:cache$/i,
-      /:temp$/i,
-      /_cache_/i,
-      /_temp_/i,
-      /^tmp:/i
-    ];
-    return patterns.some(pattern => pattern.test(key));
+    return RedisAudit.CACHE_PATTERNS.some(pattern => pattern.test(key));
   }
 
   private async getKeySize(key: string, type: string): Promise<number> {
@@ -269,7 +272,12 @@ async function main() {
   console.log('=============================\n');
 }
 
-if (require.main === module) {
+// Check if running as main module (ES module style)
+const isMainModule = process.argv[1] && (
+  process.argv[1].endsWith('redis_audit.ts') || 
+  process.argv[1].endsWith('redis_audit.js')
+);
+if (isMainModule) {
   main().catch(err => {
     console.error('Fatal error:', err);
     process.exit(1);

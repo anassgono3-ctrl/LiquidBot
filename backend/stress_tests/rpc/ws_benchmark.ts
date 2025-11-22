@@ -11,6 +11,7 @@
  */
 
 import * as fs from 'fs';
+
 import WebSocket from 'ws';
 
 interface WsBenchmarkConfig {
@@ -299,7 +300,12 @@ async function main() {
   console.log('=============================\n');
 }
 
-if (require.main === module) {
+// Check if running as main module (ES module style)
+const isMainModule = process.argv[1] && (
+  process.argv[1].endsWith('ws_benchmark.ts') || 
+  process.argv[1].endsWith('ws_benchmark.js')
+);
+if (isMainModule) {
   main().catch(err => {
     console.error('Fatal error:', err);
     process.exit(1);

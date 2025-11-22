@@ -17,6 +17,7 @@ export interface JsonReporterConfig {
   outputPath: string;
   pretty?: boolean;
   includeRawEvents?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   metadata?: Record<string, any>;
 }
 
@@ -27,7 +28,8 @@ export class JsonReporter {
     this.config = config;
   }
 
-  public report(results: any): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars, @typescript-eslint/no-explicit-any
+  public report(_results: any): void {
     throw new Error('JsonReporter not yet implemented. See TODO comments.');
   }
 
