@@ -14,6 +14,6 @@
     "outDir": "dist",
     "types": ["node", "ws"]
   },
-  "include": ["src", "scripts", "tests"],
+  "include": ["src", "scripts", "tests", "stress_tests"],
   "exclude": ["dist", "node_modules"]
 }
