@@ -39,3 +39,10 @@ prisma/migrations/*_migration/
 tmp/
 temp/
 *.tmp
+
+# Stress test results
+stress_tests/**/*.json
+!stress_tests/**/package.json
+rpc_http_results.json
+rpc_ws_results.json
+redis_audit.json
