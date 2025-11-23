@@ -299,6 +299,51 @@ EXECUTION_HF_THRESHOLD_BPS=9800
 SUBGRAPH_PAGE_SIZE=100
 ```
 
+## Private Relay Integration
+
+LiquidBot integrates with Flashbots Protect-style private relays for Base network liquidations, enabling private transaction submission to reduce public mempool front-running.
+
+### Quick Setup
+
+```bash
+# Enable private relay with Flashbots Protect
+PRIVATE_TX_RPC_URL=https://protect.flashbots.net/v1/rpc
+PRIVATE_TX_MODE=protect
+PRIVATE_TX_FALLBACK_MODE=race
+
+# Configure public RPC fallback endpoints
+WRITE_RPCS=https://mainnet.base.org,https://base.llamarpc.com
+```
+
+### Benefits
+
+- **Reduced MEV Exposure**: Transactions bypass public mempool, reducing front-running risk
+- **Better Success Rates**: Private submission reduces races with other liquidators
+- **Automatic Fallback**: Falls back to public broadcast on private relay failure
+- **Full Observability**: Prometheus metrics for monitoring performance
+
+### Modes
+
+- `disabled` (default): Use public mempool only
+- `protect`: Use eth_sendPrivateTransaction with Flashbots Protect
+- `bundle`: Reserved for future atomic multi-transaction bundles
+
+### Fallback Strategies
+
+- `race`: Broadcast to multiple public RPCs in parallel (uses WRITE_RPCS)
+- `direct`: Use single primary RPC endpoint (RPC_URL)
+
+### Metrics
+
+Private relay operations are tracked with Prometheus metrics:
+
+- `liquidbot_private_tx_attempts_total{mode}` - Total attempts
+- `liquidbot_private_tx_success_total{mode}` - Successful submissions
+- `liquidbot_private_tx_fallback_total{reason}` - Fallback activations
+- `liquidbot_private_tx_latency_ms` - Submission latency distribution
+
+**Full documentation**: See [docs/PRIVATE_RELAY.md](./docs/PRIVATE_RELAY.md)
+
 ## Reliability and Safety Features
 
 ### Strict Reserve Validation

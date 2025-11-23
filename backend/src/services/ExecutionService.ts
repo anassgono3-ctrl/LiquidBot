@@ -15,6 +15,7 @@ import { isZero } from '../utils/bigint.js';
 import { GasPolicy } from '../execution/GasPolicy.js';
 import { PrivateTxSender } from '../execution/PrivateTxSender.js';
 import type { LiquidationOutcomeEvent, SkipReason } from '../types/liquidationOutcome.js';
+import { PrivateRelayService } from '../relay/PrivateRelayService.js';
 
 import { OneInchQuoteService } from './OneInchQuoteService.js';
 import { AaveDataService } from './AaveDataService.js';
@@ -50,6 +51,7 @@ export class ExecutionService {
   private aaveMetadata?: AaveMetadata;
   private gasPolicy?: GasPolicy;
   private privateTxSender?: PrivateTxSender;
+  private privateRelayService?: PrivateRelayService;
   private notificationService?: NotificationService;
   private preSimCache?: import('./PreSimCache.js').PreSimCache;
   private gasLadder?: import('./GasLadder.js').GasLadder;
@@ -86,6 +88,14 @@ export class ExecutionService {
       this.privateTxSender = new PrivateTxSender({
         mode: config.txSubmitMode,
         privateRpcUrl: config.privateTxRpcUrl
+      });
+      
+      // Initialize PrivateRelayService
+      const writeRpcs = config.writeRpcs || [];
+      this.privateRelayService = new PrivateRelayService({
+        provider: this.provider,
+        wallet: this.wallet,
+        writeRpcs
       });
     }
     
@@ -1591,6 +1601,45 @@ export class ExecutionService {
    * @param executor Contract instance
    * @param params Liquidation parameters
    */
+  /**
+   * Submit transaction with private relay or fallback to public
+   */
+  private async submitWithPrivateRelayOrFallback(
+    signedTx: string,
+    context: { user: string; triggerType?: string; block?: number }
+  ): Promise<{ success: boolean; txHash?: string; sentPrivate: boolean; fallbackUsed: boolean }> {
+    // Check if private relay is enabled
+    if (!this.privateRelayService || !this.privateRelayService.isEnabled()) {
+      // Private relay disabled, use standard provider broadcast
+      if (!this.provider) {
+        return { success: false, sentPrivate: false, fallbackUsed: false };
+      }
+      
+      try {
+        const response = await this.provider.broadcastTransaction(signedTx);
+        return {
+          success: true,
+          txHash: response.hash,
+          sentPrivate: false,
+          fallbackUsed: false
+        };
+      } catch (error: any) {
+        console.error('[execution] Public broadcast failed:', error.message);
+        return { success: false, sentPrivate: false, fallbackUsed: false };
+      }
+    }
+
+    // Use private relay service with retry and fallback
+    const result = await this.privateRelayService.submit(signedTx, context);
+    
+    return {
+      success: result.success,
+      txHash: result.txHash,
+      sentPrivate: result.sentPrivate,
+      fallbackUsed: result.fallbackUsed
+    };
+  }
+
   private async submitPrivateTransaction(
     executor: ethers.Contract,
     params: unknown
