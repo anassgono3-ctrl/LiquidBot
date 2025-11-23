@@ -3,6 +3,7 @@ import { Counter, Gauge, Histogram } from 'prom-client';
 import { metricsRegistry } from './registry.js';
 import { createExecutionMetrics, type ExecutionMetrics } from './execution.js';
 import { registerCriticalLaneMetrics } from '../fastpath/CriticalLaneMetrics.js';
+import { registerPrivateRelayMetrics } from './PrivateRelayMetrics.js';
 
 // Singleton execution metrics instance
 let _executionMetrics: ExecutionMetrics | null = null;
@@ -17,6 +18,9 @@ export function initMetricsOnce(): ExecutionMetrics {
   
   // Register Critical Lane metrics
   registerCriticalLaneMetrics(metricsRegistry);
+  
+  // Register Private Relay metrics
+  registerPrivateRelayMetrics(metricsRegistry);
   
   return _executionMetrics;
 }
