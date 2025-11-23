@@ -54,7 +54,27 @@ PREDICTIVE_HORIZON_SEC=180
 # - adverse: -1σ price move (1% drop)
 # - extreme: -2σ price move (2% drop)
 PREDICTIVE_SCENARIOS=baseline,adverse,extreme
+
+# ==== PREDICTIVE INTEGRATION CONFIGURATION ====
+
+# Enable feeding predictive output into hot/warm queues & micro-verify (default: true)
+PREDICTIVE_QUEUE_ENABLED=true
+
+# Enable micro-verification when scenario-projected HF < 1.0 (default: true)
+PREDICTIVE_MICRO_VERIFY_ENABLED=true
+
+# Allow predictive scenario < 1.0 with ETA <= 30s to pre-mark for fast-path (default: false)
+PREDICTIVE_FASTPATH_ENABLED=false
+
+# Enable dynamic buffer scaling based on volatility (default: false)
+PREDICTIVE_DYNAMIC_BUFFER_ENABLED=false
+
+# Dynamic buffer scaling bounds (basis points)
+PREDICTIVE_VOLATILITY_BPS_SCALE_MIN=20   # 0.20%
+PREDICTIVE_VOLATILITY_BPS_SCALE_MAX=100  # 1.00%
 ```
+
+**Note**: Predictive engine operates **independently** of `PRE_SIM_ENABLED`. Disabling pre-simulation caching does not affect predictive candidate generation or integration.
 
 ## Prediction Model
 
@@ -152,74 +172,156 @@ Sample output:
 
 ## Integration Points
 
-### 1. Price Updates
+The predictive engine now integrates directly with the execution pipeline via **PredictiveOrchestrator**:
 
-The engine subscribes to price feed updates:
+### 1. PredictiveOrchestrator
 
-```typescript
-// On Chainlink AnswerUpdated event
-engine.updatePrice(asset, newPrice, timestamp, blockNumber);
-```
-
-### 2. Reserve Index Updates
-
-Track variable debt index growth:
+Central integration layer that:
+- Subscribes to price updates from `PriceService`
+- Receives user snapshot batches from `RealTimeHFService`
+- Evaluates candidates using `PredictiveEngine`
+- Routes candidates to execution primitives
 
 ```typescript
-// On ReserveDataUpdated event
-rateTracker.addSnapshot(newIndex, timestamp, blockNumber);
+import { PredictiveOrchestrator } from './src/risk/PredictiveOrchestrator.js';
+
+const orchestrator = new PredictiveOrchestrator();
+
+// Update prices
+orchestrator.updatePrice('ETH', 2000, Date.now(), currentBlock);
+
+// Evaluate users and trigger integrations
+await orchestrator.evaluate(userSnapshots, currentBlock);
 ```
 
-### 3. Candidate Storage
+### 2. Queue Integration
 
-Predictive candidates are stored in Redis:
-
-```
-Key: predictive:eta:zset
-Type: Sorted Set
-Score: projected crossing epoch seconds
-Member: JSON-encoded PredictiveCandidate
-```
-
-### 4. Precompute Integration
-
-Top-K candidates (ETA < 60s) trigger calldata precomputation:
+Candidates flow into **PriorityQueues** with `entryReason='predictive_scenario'`:
 
 ```typescript
-if (candidate.etaSec < 60 && PRECOMPUTE_ENABLED) {
-  await precomputeService.generateCalldata(candidate.address);
+// HotCriticalQueue or WarmProjectedQueue
+const entry: QueueEntry = {
+  user: candidate.address,
+  healthFactor: candidate.hfCurrent,
+  projectedHF: candidate.hfProjected,
+  entryReason: 'predictive_scenario',
+  predictiveScenario: candidate.scenario,
+  predictiveEtaSec: candidate.etaSec,
+  priority: computedPriority,
+  // ... other fields
+};
+```
+
+Controlled by `PREDICTIVE_QUEUE_ENABLED` (default: true).
+
+### 3. Micro-Verification Integration
+
+When projected HF < threshold, triggers micro-verification:
+
+```typescript
+// In RealTimeHFService
+public async ingestPredictiveCandidates(candidates: PredictiveCandidate[]): Promise<void> {
+  for (const candidate of candidates) {
+    if (candidate.hfProjected < 1.0 + buffer) {
+      await this.scheduleMicroVerify(candidate.address);
+    }
+  }
 }
 ```
 
-### 5. Fast-Path Execution
+Controlled by `PREDICTIVE_MICRO_VERIFY_ENABLED` (default: true).
 
-When HF crosses in pending block or ETA reaches zero:
+### 4. Sprinter Pre-Staging Integration
+
+Candidates with projected HF below pre-stage threshold feed into Sprinter:
 
 ```typescript
-if (hfPending < 1.0 || candidate.etaSec <= 0) {
-  await fastPathExecutor.execute(candidate, {
-    blockTag: 'pending',
-    gasLadder: true,
-    writeRpcRace: true
-  });
+// In SprinterEngine
+public prestageFromPredictive(
+  user: string,
+  debtToken: string,
+  collateralToken: string,
+  debtWei: bigint,
+  collateralWei: bigint,
+  projectedHF: number,
+  currentBlock: number,
+  debtPriceUsd: number
+): boolean {
+  // Applies same filters, delegates to prestage()
 }
+```
+
+Candidates are pre-staged when projected HF < 1.02 (configurable via `PRESTAGE_HF_BPS`).
+
+### 5. Fast-Path Readiness (Optional)
+
+When enabled, candidates with projected HF < 1.0 and ETA ≤ 30s are flagged for fast-path:
+
+```typescript
+if (config.predictiveFastpathEnabled && 
+    candidate.hfProjected < 1.0 && 
+    candidate.etaSec <= 30) {
+  // Flag for CriticalLane attempt on next confirmation
+}
+```
+
+Controlled by `PREDICTIVE_FASTPATH_ENABLED` (default: false).
+
+### 6. Event Listener Pattern
+
+Custom integration via listener interface:
+
+```typescript
+class MyPredictiveListener implements PredictiveEventListener {
+  async onPredictiveCandidate(event: PredictiveScenarioEvent): Promise<void> {
+    if (event.shouldMicroVerify) {
+      // Custom micro-verify logic
+    }
+  }
+}
+
+orchestrator.addListener(new MyPredictiveListener());
 ```
 
 ## Metrics
 
 Prometheus metrics exported at `/metrics`:
 
+### Ingestion & Integration Metrics
+
 ```
-# Total predictive candidates by scenario
-predictive_candidates_total{scenario="baseline"} 42
-predictive_candidates_total{scenario="adverse"} 15
-predictive_candidates_total{scenario="extreme"} 3
+# Total predictive candidates ingested by scenario
+liquidbot_predictive_ingested_total{scenario="baseline"} 42
+liquidbot_predictive_ingested_total{scenario="adverse"} 15
+liquidbot_predictive_ingested_total{scenario="extreme"} 3
 
-# Confirmed crossings
-predictive_crossings_confirmed{scenario="adverse"} 12
+# Queue entries from predictive scenarios
+liquidbot_predictive_queue_entries_total{reason="predictive_scenario"} 38
 
-# False positives
-predictive_false_positive{scenario="baseline"} 8
+# Micro-verifications scheduled from predictive scenarios
+liquidbot_predictive_micro_verify_scheduled_total{scenario="adverse"} 12
+
+# Pre-staged candidates from predictive scenarios
+liquidbot_predictive_prestaged_total{scenario="baseline"} 8
+liquidbot_predictive_prestaged_total{scenario="adverse"} 5
+
+# Fast-path flags from predictive scenarios (if enabled)
+liquidbot_predictive_fastpath_flagged_total{scenario="adverse"} 3
+
+# Current dynamic buffer value (gauge)
+liquidbot_predictive_dynamic_buffer_current_bps 45
+```
+
+### Accuracy & Performance Metrics
+
+```
+# Projection accuracy histogram (basis points)
+liquidbot_predictive_projection_accuracy_bps_bucket{le="10"} 24
+liquidbot_predictive_projection_accuracy_bps_bucket{le="50"} 41
+liquidbot_predictive_projection_accuracy_bps_bucket{le="100"} 53
+
+# False negatives (missed crossings without predictive candidate)
+liquidbot_predictive_false_negative_total{scenario="baseline"} 2
 
 # Calculation performance
 hf_calc_batch_ms_bucket{le="100"} 156
