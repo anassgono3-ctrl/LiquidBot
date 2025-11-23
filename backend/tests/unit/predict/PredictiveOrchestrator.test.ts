@@ -70,6 +70,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x1111111111111111111111111111111111111111',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -90,17 +91,13 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x2222222222222222222222222222222222222222',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
               collateralUsd: 10200,
               debtUsd: 10000,
               liquidationThreshold: 0.85,
-              ltv: 0.80,
-              collateralWei: 5n * 10n ** 18n,
-              debtWei: 10000n * 10n ** 18n,
-              collateralPriceUsd: 2040,
-              debtPriceUsd: 1.0
             }
           ]
         }
@@ -119,6 +116,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x3333333333333333333333333333333333333333',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -142,6 +140,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x4444444444444444444444444444444444444444',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -168,6 +167,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x5555555555555555555555555555555555555555',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -208,6 +208,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x6666666666666666666666666666666666666666',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -232,6 +233,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x7777777777777777777777777777777777777777',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -256,6 +258,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0x8888888888888888888888888888888888888888',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -267,6 +270,7 @@ describe('PredictiveOrchestrator', () => {
         },
         {
           address: '0x9999999999999999999999999999999999999999',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -309,6 +313,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
@@ -337,6 +342,7 @@ describe('PredictiveOrchestrator', () => {
       const users: UserSnapshot[] = [
         {
           address: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+          block: 100,
           reserves: [
             {
               asset: 'ETH',
