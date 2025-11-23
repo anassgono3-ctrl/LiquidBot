@@ -202,8 +202,16 @@ export class PrivateRelayService {
         const response = await provider.broadcastTransaction(signedTx);
         return { success: true, txHash: response.hash };
       } catch (error: any) {
+        // Extract host safely, fallback to full URL if parsing fails
+        let urlHost = rpcUrl;
+        try {
+          urlHost = new URL(rpcUrl).host;
+        } catch {
+          // Ignore URL parsing error, use full URL
+        }
+        
         console.warn('[private-relay] race endpoint failed', {
-          rpcUrl: new URL(rpcUrl).host,
+          rpcUrl: urlHost,
           error: error.message
         });
         return { success: false };

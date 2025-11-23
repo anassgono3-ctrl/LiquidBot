@@ -192,7 +192,7 @@ describe('FlashbotsProtectClient', () => {
     
     expect(result.success).toBe(true);
     expect(result.txHash).toBe('0x1234567890123456789012345678901234567890123456789012345678901234');
-    expect(result.latencyMs).toBeGreaterThanOrEqual(0); // Changed to >= 0 to handle fast execution
+    expect(result.latencyMs).toBeGreaterThanOrEqual(0); // Latency can be 0 for very fast mock responses
   });
 
   it('should handle RPC error response', async () => {

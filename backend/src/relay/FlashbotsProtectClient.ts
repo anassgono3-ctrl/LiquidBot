@@ -71,6 +71,7 @@ export class FlashbotsProtectClient {
       };
 
       // Send HTTP request with signature header
+      // AbortSignal.timeout requires Node.js 17.3.0+ (we require 18.18.0+)
       const response = await fetch(this.rpcUrl, {
         method: 'POST',
         headers: {
