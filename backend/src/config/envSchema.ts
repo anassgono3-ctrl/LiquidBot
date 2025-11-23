@@ -422,6 +422,14 @@ export const rawEnvSchema = z.object({
   PREDICTIVE_MAX_USERS_PER_TICK: z.string().optional(),
   PREDICTIVE_HORIZON_SEC: z.string().optional(),
   PREDICTIVE_SCENARIOS: z.string().optional(),
+  // Predictive integration with execution pipeline
+  PREDICTIVE_QUEUE_ENABLED: z.string().optional(),
+  PREDICTIVE_MICRO_VERIFY_ENABLED: z.string().optional(),
+  PREDICTIVE_FASTPATH_ENABLED: z.string().optional(),
+  // Dynamic buffer scaling based on volatility
+  PREDICTIVE_DYNAMIC_BUFFER_ENABLED: z.string().optional(),
+  PREDICTIVE_VOLATILITY_BPS_SCALE_MIN: z.string().optional(),
+  PREDICTIVE_VOLATILITY_BPS_SCALE_MAX: z.string().optional(),
   
   // ==== MICRO-VERIFICATION FAST PATH ====
   // Enable micro-verification for immediate single-user HF checks
@@ -935,6 +943,12 @@ export const env = (() => {
       .split(',')
       .map(s => s.trim())
       .filter(s => s.length > 0),
+    predictiveQueueEnabled: (parsed.PREDICTIVE_QUEUE_ENABLED || 'true').toLowerCase() === 'true',
+    predictiveMicroVerifyEnabled: (parsed.PREDICTIVE_MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
+    predictiveFastpathEnabled: (parsed.PREDICTIVE_FASTPATH_ENABLED || 'false').toLowerCase() === 'true',
+    predictiveDynamicBufferEnabled: (parsed.PREDICTIVE_DYNAMIC_BUFFER_ENABLED || 'false').toLowerCase() === 'true',
+    predictiveVolatilityBpsScaleMin: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MIN || 20), // 0.20%
+    predictiveVolatilityBpsScaleMax: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MAX || 100), // 1.00%
     
     // ==== MICRO-VERIFICATION FAST PATH ====
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',

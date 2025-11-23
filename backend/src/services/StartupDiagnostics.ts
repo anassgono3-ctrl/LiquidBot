@@ -79,6 +79,19 @@ export interface StartupDiagnosticsResult {
     writeRpcCount: number;
     optimisticMode: boolean;
   };
+  predictive: {
+    enabled: boolean;
+    queueIntegration: boolean;
+    microVerifyIntegration: boolean;
+    fastpathIntegration: boolean;
+    bufferBps: number;
+    dynamicBuffer: boolean;
+    dynamicBufferMin: number;
+    dynamicBufferMax: number;
+    horizonSec: number;
+    scenarios: string[];
+    maxUsersPerTick: number;
+  };
 }
 
 /**
@@ -106,7 +119,8 @@ export class StartupDiagnosticsService {
       metrics: this.checkMetricsConfig(),
       borrowersIndex: this.checkBorrowersIndex(),
       precompute: this.checkPrecomputeConfig(),
-      sprinter: this.checkSprinterConfig()
+      sprinter: this.checkSprinterConfig(),
+      predictive: this.checkPredictiveConfig()
     };
 
     return result;
@@ -359,6 +373,25 @@ export class StartupDiagnosticsService {
   }
 
   /**
+   * Check Predictive Engine configuration
+   */
+  private checkPredictiveConfig(): StartupDiagnosticsResult['predictive'] {
+    return {
+      enabled: config.predictiveEnabled,
+      queueIntegration: config.predictiveQueueEnabled,
+      microVerifyIntegration: config.predictiveMicroVerifyEnabled,
+      fastpathIntegration: config.predictiveFastpathEnabled,
+      bufferBps: config.predictiveHfBufferBps,
+      dynamicBuffer: config.predictiveDynamicBufferEnabled,
+      dynamicBufferMin: config.predictiveVolatilityBpsScaleMin,
+      dynamicBufferMax: config.predictiveVolatilityBpsScaleMax,
+      horizonSec: config.predictiveHorizonSec,
+      scenarios: config.predictiveScenarios,
+      maxUsersPerTick: config.predictiveMaxUsersPerTick
+    };
+  }
+
+  /**
    * Format diagnostics result as readable log message
    */
   formatDiagnostics(result: StartupDiagnosticsResult): string {
@@ -457,6 +490,21 @@ export class StartupDiagnosticsService {
       lines.push(`  Verify batch: ${result.sprinter.verifyBatch}`);
       lines.push(`  Write RPCs: ${result.sprinter.writeRpcCount}`);
       lines.push(`  Optimistic mode: ${result.sprinter.optimisticMode ? 'ENABLED' : 'DISABLED'}`);
+    }
+
+    // Predictive Engine
+    lines.push('');
+    lines.push('[Predictive Engine]');
+    lines.push(`  Enabled: ${result.predictive.enabled ? 'true' : 'false'}`);
+    if (result.predictive.enabled) {
+      lines.push(`  Queue Integration: ${result.predictive.queueIntegration ? 'true' : 'false'}`);
+      lines.push(`  Micro-Verify Integration: ${result.predictive.microVerifyIntegration ? 'true' : 'false'}`);
+      lines.push(`  Fastpath Integration: ${result.predictive.fastpathIntegration ? 'true' : 'false'}`);
+      const dynamicBufferStr = result.predictive.dynamicBuffer 
+        ? `${result.predictive.bufferBps}bps (scaled: ${result.predictive.dynamicBufferMin}-${result.predictive.dynamicBufferMax}bps)`
+        : `${result.predictive.bufferBps}bps`;
+      lines.push(`  Buffer (current/dynamic): ${dynamicBufferStr}`);
+      lines.push(`  Scenarios: ${result.predictive.scenarios.join(', ')}`);
     }
     
     // Summary line
