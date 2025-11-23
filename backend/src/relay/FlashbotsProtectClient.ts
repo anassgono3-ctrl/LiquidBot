@@ -12,6 +12,7 @@ export interface FlashbotsProtectOptions {
   rpcUrl: string;
   signerAddress: string;
   signatureRandom: boolean;
+  timeoutMs?: number; // Request timeout in milliseconds (default: 5000)
 }
 
 export interface SendPrivateTransactionResult {
@@ -29,11 +30,13 @@ export class FlashbotsProtectClient {
   private rpcUrl: string;
   private signerAddress: string;
   private signatureRandom: boolean;
+  private timeoutMs: number;
 
   constructor(options: FlashbotsProtectOptions) {
     this.rpcUrl = options.rpcUrl;
     this.signerAddress = options.signerAddress.toLowerCase();
     this.signatureRandom = options.signatureRandom;
+    this.timeoutMs = options.timeoutMs || 5000;
   }
 
   /**
@@ -75,7 +78,7 @@ export class FlashbotsProtectClient {
           'x-flashbots-signature': signature
         },
         body: JSON.stringify(requestBody),
-        signal: AbortSignal.timeout(5000) // 5 second timeout
+        signal: AbortSignal.timeout(this.timeoutMs)
       });
 
       const latencyMs = Date.now() - startTime;

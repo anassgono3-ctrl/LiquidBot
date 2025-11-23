@@ -91,6 +91,8 @@ export class ExecutionService {
       });
       
       // Initialize PrivateRelayService
+      // writeRpcs comes from WRITE_RPCS env var (comma-separated public RPC URLs)
+      // Used for race mode fallback when private relay fails
       const writeRpcs = config.writeRpcs || [];
       this.privateRelayService = new PrivateRelayService({
         provider: this.provider,

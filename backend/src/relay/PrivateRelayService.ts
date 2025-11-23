@@ -30,11 +30,13 @@ export class PrivateRelayService {
   private client?: FlashbotsProtectClient;
   private provider?: ethers.Provider;
   private writeRpcs: string[];
+  private providerCache: Map<string, ethers.JsonRpcProvider>;
 
   constructor(options: PrivateRelayServiceOptions = {}) {
     this.config = getPrivateRelayConfig();
     this.provider = options.provider;
     this.writeRpcs = options.writeRpcs || [];
+    this.providerCache = new Map();
 
     // Log configuration once on initialization
     logPrivateRelayConfig(this.config);
@@ -69,17 +71,7 @@ export class PrivateRelayService {
       };
     }
 
-    if (!this.config.rpcUrl) {
-      return {
-        success: false,
-        sentPrivate: false,
-        fallbackUsed: false,
-        errorCode: PrivateRelayErrorCode.NO_RPC_URL,
-        latencyMs: 0
-      };
-    }
-
-    if (!this.client) {
+    if (!this.config.rpcUrl || !this.client) {
       return {
         success: false,
         sentPrivate: false,
@@ -200,7 +192,13 @@ export class PrivateRelayService {
     // Broadcast to all RPCs in parallel
     const promises = this.writeRpcs.map(async (rpcUrl) => {
       try {
-        const provider = new ethers.JsonRpcProvider(rpcUrl);
+        // Get or create cached provider for this RPC URL
+        let provider = this.providerCache.get(rpcUrl);
+        if (!provider) {
+          provider = new ethers.JsonRpcProvider(rpcUrl);
+          this.providerCache.set(rpcUrl, provider);
+        }
+        
         const response = await provider.broadcastTransaction(signedTx);
         return { success: true, txHash: response.hash };
       } catch (error: any) {
