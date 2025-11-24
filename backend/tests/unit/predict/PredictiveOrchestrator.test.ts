@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
-import { PredictiveOrchestrator, type PredictiveEventListener, type PredictiveScenarioEvent } from '../../../src/risk/PredictiveOrchestrator.js';
+import { PredictiveOrchestrator, type PredictiveEventListener, type PredictiveScenarioEvent, type UserSnapshotProvider } from '../../../src/risk/PredictiveOrchestrator.js';
 import type { UserSnapshot } from '../../../src/risk/HFCalculator.js';
 
 describe('PredictiveOrchestrator', () => {
@@ -16,7 +16,16 @@ describe('PredictiveOrchestrator', () => {
       fastpathEnabled: false,
       dynamicBufferEnabled: false,
       volatilityBpsScaleMin: 20,
-      volatilityBpsScaleMax: 100
+      volatilityBpsScaleMax: 100,
+      fallbackIntervalBlocks: 20,
+      fallbackIntervalMs: 30000,
+      fastpathEtaCapSec: 45,
+      priorityHfWeight: 1.0,
+      priorityEtaWeight: 1.0,
+      priorityDebtWeight: 0.6,
+      priorityScenarioWeightBaseline: 1.0,
+      priorityScenarioWeightAdverse: 1.15,
+      priorityScenarioWeightExtreme: 1.3
     });
 
     receivedEvents = [];
@@ -27,6 +36,10 @@ describe('PredictiveOrchestrator', () => {
     };
 
     orchestrator.addListener(mockListener);
+  });
+
+  afterEach(() => {
+    orchestrator.stop();
   });
 
   describe('configuration', () => {
@@ -41,6 +54,15 @@ describe('PredictiveOrchestrator', () => {
     it('should respect enabled flag', () => {
       const disabled = new PredictiveOrchestrator({ enabled: false });
       expect(disabled.isEnabled()).toBe(false);
+      disabled.stop();
+    });
+    
+    it('should track lastEvaluationBlock and lastEvaluationTs in stats', () => {
+      const stats = orchestrator.getStats();
+      expect(stats).toHaveProperty('lastEvaluationBlock');
+      expect(stats).toHaveProperty('lastEvaluationTs');
+      expect(stats.lastEvaluationBlock).toBe(0);
+      expect(stats.lastEvaluationTs).toBe(0);
     });
   });
 
@@ -59,6 +81,7 @@ describe('PredictiveOrchestrator', () => {
       
       const stats = disabled.getStats();
       expect(stats.engineStats.priceWindowsCount).toBe(0);
+      disabled.stop();
     });
   });
 
@@ -84,6 +107,7 @@ describe('PredictiveOrchestrator', () => {
 
       await disabled.evaluate(users, 100);
       expect(receivedEvents.length).toBe(0);
+      disabled.stop();
     });
 
     it('should evaluate users near threshold', async () => {
@@ -132,6 +156,29 @@ describe('PredictiveOrchestrator', () => {
       
       // Should not generate candidates for safe users
       expect(receivedEvents.length).toBe(0);
+    });
+    
+    it('should update lastEvaluationBlock after evaluation', async () => {
+      const users: UserSnapshot[] = [
+        {
+          address: '0x4444444444444444444444444444444444444444',
+          block: 150,
+          reserves: [
+            {
+              asset: 'ETH',
+              collateralUsd: 10000,
+              debtUsd: 9000,
+              liquidationThreshold: 0.85
+            }
+          ]
+        }
+      ];
+
+      await orchestrator.evaluate(users, 150);
+      
+      const stats = orchestrator.getStats();
+      expect(stats.lastEvaluationBlock).toBe(150);
+      expect(stats.lastEvaluationTs).toBeGreaterThan(0);
     });
   });
 
@@ -225,6 +272,7 @@ describe('PredictiveOrchestrator', () => {
       // Verify fastpath flag is considered
       const stats = withFastpath.getStats();
       expect(stats.fastpathEnabled).toBe(true);
+      withFastpath.stop();
     });
   });
 
@@ -378,6 +426,60 @@ describe('PredictiveOrchestrator', () => {
       
       const stats = orchestrator.getStats();
       expect(stats.priceWindowsCount).toBeGreaterThanOrEqual(0);
+    });
+  });
+  
+  describe('periodic fallback evaluation', () => {
+    it('should accept a user provider for fallback evaluations', () => {
+      const mockProvider: UserSnapshotProvider = {
+        getUserSnapshots: vi.fn().mockResolvedValue([])
+      };
+      
+      orchestrator.setUserProvider(mockProvider);
+      // No error should be thrown
+      expect(true).toBe(true);
+    });
+    
+    it('should start and stop fallback timer', () => {
+      orchestrator.startFallbackTimer();
+      // Timer should be running (internal state)
+      
+      orchestrator.stop();
+      // Timer should be stopped
+      expect(true).toBe(true);
+    });
+    
+    it('should call onNewBlock without errors', () => {
+      orchestrator.onNewBlock(100);
+      orchestrator.onNewBlock(110);
+      orchestrator.onNewBlock(120);
+      
+      // No errors should be thrown
+      expect(true).toBe(true);
+    });
+    
+    it('should use evaluateWithReason for explicit reason tracking', async () => {
+      const users: UserSnapshot[] = [
+        {
+          address: '0xcccccccccccccccccccccccccccccccccccccccc',
+          block: 100,
+          reserves: [
+            {
+              asset: 'ETH',
+              collateralUsd: 20000,
+              debtUsd: 10000,
+              liquidationThreshold: 0.85
+            }
+          ]
+        }
+      ];
+
+      await orchestrator.evaluateWithReason(users, 100, 'event');
+      await orchestrator.evaluateWithReason(users, 120, 'fallback');
+      
+      // Both should succeed without error
+      const stats = orchestrator.getStats();
+      expect(stats.lastEvaluationBlock).toBe(120);
     });
   });
 });

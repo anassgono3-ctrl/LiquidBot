@@ -234,6 +234,73 @@ if (config.useRealtimeHF) {
   logger.info('[realtime-hf] Disabled (USE_REALTIME_HF=false)');
 }
 
+// Initialize predictive orchestrator (only when enabled via config and realtime HF is enabled)
+import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
+
+let predictiveOrchestrator: PredictiveOrchestrator | undefined;
+
+if (config.predictiveEnabled && config.useRealtimeHF) {
+  predictiveOrchestrator = new PredictiveOrchestrator();
+  
+  // Wire up the predictive orchestrator listener to route candidates to RealTimeHFService
+  predictiveOrchestrator.addListener({
+    async onPredictiveCandidate(event: PredictiveScenarioEvent): Promise<void> {
+      if (!realtimeHFService) return;
+      
+      // Ingest candidate into the realtime HF service's queue
+      realtimeHFService.ingestPredictiveCandidates([{
+        address: event.candidate.address,
+        scenario: event.candidate.scenario,
+        hfCurrent: event.candidate.hfCurrent,
+        hfProjected: event.candidate.hfProjected,
+        etaSec: event.candidate.etaSec,
+        totalDebtUsd: event.candidate.totalDebtUsd
+      }]);
+    }
+  });
+  
+  // Set up user provider for fallback evaluations using the candidate manager
+  if (realtimeHFService) {
+    const userProvider: UserSnapshotProvider = {
+      async getUserSnapshots(maxUsers: number) {
+        const manager = realtimeHFService!.getCandidateManager();
+        const allCandidates = manager.getAll();
+        
+        // Sort by ascending HF (lowest first) for better candidate density
+        const sortedCandidates = allCandidates
+          .filter(c => c.lastHF !== null && c.lastHF < 1.2) // Only include near-threshold candidates
+          .sort((a, b) => (a.lastHF ?? 1) - (b.lastHF ?? 1))
+          .slice(0, maxUsers);
+        
+        // Convert to UserSnapshot format
+        // Note: This is a simplified version - full reserve data would need to be fetched
+        return sortedCandidates.map(c => ({
+          address: c.address,
+          block: 0, // Block would need to be tracked from real-time service
+          reserves: [] // Reserves would need to be fetched separately for full HF calculation
+        }));
+      }
+    };
+    
+    predictiveOrchestrator.setUserProvider(userProvider);
+    logger.info('[predictive-orchestrator] User provider set from candidate manager');
+  }
+  
+  // Start the fallback evaluation timer
+  predictiveOrchestrator.startFallbackTimer();
+  
+  logger.info(
+    `[predictive-orchestrator] Initialized with fallback intervals: ` +
+    `blocks=${config.predictiveFallbackIntervalBlocks}, ms=${config.predictiveFallbackIntervalMs}`
+  );
+} else {
+  if (!config.predictiveEnabled) {
+    logger.info('[predictive-orchestrator] Disabled (PREDICTIVE_ENABLED=false)');
+  } else if (!config.useRealtimeHF) {
+    logger.info('[predictive-orchestrator] Disabled (USE_REALTIME_HF=false required)');
+  }
+}
+
 
 
 // Warmup probe
@@ -426,6 +493,16 @@ if (config.useSubgraph && !config.useMockSubgraph && subgraphService) {
 const shutdown = async (signal: string) => {
   logger.info(`Received ${signal}, shutting down...`);
   subgraphPoller?.stop();
+  
+  // Stop predictive orchestrator if running
+  if (predictiveOrchestrator) {
+    try {
+      predictiveOrchestrator.stop();
+      logger.info('[predictive-orchestrator] Stopped');
+    } catch (err) {
+      logger.error('[predictive-orchestrator] Error stopping:', err);
+    }
+  }
   
   // Stop real-time HF service if running
   if (realtimeHFService) {

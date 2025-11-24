@@ -433,6 +433,15 @@ export const config = {
   get predictiveDynamicBufferEnabled() { return env.predictiveDynamicBufferEnabled; },
   get predictiveVolatilityBpsScaleMin() { return env.predictiveVolatilityBpsScaleMin; },
   get predictiveVolatilityBpsScaleMax() { return env.predictiveVolatilityBpsScaleMax; },
+  get predictiveFallbackIntervalBlocks() { return env.predictiveFallbackIntervalBlocks; },
+  get predictiveFallbackIntervalMs() { return env.predictiveFallbackIntervalMs; },
+  get fastpathPredictiveEtaCapSec() { return env.fastpathPredictiveEtaCapSec; },
+  get predictivePriorityHfWeight() { return env.predictivePriorityHfWeight; },
+  get predictivePriorityEtaWeight() { return env.predictivePriorityEtaWeight; },
+  get predictivePriorityDebtWeight() { return env.predictivePriorityDebtWeight; },
+  get predictivePriorityScenarioWeightBaseline() { return env.predictivePriorityScenarioWeightBaseline; },
+  get predictivePriorityScenarioWeightAdverse() { return env.predictivePriorityScenarioWeightAdverse; },
+  get predictivePriorityScenarioWeightExtreme() { return env.predictivePriorityScenarioWeightExtreme; },
   
   // Micro-Verification Fast Path
   get microVerifyEnabled() { return env.microVerifyEnabled; },

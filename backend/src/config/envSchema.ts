@@ -430,6 +430,18 @@ export const rawEnvSchema = z.object({
   PREDICTIVE_DYNAMIC_BUFFER_ENABLED: z.string().optional(),
   PREDICTIVE_VOLATILITY_BPS_SCALE_MIN: z.string().optional(),
   PREDICTIVE_VOLATILITY_BPS_SCALE_MAX: z.string().optional(),
+  // Predictive fallback evaluation intervals
+  PREDICTIVE_FALLBACK_INTERVAL_BLOCKS: z.string().optional(),
+  PREDICTIVE_FALLBACK_INTERVAL_MS: z.string().optional(),
+  // Fast-path predictive ETA cap
+  FASTPATH_PREDICTIVE_ETA_CAP_SEC: z.string().optional(),
+  // Predictive priority score weights
+  PREDICTIVE_PRIORITY_HF_WEIGHT: z.string().optional(),
+  PREDICTIVE_PRIORITY_ETA_WEIGHT: z.string().optional(),
+  PREDICTIVE_PRIORITY_DEBT_WEIGHT: z.string().optional(),
+  PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE: z.string().optional(),
+  PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE: z.string().optional(),
+  PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME: z.string().optional(),
   
   // ==== MICRO-VERIFICATION FAST PATH ====
   // Enable micro-verification for immediate single-user HF checks
@@ -949,6 +961,15 @@ export const env = (() => {
     predictiveDynamicBufferEnabled: (parsed.PREDICTIVE_DYNAMIC_BUFFER_ENABLED || 'false').toLowerCase() === 'true',
     predictiveVolatilityBpsScaleMin: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MIN || 20), // 0.20%
     predictiveVolatilityBpsScaleMax: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MAX || 100), // 1.00%
+    predictiveFallbackIntervalBlocks: Number(parsed.PREDICTIVE_FALLBACK_INTERVAL_BLOCKS || 20),
+    predictiveFallbackIntervalMs: Number(parsed.PREDICTIVE_FALLBACK_INTERVAL_MS || 30000), // 30 seconds
+    fastpathPredictiveEtaCapSec: Number(parsed.FASTPATH_PREDICTIVE_ETA_CAP_SEC || 45), // 45 seconds
+    predictivePriorityHfWeight: Number(parsed.PREDICTIVE_PRIORITY_HF_WEIGHT || 1.0),
+    predictivePriorityEtaWeight: Number(parsed.PREDICTIVE_PRIORITY_ETA_WEIGHT || 1.0),
+    predictivePriorityDebtWeight: Number(parsed.PREDICTIVE_PRIORITY_DEBT_WEIGHT || 0.6),
+    predictivePriorityScenarioWeightBaseline: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE || 1.0),
+    predictivePriorityScenarioWeightAdverse: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE || 1.15),
+    predictivePriorityScenarioWeightExtreme: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME || 1.3),
     
     // ==== MICRO-VERIFICATION FAST PATH ====
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',

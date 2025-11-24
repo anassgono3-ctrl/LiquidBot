@@ -37,7 +37,8 @@ import {
   reserveRechecksTotal,
   pendingVerifyErrorsTotal,
   headstartProcessedTotal,
-  headstartLatencyMs
+  headstartLatencyMs,
+  priceFeedEventsTotal
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
 import { normalizeAddress } from '../utils/Address.js';
@@ -1428,6 +1429,9 @@ export class RealTimeHFService extends EventEmitter {
       const currentPrice = parseFloat(currentAnswer.toString());
       const rawSymbol = this.chainlinkFeedToSymbol.get(feedAddress) || feedAddress;
       const symbol = this.normalizeAssetSymbol(rawSymbol);
+      
+      // Increment per-asset price feed counter
+      priceFeedEventsTotal.inc({ asset: symbol });
       
       // Check if this asset is in the monitored set (if filter is configured)
       if (this.priceMonitorAssets !== null && !this.priceMonitorAssets.has(symbol)) {
@@ -3616,6 +3620,67 @@ export class RealTimeHFService extends EventEmitter {
       });
 
       console.log(`[pre-sim] queued user=${userAddress.slice(0, 10)}... hf=${healthFactor.toFixed(4)} proj=${projectedHf.toFixed(4)} debt=$${debtUsd.toFixed(2)}`);
+    }
+  }
+
+  /**
+   * Ingest predictive candidates from PredictiveOrchestrator
+   * Deduplicates by user+scenario per tick and pushes into warm/hot queue
+   */
+  public ingestPredictiveCandidates(
+    candidates: Array<{
+      address: string;
+      scenario: string;
+      hfCurrent?: number;
+      hfProjected: number;
+      etaSec: number;
+      totalDebtUsd: number;
+    }>
+  ): void {
+    // Track ingested candidates to prevent duplicates in same tick
+    const seenThisTick = new Set<string>();
+    
+    for (const candidate of candidates) {
+      const key = `${candidate.address.toLowerCase()}_${candidate.scenario}`;
+      
+      // Deduplicate per tick
+      if (seenThisTick.has(key)) {
+        continue;
+      }
+      seenThisTick.add(key);
+      
+      // Calculate priority score: (1/etaSec) * (hfCurrent - hfProjected) * log(totalDebtUsd + 1)
+      const hfCurrent = candidate.hfCurrent ?? 1.0;
+      const hfDelta = Math.max(0, hfCurrent - candidate.hfProjected);
+      const etaFactor = candidate.etaSec > 0 ? 1 / candidate.etaSec : 1;
+      const debtFactor = Math.log10(Math.max(candidate.totalDebtUsd, 1) + 1);
+      
+      const priority = hfDelta * etaFactor * debtFactor;
+      
+      // Add to pre-sim queue with predictive_scenario reason
+      const normalized = normalizeAddress(candidate.address);
+      
+      this.preSimQueue.set(normalized, {
+        user: normalized,
+        projectedHf: candidate.hfProjected,
+        debtUsd: candidate.totalDebtUsd,
+        timestamp: Date.now()
+      });
+      
+      // Log ingested candidate
+      console.log(
+        `[predictive-ingest] queued user=${normalized.slice(0, 10)}... ` +
+        `scenario=${candidate.scenario} priority=${priority.toFixed(4)} etaSec=${candidate.etaSec}`
+      );
+      
+      // Notify liquidation audit service of predictive candidate (for race classification)
+      if (this.liquidationAuditService) {
+        this.liquidationAuditService.recordPredictiveCandidate(
+          normalized,
+          candidate.scenario,
+          candidate.hfProjected
+        );
+      }
     }
   }
 
