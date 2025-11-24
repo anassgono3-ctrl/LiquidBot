@@ -3,6 +3,8 @@
 ## Overview
 This implementation adds a new high-priority execution path called "Sprinter" designed to minimize block/event → transaction latency on Base's private mempool. The goal is to consistently win at least some liquidation races by pre-staging data and eliminating post-event computation overhead.
 
+**Predictive Integration**: Sprinter now accepts candidates from the Predictive Health Factor Engine via `prestageFromPredictive()` method, enabling proactive pre-staging of users likely to cross liquidation threshold within the projection horizon. See [Predictive HF Documentation](./backend/docs/predictive-hf.md) for details.
+
 ## Implementation Status
 
 ### ✅ Completed Components

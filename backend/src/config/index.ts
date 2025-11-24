@@ -427,6 +427,12 @@ export const config = {
   get predictiveMaxUsersPerTick() { return env.predictiveMaxUsersPerTick; },
   get predictiveHorizonSec() { return env.predictiveHorizonSec; },
   get predictiveScenarios() { return env.predictiveScenarios; },
+  get predictiveQueueEnabled() { return env.predictiveQueueEnabled; },
+  get predictiveMicroVerifyEnabled() { return env.predictiveMicroVerifyEnabled; },
+  get predictiveFastpathEnabled() { return env.predictiveFastpathEnabled; },
+  get predictiveDynamicBufferEnabled() { return env.predictiveDynamicBufferEnabled; },
+  get predictiveVolatilityBpsScaleMin() { return env.predictiveVolatilityBpsScaleMin; },
+  get predictiveVolatilityBpsScaleMax() { return env.predictiveVolatilityBpsScaleMax; },
   
   // Micro-Verification Fast Path
   get microVerifyEnabled() { return env.microVerifyEnabled; },

@@ -1105,3 +1105,68 @@ export const criticalLaneSkippedTotal = () => getExecutionMetrics().criticalLane
 export const criticalLaneDetectMs = () => getExecutionMetrics().criticalLaneDetectMs;
 export const criticalLaneIntentMs = () => getExecutionMetrics().criticalLaneIntentMs;
 export const criticalLaneSubmitMs = () => getExecutionMetrics().criticalLaneSubmitMs;
+
+// ==== PREDICTIVE ENGINE METRICS ====
+
+// Predictive candidate ingestion by scenario
+export const predictiveIngestedTotal = new Counter({
+  name: 'liquidbot_predictive_ingested_total',
+  help: 'Total predictive candidates ingested',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+// Queue entries from predictive scenarios
+export const predictiveQueueEntriesTotal = new Counter({
+  name: 'liquidbot_predictive_queue_entries_total',
+  help: 'Total queue entries from predictive scenarios',
+  labelNames: ['reason'],
+  registers: [metricsRegistry]
+});
+
+// Micro-verification scheduling from predictive scenarios
+export const predictiveMicroVerifyScheduledTotal = new Counter({
+  name: 'liquidbot_predictive_micro_verify_scheduled_total',
+  help: 'Total micro-verifications scheduled from predictive scenarios',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+// Pre-staging from predictive scenarios
+export const predictivePrestagedTotal = new Counter({
+  name: 'liquidbot_predictive_prestaged_total',
+  help: 'Total pre-staged candidates from predictive scenarios',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+// Fast-path flagging from predictive scenarios
+export const predictiveFastpathFlaggedTotal = new Counter({
+  name: 'liquidbot_predictive_fastpath_flagged_total',
+  help: 'Total fast-path flags from predictive scenarios',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+// Current dynamic buffer value (gauge)
+export const predictiveDynamicBufferCurrentBps = new Gauge({
+  name: 'liquidbot_predictive_dynamic_buffer_current_bps',
+  help: 'Current predictive HF buffer in basis points (dynamically scaled)',
+  registers: [metricsRegistry]
+});
+
+// Projection accuracy histogram
+export const predictiveProjectionAccuracyBps = new Histogram({
+  name: 'liquidbot_predictive_projection_accuracy_bps',
+  help: 'Histogram of projection accuracy in basis points (|hfProjected - hfActual| * 10000)',
+  buckets: [0, 5, 10, 20, 50, 100, 200, 500, 1000],
+  registers: [metricsRegistry]
+});
+
+// False negative tracking
+export const predictiveFalseNegativeTotal = new Counter({
+  name: 'liquidbot_predictive_false_negative_total',
+  help: 'Total false negatives (actual HF crossed without predictive candidate)',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});

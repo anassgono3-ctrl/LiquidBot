@@ -250,6 +250,45 @@ export class SprinterEngine {
   }
 
   /**
+   * Pre-stage a candidate from predictive engine
+   * Applies same filters and delegates to prestage()
+   */
+  prestageFromPredictive(
+    user: string,
+    debtToken: string,
+    collateralToken: string,
+    debtWei: bigint,
+    collateralWei: bigint,
+    projectedHF: number,
+    currentBlock: number,
+    debtPriceUsd: number
+  ): boolean {
+    // Check minimum debt USD threshold
+    const debtUsd = Number(ethers.formatEther(debtWei)) * debtPriceUsd;
+    if (debtUsd < this.config.minDebtUsd) {
+      return false;
+    }
+
+    // Check projected HF threshold
+    const prestageThreshold = this.config.prestageHfBps / 10000;
+    if (projectedHF > prestageThreshold) {
+      return false;
+    }
+
+    // Delegate to regular prestage method
+    return this.prestage(
+      user,
+      debtToken,
+      collateralToken,
+      debtWei,
+      collateralWei,
+      projectedHF,
+      currentBlock,
+      debtPriceUsd
+    );
+  }
+
+  /**
    * Estimate repay amount based on close factor mode
    */
   private estimateRepayAmount(debtWei: bigint, projectedHF: number): bigint {

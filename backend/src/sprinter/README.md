@@ -51,6 +51,20 @@ Pre-stages liquidation candidates that are near the liquidation threshold.
 }
 ```
 
+**Predictive Integration:**
+
+Sprinter accepts candidates from the Predictive Health Factor Engine via `prestageFromPredictive()` method:
+
+```typescript
+sprinterEngine.prestageFromPredictive(
+  user, debtToken, collateralToken,
+  debtWei, collateralWei,
+  projectedHF, currentBlock, debtPriceUsd
+);
+```
+
+This enables proactive pre-staging based on scenario-based HF projections (baseline/adverse/extreme). When predictive engine projects HF < 1.02 within the horizon, candidates flow into Sprinter's pre-staging pipeline. See [Predictive HF Documentation](../../docs/predictive-hf.md).
+
 #### 2. TemplateCache (`TemplateCache.ts`)
 Caches minimal liquidation calldata skeletons for fast patching.
 

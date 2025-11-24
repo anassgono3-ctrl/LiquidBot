@@ -98,6 +98,29 @@ PRIVATE_TX_MODE=disabled
 REDIS_PIPELINE_ENABLED=true
 ```
 
+### Predictive Fast-Path Integration
+
+When **Predictive Engine** is enabled with fast-path integration, candidates with projected HF < 1.0 and ETA ≤ 30s can be pre-marked for fast-path readiness:
+
+```bash
+# Enable predictive engine (default: false)
+PREDICTIVE_ENABLED=true
+
+# Enable fast-path integration (default: false)
+# Pre-marks candidates for CriticalLane when projected HF < 1.0 soon
+PREDICTIVE_FASTPATH_ENABLED=false
+```
+
+**Note**: Predictive fast-path integration is **disabled by default** to prevent false positives. Enable only after tuning predictive accuracy in your environment.
+
+When enabled, predictive candidates flow into the fast-path pipeline:
+1. PredictiveEngine projects HF < 1.0 within 30s
+2. Candidate flagged in orchestrator
+3. On next price/block event confirmation, triggers CriticalLane attempt
+4. Standard profit/debt thresholds apply
+
+See [`backend/docs/predictive-hf.md`](./docs/predictive-hf.md) for predictive engine configuration.
+
 ## Redis Schema
 
 ### Channels

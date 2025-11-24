@@ -115,10 +115,22 @@ npm run accel:smoke
 ### Configuration
 
 ```bash
-# Pre-simulation (default: enabled)
+# Pre-simulation execution path acceleration (default: enabled)
 PRE_SIM_ENABLED=true
 PRE_SIM_HF_WINDOW=1.01
 PRE_SIM_MIN_DEBT_USD=100
+
+# Predictive Health Factor Engine (default: disabled)
+# Scenario-based HF projection for proactive candidate detection
+# NOTE: Predictive operates independently of PRE_SIM_ENABLED
+PREDICTIVE_ENABLED=false
+PREDICTIVE_HF_BUFFER_BPS=40
+PREDICTIVE_HORIZON_SEC=180
+PREDICTIVE_SCENARIOS=baseline,adverse,extreme
+# Integration controls (only apply when PREDICTIVE_ENABLED=true)
+PREDICTIVE_QUEUE_ENABLED=true           # Feed into hot/warm queues
+PREDICTIVE_MICRO_VERIFY_ENABLED=true    # Schedule micro-verification
+PREDICTIVE_FASTPATH_ENABLED=false       # Pre-mark for fast-path (use cautiously)
 
 # Gas ladder (default: enabled)
 GAS_LADDER_ENABLED=true

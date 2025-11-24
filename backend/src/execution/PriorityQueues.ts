@@ -20,8 +20,11 @@ export interface QueueEntry {
   blocksUntilCritical?: number;
   volatilityScore?: number;
   // Entry metadata
-  entryReason: 'hf_threshold' | 'volatility_projection' | 'price_trigger' | 'reserve_update';
+  entryReason: 'hf_threshold' | 'volatility_projection' | 'price_trigger' | 'reserve_update' | 'predictive_scenario';
   priority: number; // Lower = higher priority
+  // Predictive metadata (optional)
+  predictiveScenario?: string;
+  predictiveEtaSec?: number;
 }
 
 export interface PriorityQueueConfig {
