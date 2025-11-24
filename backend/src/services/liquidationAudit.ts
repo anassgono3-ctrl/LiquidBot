@@ -15,7 +15,10 @@ import {
   liquidationAuditReasonRaced,
   liquidationAuditErrors,
   watchMissCount,
-  auditUsdScalingSuspectTotal
+  auditUsdScalingSuspectTotal,
+  liquidationRaceClassificationTotal,
+  liquidationDetectionLatencyMs,
+  liquidationPredictivePresenceTotal
 } from '../metrics/index.js';
 import { detectSuspiciousScaling } from '../utils/CanonicalUsdMath.js';
 
@@ -107,6 +110,21 @@ export class LiquidationAuditService {
   private ourBotAddress?: string;
 
   private autoHealCallback?: (user: string) => void;
+  
+  // Detection latency tracking: map of user -> detection timestamp
+  private detectionTimestamps: Map<string, { detectedAt: number; detectedBlock: number }> = new Map();
+  
+  // Predictive candidate tracking: map of user -> { present: boolean, scenario: string }
+  private predictiveCandidates: Map<string, { scenario: string; hfProjected: number; timestamp: number }> = new Map();
+  
+  // Execution attempt tracking: map of user -> { attempted: boolean, attemptedAt: number }
+  private executionAttempts: Map<string, { attempted: boolean; attemptedAt: number }> = new Map();
+  
+  // Pre-staged users tracking
+  private prestagedUsers: Set<string> = new Set();
+  
+  // Queued users tracking
+  private queuedUsers: Set<string> = new Set();
 
   constructor(
     priceService: PriceService,
@@ -148,6 +166,68 @@ export class LiquidationAuditService {
 
     // Log config on initialization
     this.logConfig();
+  }
+  
+  /**
+   * Record detection timestamp when HF < 1.0 is first observed
+   */
+  public recordDetection(user: string, block: number): void {
+    const normalized = user.toLowerCase();
+    if (!this.detectionTimestamps.has(normalized)) {
+      this.detectionTimestamps.set(normalized, {
+        detectedAt: Date.now(),
+        detectedBlock: block
+      });
+    }
+  }
+  
+  /**
+   * Record execution attempt for a user
+   */
+  public recordExecutionAttempt(user: string): void {
+    const normalized = user.toLowerCase();
+    this.executionAttempts.set(normalized, {
+      attempted: true,
+      attemptedAt: Date.now()
+    });
+  }
+  
+  /**
+   * Record predictive candidate presence for a user
+   */
+  public recordPredictiveCandidate(user: string, scenario: string, hfProjected: number): void {
+    const normalized = user.toLowerCase();
+    this.predictiveCandidates.set(normalized, {
+      scenario,
+      hfProjected,
+      timestamp: Date.now()
+    });
+  }
+  
+  /**
+   * Mark user as pre-staged
+   */
+  public markPrestaged(user: string): void {
+    this.prestagedUsers.add(user.toLowerCase());
+  }
+  
+  /**
+   * Mark user as queued
+   */
+  public markQueued(user: string): void {
+    this.queuedUsers.add(user.toLowerCase());
+  }
+  
+  /**
+   * Clear tracking data for a user after liquidation
+   */
+  public clearUserTracking(user: string): void {
+    const normalized = user.toLowerCase();
+    this.detectionTimestamps.delete(normalized);
+    this.executionAttempts.delete(normalized);
+    this.predictiveCandidates.delete(normalized);
+    this.prestagedUsers.delete(normalized);
+    this.queuedUsers.delete(normalized);
   }
 
   /**
@@ -260,6 +340,51 @@ export class LiquidationAuditService {
 
       // Check if debt is below MIN_DEBT_USD (informational tag)
       const infoMinDebt = debtUsd !== null && debtUsd < config.minDebtUsd;
+      
+      // Enhanced race classification
+      const executionAttempt = this.executionAttempts.get(user);
+      const detectionInfo = this.detectionTimestamps.get(user);
+      const predictiveInfo = this.predictiveCandidates.get(user);
+      const wasQueued = this.queuedUsers.has(user);
+      const wasPrestaged = this.prestagedUsers.has(user);
+      
+      const attemptLabel = executionAttempt?.attempted ? 'yes' : 'no';
+      const watchSetLabel = inSet ? 'yes' : 'no';
+      
+      // Update race classification metrics
+      if (reason === 'raced') {
+        liquidationRaceClassificationTotal.inc({ attempt: attemptLabel, watch_set: watchSetLabel });
+        
+        // Track predictive presence
+        const predictivePresence = predictiveInfo ? 'present' : 'absent';
+        const predictiveScenario = predictiveInfo?.scenario || 'none';
+        liquidationPredictivePresenceTotal.inc({ presence: predictivePresence, scenario: predictiveScenario });
+        
+        // Track latency if we have detection timestamp
+        if (detectionInfo) {
+          const now = Date.now();
+          const blockToDetectMs = detectionInfo.detectedAt - (blockTimestamp * 1000);
+          
+          // Only record if positive (valid timing)
+          if (blockToDetectMs > 0 && blockToDetectMs < 30000) {
+            liquidationDetectionLatencyMs.observe({ phase: 'block_to_detect' }, blockToDetectMs);
+          }
+          
+          if (executionAttempt?.attempted && executionAttempt.attemptedAt) {
+            const detectToAttemptMs = executionAttempt.attemptedAt - detectionInfo.detectedAt;
+            if (detectToAttemptMs > 0 && detectToAttemptMs < 30000) {
+              liquidationDetectionLatencyMs.observe({ phase: 'detect_to_attempt' }, detectToAttemptMs);
+            }
+          }
+        }
+        
+        // Add debug logging for race classification
+        console.log(
+          `[race-debug] user=${user} attempt=${attemptLabel} predictive=${predictiveInfo ? 'present' : 'absent'} ` +
+          `queued=${wasQueued ? 'yes' : 'no'} prestaged=${wasPrestaged ? 'yes' : 'no'} ` +
+          `latencyBlockToDetect=${detectionInfo ? Date.now() - detectionInfo.detectedAt : 'N/A'}ms`
+        );
+      }
 
       // Create audit result
       const auditResult: LiquidationAuditResult = {
@@ -286,6 +411,9 @@ export class LiquidationAuditService {
 
       // Update metrics
       this.updateMetrics(reason);
+      
+      // Clear tracking data for this user after processing
+      this.clearUserTracking(user);
 
       // Auto-heal: add user to watch set if not_in_watch_set
       if (reason === 'not_in_watch_set' && this.autoHealCallback) {

@@ -1170,3 +1170,87 @@ export const predictiveFalseNegativeTotal = new Counter({
   labelNames: ['scenario'],
   registers: [metricsRegistry]
 });
+
+// ==== ADDITIONAL PREDICTIVE & RACE CLASSIFICATION METRICS ====
+
+// Predictive evaluation runs counter
+export const predictiveEvaluationRunsTotal = new Counter({
+  name: 'liquidbot_predictive_evaluation_runs_total',
+  help: 'Number of predictive evaluation ticks',
+  labelNames: ['reason'],
+  registers: [metricsRegistry]
+});
+
+// Raw candidates generated before filtering
+export const predictiveCandidatesGeneratedTotal = new Counter({
+  name: 'liquidbot_predictive_candidates_generated_total',
+  help: 'Raw candidates produced before filtering',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+// Candidates filtered out with reasons
+export const predictiveCandidatesFilteredTotal = new Counter({
+  name: 'liquidbot_predictive_candidates_filtered_total',
+  help: 'Filter reasons for predictive candidates',
+  labelNames: ['filter'],
+  registers: [metricsRegistry]
+});
+
+// False positive tracking
+export const predictiveFalsePositiveTotal = new Counter({
+  name: 'liquidbot_predictive_false_positive_total',
+  help: 'Total false positives (candidate whose projected crossing did not occur within horizon)',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+// Race classification: distinguish attempt vs no-attempt
+export const liquidationRaceClassificationTotal = new Counter({
+  name: 'liquidbot_liquidation_race_classification_total',
+  help: 'Distinguish raced events we attempted vs passive',
+  labelNames: ['attempt', 'watch_set'],
+  registers: [metricsRegistry]
+});
+
+// Latency segmentation for liquidation detection
+export const liquidationDetectionLatencyMs = new Histogram({
+  name: 'liquidbot_liquidation_detection_latency_ms',
+  help: 'Latency segments for liquidation detection',
+  labelNames: ['phase'],
+  buckets: [10, 25, 50, 100, 250, 500, 1000, 2000, 5000],
+  registers: [metricsRegistry]
+});
+
+// Predictive candidate presence in audited liquidations
+export const liquidationPredictivePresenceTotal = new Counter({
+  name: 'liquidbot_liquidation_predictive_presence_total',
+  help: 'Whether predictive candidate existed pre-race',
+  labelNames: ['presence', 'scenario'],
+  registers: [metricsRegistry]
+});
+
+// Price feed events counter (fix for existing 0 count issue)
+export const priceFeedEventsTotal = new Counter({
+  name: 'liquidbot_price_feed_events_total',
+  help: 'Total price feed update events received per asset',
+  labelNames: ['asset'],
+  registers: [metricsRegistry]
+});
+
+// ETA distribution for ingested candidates
+export const predictiveEtaDistributionSec = new Histogram({
+  name: 'liquidbot_predictive_eta_distribution_sec',
+  help: 'Candidate ETA distribution for ingested candidates',
+  labelNames: ['scenario'],
+  buckets: [5, 10, 20, 30, 45, 60, 90, 120, 180, 300],
+  registers: [metricsRegistry]
+});
+
+// Evaluation duration histogram
+export const predictiveEvaluationDurationMs = new Histogram({
+  name: 'liquidbot_predictive_evaluation_duration_ms',
+  help: 'Duration per evaluation tick',
+  buckets: [10, 25, 50, 100, 250, 500, 1000, 2000],
+  registers: [metricsRegistry]
+});
