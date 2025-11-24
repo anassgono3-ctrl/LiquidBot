@@ -234,6 +234,46 @@ if (config.useRealtimeHF) {
   logger.info('[realtime-hf] Disabled (USE_REALTIME_HF=false)');
 }
 
+// Initialize predictive orchestrator (only when enabled via config and realtime HF is enabled)
+import { PredictiveOrchestrator, type PredictiveScenarioEvent } from './risk/PredictiveOrchestrator.js';
+
+let predictiveOrchestrator: PredictiveOrchestrator | undefined;
+
+if (config.predictiveEnabled && config.useRealtimeHF) {
+  predictiveOrchestrator = new PredictiveOrchestrator();
+  
+  // Wire up the predictive orchestrator listener to route candidates to RealTimeHFService
+  predictiveOrchestrator.addListener({
+    async onPredictiveCandidate(event: PredictiveScenarioEvent): Promise<void> {
+      if (!realtimeHFService) return;
+      
+      // Ingest candidate into the realtime HF service's queue
+      realtimeHFService.ingestPredictiveCandidates([{
+        address: event.candidate.address,
+        scenario: event.candidate.scenario,
+        hfCurrent: event.candidate.hfCurrent,
+        hfProjected: event.candidate.hfProjected,
+        etaSec: event.candidate.etaSec,
+        totalDebtUsd: event.candidate.totalDebtUsd
+      }]);
+    }
+  });
+  
+  // Start the fallback evaluation timer
+  predictiveOrchestrator.startFallbackTimer();
+  
+  logger.info(
+    `[predictive-orchestrator] Initialized with fallback intervals: ` +
+    `blocks=${config.predictiveFallbackIntervalBlocks}, ms=${config.predictiveFallbackIntervalMs}`
+  );
+} else {
+  if (!config.predictiveEnabled) {
+    logger.info('[predictive-orchestrator] Disabled (PREDICTIVE_ENABLED=false)');
+  } else if (!config.useRealtimeHF) {
+    logger.info('[predictive-orchestrator] Disabled (USE_REALTIME_HF=false required)');
+  }
+}
+
 
 
 // Warmup probe
@@ -426,6 +466,16 @@ if (config.useSubgraph && !config.useMockSubgraph && subgraphService) {
 const shutdown = async (signal: string) => {
   logger.info(`Received ${signal}, shutting down...`);
   subgraphPoller?.stop();
+  
+  // Stop predictive orchestrator if running
+  if (predictiveOrchestrator) {
+    try {
+      predictiveOrchestrator.stop();
+      logger.info('[predictive-orchestrator] Stopped');
+    } catch (err) {
+      logger.error('[predictive-orchestrator] Error stopping:', err);
+    }
+  }
   
   // Stop real-time HF service if running
   if (realtimeHFService) {
