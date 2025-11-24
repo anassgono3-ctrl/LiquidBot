@@ -235,7 +235,7 @@ if (config.useRealtimeHF) {
 }
 
 // Initialize predictive orchestrator (only when enabled via config and realtime HF is enabled)
-import { PredictiveOrchestrator, type PredictiveScenarioEvent } from './risk/PredictiveOrchestrator.js';
+import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
 
 let predictiveOrchestrator: PredictiveOrchestrator | undefined;
 
@@ -258,6 +258,33 @@ if (config.predictiveEnabled && config.useRealtimeHF) {
       }]);
     }
   });
+  
+  // Set up user provider for fallback evaluations using the candidate manager
+  if (realtimeHFService) {
+    const userProvider: UserSnapshotProvider = {
+      async getUserSnapshots(maxUsers: number) {
+        const manager = realtimeHFService!.getCandidateManager();
+        const allCandidates = manager.getAll();
+        
+        // Sort by ascending HF (lowest first) for better candidate density
+        const sortedCandidates = allCandidates
+          .filter(c => c.lastHF !== null && c.lastHF < 1.2) // Only include near-threshold candidates
+          .sort((a, b) => (a.lastHF ?? 1) - (b.lastHF ?? 1))
+          .slice(0, maxUsers);
+        
+        // Convert to UserSnapshot format
+        // Note: This is a simplified version - full reserve data would need to be fetched
+        return sortedCandidates.map(c => ({
+          address: c.address,
+          block: 0, // Block would need to be tracked from real-time service
+          reserves: [] // Reserves would need to be fetched separately for full HF calculation
+        }));
+      }
+    };
+    
+    predictiveOrchestrator.setUserProvider(userProvider);
+    logger.info('[predictive-orchestrator] User provider set from candidate manager');
+  }
   
   // Start the fallback evaluation timer
   predictiveOrchestrator.startFallbackTimer();
