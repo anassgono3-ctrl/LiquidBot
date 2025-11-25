@@ -446,8 +446,10 @@ export class PriceService {
     this.priceCache.set(resolvedSymbol, { price, timestamp: Date.now() });
     
     // Call onPriceUpdate callback if registered (for PredictiveOrchestrator)
+    // Note: Block number is not tracked in PriceService, pass 0 as placeholder
+    // PredictiveOrchestrator primarily uses timestamp for timing calculations
     if (this.onPriceUpdate) {
-      this.onPriceUpdate(resolvedSymbol, price, Date.now(), 0); // block number would need to be tracked
+      this.onPriceUpdate(resolvedSymbol, price, Date.now(), 0);
     }
 
     return price;

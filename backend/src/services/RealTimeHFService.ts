@@ -3764,6 +3764,14 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Prestage a predictive candidate using SprinterEngine
    * Called from PredictiveOrchestrator listener when shouldPrestage is true
+   * 
+   * FIXME: This is a placeholder implementation. Full integration requires:
+   * 1. Fetching user's actual debt/collateral tokens and amounts from AaveDataService
+   * 2. Getting current block number from provider
+   * 3. Getting price for debt token from PriceService
+   * 4. Calling sprinterEngine.prestageFromPredictive with actual values
+   * 
+   * See: Issue #XXX for tracking full Sprinter integration
    */
   async prestageFromPredictiveCandidate(
     userAddress: string,
@@ -3771,27 +3779,26 @@ export class RealTimeHFService extends EventEmitter {
     totalDebtUsd: number,
     scenario: string
   ): Promise<void> {
-    // This method would need SprinterEngine integration
-    // For now, we log that prestaging would happen here
-    // Full implementation would require:
-    // 1. Fetching user's actual debt/collateral tokens and amounts
-    // 2. Getting current block number
-    // 3. Getting price for debt token
-    // 4. Calling sprinterEngine.prestageFromPredictive with actual values
-    
     const normalized = normalizeAddress(userAddress);
     
     // eslint-disable-next-line no-console
     console.log(
       `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
       `projHf=${projectedHf.toFixed(4)} debtUsd=${totalDebtUsd.toFixed(2)} ` +
-      `(full implementation requires user position data)`
+      `(FIXME: placeholder - full implementation requires user position data)`
     );
     
-    // TODO: When SprinterEngine is fully wired:
-    // 1. Fetch user position details from AaveDataService
-    // 2. Extract debt/collateral token addresses and wei amounts
-    // 3. Get debt token price from PriceService
-    // 4. Call sprinterEngine.prestageFromPredictive(...)
+    // FIXME: When SprinterEngine is fully wired:
+    // const userPosition = await this.aaveDataService.getUserPosition(normalized);
+    // const debtToken = userPosition.largestDebtAsset;
+    // const collateralToken = userPosition.largestCollateralAsset;
+    // const debtWei = userPosition.debtAmounts[debtToken];
+    // const collateralWei = userPosition.collateralAmounts[collateralToken];
+    // const debtPriceUsd = await this.priceService.getPrice(debtToken);
+    // const currentBlock = await this.provider.getBlockNumber();
+    // this.sprinterEngine.prestageFromPredictive(
+    //   normalized, debtToken, collateralToken, debtWei, collateralWei,
+    //   projectedHf, currentBlock, debtPriceUsd
+    // );
   }
 }

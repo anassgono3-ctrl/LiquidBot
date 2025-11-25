@@ -14,7 +14,9 @@ import {
   registry,
   actionableOpportunitiesTotal,
   skippedUnresolvedPlanTotal,
-  initMetricsOnce
+  initMetricsOnce,
+  predictiveMicroVerifyScheduledTotal,
+  predictivePrestagedTotal
 } from "./metrics/index.js";
 import { SubgraphService } from "./services/SubgraphService.js";
 import { startSubgraphPoller, SubgraphPollerHandle } from "./polling/subgraphPoller.js";
@@ -29,6 +31,7 @@ import { AtRiskScanner } from "./services/AtRiskScanner.js";
 import { RealTimeHFService } from "./services/RealTimeHFService.js";
 import type { LiquidatableEvent } from "./services/RealTimeHFService.js";
 import { StartupDiagnosticsService } from "./services/StartupDiagnostics.js";
+import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
 
 const logger = createLogger({
   level: "info",
@@ -138,12 +141,6 @@ const inflightExecutions = new Set<string>();
 
 // Initialize predictive orchestrator (only when enabled via config and realtime HF is enabled)
 // Must be created before RealTimeHFService so it can be passed in options
-import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
-import { 
-  predictiveMicroVerifyScheduledTotal, 
-  predictivePrestagedTotal 
-} from './metrics/index.js';
-
 let predictiveOrchestrator: PredictiveOrchestrator | undefined;
 
 if (config.predictiveEnabled && config.useRealtimeHF) {
