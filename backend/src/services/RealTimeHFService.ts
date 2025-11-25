@@ -91,6 +91,7 @@ export interface RealTimeHFServiceOptions {
   skipWsConnection?: boolean; // for testing
   notificationService?: NotificationService;
   priceService?: PriceService;
+  predictiveOrchestrator?: import('../risk/PredictiveOrchestrator.js').PredictiveOrchestrator;
 }
 
 export interface LiquidatableEvent {
@@ -144,6 +145,7 @@ export class RealTimeHFService extends EventEmitter {
   private microVerifier?: import('./MicroVerifier.js').MicroVerifier;
   private fastpathPublisher?: FastpathPublisher;
   private watchSet?: WatchSet;
+  private predictiveOrchestrator?: import('../risk/PredictiveOrchestrator.js').PredictiveOrchestrator;
   private isShuttingDown = false;
   private reconnectAttempts = 0;
   private readonly maxReconnectAttempts = 10;
@@ -322,6 +324,9 @@ export class RealTimeHFService extends EventEmitter {
     
     // Store price service for use in polling logic
     this.priceService = options.priceService;
+    
+    // Store predictive orchestrator for integration
+    this.predictiveOrchestrator = options.predictiveOrchestrator;
     
     // Initialize liquidation audit service if enabled
     if (config.liquidationAuditEnabled) {
@@ -3715,5 +3720,78 @@ export class RealTimeHFService extends EventEmitter {
    */
   getLowHFTracker(): LowHFTracker | undefined {
     return this.lowHfTracker;
+  }
+
+  /**
+   * Schedule micro-verify for a predictive candidate
+   * Called from PredictiveOrchestrator listener when shouldMicroVerify is true
+   */
+  async schedulePredictiveMicroVerify(
+    userAddress: string,
+    projectedHf: number,
+    scenario: string
+  ): Promise<void> {
+    if (!this.microVerifier || !config.microVerifyEnabled) {
+      return;
+    }
+
+    const normalized = normalizeAddress(userAddress);
+    
+    // Check if we can schedule this micro-verify
+    if (!this.microVerifier.canVerify(normalized)) {
+      return;
+    }
+
+    // Schedule the micro-verify
+    const result = await this.microVerifier.verify({
+      user: normalized,
+      trigger: 'proj_cross',
+      projectedHf: projectedHf
+    });
+
+    if (result && result.success) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[predictive-micro-verify] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+        `hf=${result.hf.toFixed(4)} latencyMs=${result.latencyMs}`
+      );
+      
+      // Update candidate manager with fresh HF
+      this.candidateManager.add(normalized, result.hf);
+    }
+  }
+
+  /**
+   * Prestage a predictive candidate using SprinterEngine
+   * Called from PredictiveOrchestrator listener when shouldPrestage is true
+   */
+  async prestageFromPredictiveCandidate(
+    userAddress: string,
+    projectedHf: number,
+    totalDebtUsd: number,
+    scenario: string
+  ): Promise<void> {
+    // This method would need SprinterEngine integration
+    // For now, we log that prestaging would happen here
+    // Full implementation would require:
+    // 1. Fetching user's actual debt/collateral tokens and amounts
+    // 2. Getting current block number
+    // 3. Getting price for debt token
+    // 4. Calling sprinterEngine.prestageFromPredictive with actual values
+    
+    const normalized = normalizeAddress(userAddress);
+    
+    // eslint-disable-next-line no-console
+    console.log(
+      `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+      `projHf=${projectedHf.toFixed(4)} debtUsd=${totalDebtUsd.toFixed(2)} ` +
+      `(full implementation requires user position data)`
+    );
+    
+    // TODO: When SprinterEngine is fully wired:
+    // 1. Fetch user position details from AaveDataService
+    // 2. Extract debt/collateral token addresses and wei amounts
+    // 3. Get debt token price from PriceService
+    // 4. Call sprinterEngine.prestageFromPredictive(...)
   }
 }

@@ -109,6 +109,9 @@ export class PriceService {
   
   // Per-block price coalescing: guarantee one price resolution per symbol per blockTag
   private perBlockPriceCache: Map<string, { price: number; timestamp: number }> = new Map(); // key: symbol-blockTag
+  
+  // Price update callback for wiring to PredictiveOrchestrator
+  public onPriceUpdate?: (asset: string, price: number, timestamp: number, block: number) => void;
 
   /**
    * Default price mappings for common tokens (USD per token)
@@ -441,6 +444,11 @@ export class PriceService {
 
     // Cache the result (using resolved symbol)
     this.priceCache.set(resolvedSymbol, { price, timestamp: Date.now() });
+    
+    // Call onPriceUpdate callback if registered (for PredictiveOrchestrator)
+    if (this.onPriceUpdate) {
+      this.onPriceUpdate(resolvedSymbol, price, Date.now(), 0); // block number would need to be tracked
+    }
 
     return price;
   }

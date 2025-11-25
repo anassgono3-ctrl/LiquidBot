@@ -132,18 +132,34 @@ if (config.useSubgraph && config.atRiskScanLimit > 0 && subgraphService) {
   logger.info('[at-risk-scanner] Disabled (requires USE_SUBGRAPH=true and AT_RISK_SCAN_LIMIT>0)');
 }
 
-// Initialize real-time HF service (only when enabled via config)
-let realtimeHFService: RealTimeHFService | undefined;
-
 // Per-block dedupe and in-flight execution tracking
 const lastNotifiedBlock = new Map<string, number>();
 const inflightExecutions = new Set<string>();
+
+// Initialize predictive orchestrator (only when enabled via config and realtime HF is enabled)
+// Must be created before RealTimeHFService so it can be passed in options
+import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
+import { 
+  predictiveMicroVerifyScheduledTotal, 
+  predictivePrestagedTotal 
+} from './metrics/index.js';
+
+let predictiveOrchestrator: PredictiveOrchestrator | undefined;
+
+if (config.predictiveEnabled && config.useRealtimeHF) {
+  predictiveOrchestrator = new PredictiveOrchestrator();
+  logger.info('[predictive-orchestrator] Created (will wire after RealTimeHFService initialization)');
+}
+
+// Initialize real-time HF service (only when enabled via config)
+let realtimeHFService: RealTimeHFService | undefined;
 
 if (config.useRealtimeHF) {
   realtimeHFService = new RealTimeHFService({ 
     subgraphService, 
     notificationService, 
-    priceService 
+    priceService,
+    predictiveOrchestrator 
   });
   
   // Handle liquidatable events
@@ -230,37 +246,67 @@ if (config.useRealtimeHF) {
   });
   
   logger.info('[realtime-hf] Service initialized and will start when server starts');
-} else {
-  logger.info('[realtime-hf] Disabled (USE_REALTIME_HF=false)');
-}
-
-// Initialize predictive orchestrator (only when enabled via config and realtime HF is enabled)
-import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
-
-let predictiveOrchestrator: PredictiveOrchestrator | undefined;
-
-if (config.predictiveEnabled && config.useRealtimeHF) {
-  predictiveOrchestrator = new PredictiveOrchestrator();
   
-  // Wire up the predictive orchestrator listener to route candidates to RealTimeHFService
-  predictiveOrchestrator.addListener({
-    async onPredictiveCandidate(event: PredictiveScenarioEvent): Promise<void> {
-      if (!realtimeHFService) return;
-      
-      // Ingest candidate into the realtime HF service's queue
-      realtimeHFService.ingestPredictiveCandidates([{
-        address: event.candidate.address,
-        scenario: event.candidate.scenario,
-        hfCurrent: event.candidate.hfCurrent,
-        hfProjected: event.candidate.hfProjected,
-        etaSec: event.candidate.etaSec,
-        totalDebtUsd: event.candidate.totalDebtUsd
-      }]);
-    }
-  });
-  
-  // Set up user provider for fallback evaluations using the candidate manager
-  if (realtimeHFService) {
+  // Wire predictive orchestrator if both are enabled
+  if (predictiveOrchestrator) {
+    // Wire up the predictive orchestrator listener to route candidates to RealTimeHFService,
+    // MicroVerifier, and SprinterEngine
+    predictiveOrchestrator.addListener({
+      async onPredictiveCandidate(event: PredictiveScenarioEvent): Promise<void> {
+        if (!realtimeHFService) return;
+        
+        // 1. Ingest candidate into the realtime HF service's queue
+        realtimeHFService.ingestPredictiveCandidates([{
+          address: event.candidate.address,
+          scenario: event.candidate.scenario,
+          hfCurrent: event.candidate.hfCurrent,
+          hfProjected: event.candidate.hfProjected,
+          etaSec: event.candidate.etaSec,
+          totalDebtUsd: event.candidate.totalDebtUsd
+        }]);
+        
+        // 2. Schedule micro-verify if shouldMicroVerify is true
+        if (event.shouldMicroVerify) {
+          try {
+            await realtimeHFService.schedulePredictiveMicroVerify(
+              event.candidate.address,
+              event.candidate.hfProjected,
+              event.candidate.scenario
+            );
+            predictiveMicroVerifyScheduledTotal.inc({ scenario: event.candidate.scenario });
+            
+            logger.debug(
+              `[predictive-listener] micro-verify scheduled user=${event.candidate.address.slice(0, 10)}... ` +
+              `scenario=${event.candidate.scenario}`
+            );
+          } catch (err) {
+            logger.error(`[predictive-listener] Failed to schedule micro-verify:`, err);
+          }
+        }
+        
+        // 3. Call SprinterEngine.prestageFromPredictive if shouldPrestage is true
+        if (event.shouldPrestage && config.sprinterEnabled) {
+          try {
+            await realtimeHFService.prestageFromPredictiveCandidate(
+              event.candidate.address,
+              event.candidate.hfProjected,
+              event.candidate.totalDebtUsd,
+              event.candidate.scenario
+            );
+            predictivePrestagedTotal.inc({ scenario: event.candidate.scenario });
+            
+            logger.debug(
+              `[predictive-listener] prestage called user=${event.candidate.address.slice(0, 10)}... ` +
+              `scenario=${event.candidate.scenario} debtUsd=${event.candidate.totalDebtUsd.toFixed(2)}`
+            );
+          } catch (err) {
+            logger.error(`[predictive-listener] Failed to prestage from predictive:`, err);
+          }
+        }
+      }
+    });
+    
+    // Set up user provider for fallback evaluations using the candidate manager
     const userProvider: UserSnapshotProvider = {
       async getUserSnapshots(maxUsers: number) {
         const manager = realtimeHFService!.getCandidateManager();
@@ -284,19 +330,29 @@ if (config.predictiveEnabled && config.useRealtimeHF) {
     
     predictiveOrchestrator.setUserProvider(userProvider);
     logger.info('[predictive-orchestrator] User provider set from candidate manager');
+    
+    // Wire PriceService to predictive orchestrator for price updates
+    if (priceService) {
+      // Add price update listener to feed predictive orchestrator
+      priceService.onPriceUpdate = (asset: string, price: number, timestamp: number, block: number) => {
+        if (predictiveOrchestrator) {
+          predictiveOrchestrator.updatePrice(asset, price, timestamp, block);
+        }
+      };
+      logger.info('[predictive-orchestrator] Wired to PriceService for price updates');
+    }
+    
+    // Start the fallback evaluation timer
+    predictiveOrchestrator.startFallbackTimer();
+    
+    logger.info(
+      `[predictive-orchestrator] Initialized with fallback intervals: ` +
+      `blocks=${config.predictiveFallbackIntervalBlocks}, ms=${config.predictiveFallbackIntervalMs}`
+    );
   }
-  
-  // Start the fallback evaluation timer
-  predictiveOrchestrator.startFallbackTimer();
-  
-  logger.info(
-    `[predictive-orchestrator] Initialized with fallback intervals: ` +
-    `blocks=${config.predictiveFallbackIntervalBlocks}, ms=${config.predictiveFallbackIntervalMs}`
-  );
 } else {
-  if (!config.predictiveEnabled) {
-    logger.info('[predictive-orchestrator] Disabled (PREDICTIVE_ENABLED=false)');
-  } else if (!config.useRealtimeHF) {
+  logger.info('[realtime-hf] Disabled (USE_REALTIME_HF=false)');
+  if (config.predictiveEnabled) {
     logger.info('[predictive-orchestrator] Disabled (USE_REALTIME_HF=false required)');
   }
 }
