@@ -614,6 +614,236 @@ Micro-verification works alongside:
 - Increase `MICRO_VERIFY_INTERVAL_MS` for throttling
 - Reduce `RESERVE_FAST_SUBSET_MAX` for reserve events
 
+---
+
+## Predictive Engine, Borrowers Index, and Sprinter Integration
+
+### Overview
+
+The Real-time HF service integrates with three advanced components to provide predictive liquidation detection and ultra-low-latency execution paths:
+
+1. **Predictive Orchestrator** - Projects future health factors based on price movements and interest accrual
+2. **Borrowers Index** - Maintains per-reserve borrower sets for targeted rechecks
+3. **Sprinter Engine** - Pre-stages liquidation calldata for immediate execution
+
+### Predictive Orchestrator Wiring
+
+The `PredictiveOrchestrator` evaluates near-critical user positions and generates predictive candidates when conditions indicate imminent liquidation risk.
+
+**Data Flow:**
+```
+PriceService (price updates)
+     │
+     ├─> PredictiveOrchestrator.updatePrice()
+     │
+     └─> PredictiveOrchestrator.evaluate(users, block)
+            │
+            ├─> Generate PredictiveCandidate[]
+            │
+            └─> Fire predictive events to listeners
+                   │
+                   ├─> RealTimeHFService.ingestPredictiveCandidates()
+                   ├─> RealTimeHFService.schedulePredictiveMicroVerify()
+                   └─> RealTimeHFService.prestageFromPredictiveCandidate()
+```
+
+**Configuration:**
+```bash
+# Enable predictive engine
+PREDICTIVE_ENABLED=true
+
+# HF buffer for predictive candidates (basis points)
+PREDICTIVE_HF_BUFFER_BPS=40  # 0.40%
+
+# Max users evaluated per tick
+PREDICTIVE_MAX_USERS_PER_TICK=800
+
+# Prediction horizon (seconds)
+PREDICTIVE_HORIZON_SEC=180  # 3 minutes
+
+# Scenarios to evaluate (baseline, adverse, extreme)
+PREDICTIVE_SCENARIOS=baseline,adverse,extreme
+
+# Enable queueing of predictive candidates
+PREDICTIVE_QUEUE_ENABLED=true
+
+# Enable micro-verification for predictive candidates
+PREDICTIVE_MICRO_VERIFY_ENABLED=true
+
+# Enable fast-path flagging
+PREDICTIVE_FASTPATH_ENABLED=false
+```
+
+**Integration Points:**
+
+1. **Price Updates**: `PriceService` calls `onPriceUpdate` callback to feed price changes to the orchestrator
+2. **User Snapshots**: Candidate manager provides near-threshold users for periodic evaluation
+3. **Event Emission**: Orchestrator emits `PredictiveScenarioEvent` for each qualifying candidate
+4. **Action Routing**: 
+   - `shouldMicroVerify` → schedules single-user HF verification
+   - `shouldPrestage` → calls Sprinter pre-staging for immediate execution readiness
+   - Always → ingests into RealTimeHF queue for tracking
+
+**Metrics:**
+- `liquidbot_predictive_ingested_total{scenario}` - Candidates ingested per scenario
+- `liquidbot_predictive_micro_verify_scheduled_total{scenario}` - Micro-verifications scheduled
+- `liquidbot_predictive_prestaged_total{scenario}` - Pre-staged candidates
+
+### Borrowers Index Service
+
+The `BorrowersIndexService` maintains persistent per-reserve borrower sets by indexing variableDebt token Transfer events. This enables targeted rechecks when reserve data or prices change.
+
+**Storage Modes:**
+- `memory` - In-memory only (default, no persistence)
+- `redis` - Persistent storage via Redis (recommended for production)
+- `postgres` - Persistent storage via PostgreSQL
+
+**Redis Mode Configuration:**
+```bash
+# Enable Borrowers Index
+BORROWERS_INDEX_ENABLED=true
+
+# Storage mode (memory, redis, postgres)
+BORROWERS_INDEX_MODE=redis
+
+# Redis URL for storage (optional, uses REDIS_URL if not specified)
+BORROWERS_INDEX_REDIS_URL=redis://localhost:6379
+
+# Max borrowers tracked per reserve
+BORROWERS_INDEX_MAX_USERS_PER_RESERVE=3000
+
+# Historical backfill range (blocks)
+BORROWERS_INDEX_BACKFILL_BLOCKS=400000
+
+# Backfill chunk size (blocks per batch)
+BORROWERS_INDEX_CHUNK_BLOCKS=2000
+```
+
+**Targeted Reserve Rechecks:**
+
+When a `ReserveDataUpdated` event or price change affects a reserve:
+
+1. Fetch borrowers for that reserve from `BorrowersIndexService`
+2. Intersect with near-critical cache (users with `lastHF < 1.02`)
+3. Execute fast subset via micro-verify or mini-multicall (before broad sweeps)
+4. Schedule broader sample of reserve borrowers for standard batch check
+
+**Metrics:**
+- `liquidbot_reserve_rechecks_total{asset,source}` - Reserve-targeted rechecks
+- `liquidbot_subset_intersection_size{trigger}` - Near-critical ∩ reserve borrowers size
+- `liquidbot_reserve_event_to_first_microverify_ms{reserve}` - Latency from event to first verification
+
+**Fallback Behavior:**
+
+If Redis connection fails during initialization, the service automatically falls back to memory mode and logs a warning. No intervention required.
+
+### Sprinter Engine Integration
+
+The `SprinterEngine` pre-stages liquidation candidates with HF < `PRESTAGE_HF_BPS` to minimize execution latency.
+
+**Configuration:**
+```bash
+# Enable Sprinter pre-staging
+SPRINTER_ENABLED=true
+
+# Pre-staging HF threshold (basis points)
+PRESTAGE_HF_BPS=10200  # 1.02
+
+# Max pre-staged candidates
+SPRINTER_MAX_PRESTAGED=1000
+
+# Stale blocks threshold
+SPRINTER_STALE_BLOCKS=10
+
+# Minimum debt USD for pre-staging
+MIN_DEBT_USD=50
+```
+
+**Pre-staging Flow:**
+
+When a predictive candidate qualifies (`event.shouldPrestage`):
+1. Extract user's debt and collateral token addresses
+2. Fetch current debt/collateral amounts (wei)
+3. Get debt token USD price
+4. Call `SprinterEngine.prestageFromPredictive()` with actual values
+
+**Current Implementation Status:**
+
+The `prestageFromPredictiveCandidate()` method is wired but contains a placeholder implementation. Full integration requires:
+- Fetching user position details from `AaveDataService`
+- Extracting debt/collateral token addresses and amounts
+- Calling actual `SprinterEngine.prestageFromPredictive()` method
+
+**Metrics:**
+- `liquidbot_predictive_prestaged_total{scenario}` - Pre-staged from predictive scenarios
+
+### Wiring Summary
+
+**Initialization Order:**
+1. Create `PredictiveOrchestrator` (if `PREDICTIVE_ENABLED=true`)
+2. Create `RealTimeHFService` with `predictiveOrchestrator` in options
+3. Wire `PredictiveOrchestrator` listener to call RealTimeHF methods
+4. Wire `PriceService.onPriceUpdate` to feed orchestrator
+5. Set user provider from candidate manager
+6. Start orchestrator fallback timer
+
+**Runtime Flow:**
+
+**On Price Update:**
+```
+PriceService.getPrice() 
+  → PriceService.onPriceUpdate callback
+  → PredictiveOrchestrator.updatePrice()
+  → (triggers evaluation if conditions met)
+```
+
+**On ReserveDataUpdated Event:**
+```
+RealTimeHFService receives event
+  → BorrowersIndexService.getBorrowers(reserve)
+  → Intersect with nearThresholdUsers
+  → Mini-multicall on fast subset
+  → Standard batch on broader sample
+  → Record reserve_rechecks_total metric
+```
+
+**On Predictive Evaluation:**
+```
+PredictiveOrchestrator.evaluate(users)
+  → Generate PredictiveCandidate[]
+  → Fire onPredictiveCandidate events
+     ├─> ingestPredictiveCandidates()
+     ├─> schedulePredictiveMicroVerify() (if shouldMicroVerify)
+     └─> prestageFromPredictiveCandidate() (if shouldPrestage)
+```
+
+### Monitoring
+
+**Key Logs to Watch:**
+```
+[predictive-orchestrator] run block=... reason=... usersEvaluated=... candidates=...
+[predictive-listener] micro-verify scheduled user=... scenario=...
+[predictive-listener] prestage called user=... scenario=... debtUsd=...
+[fast-lane] [reserve-fast-subset] asset=... size=... via micro-verify
+[reserve-recheck] Checking .../... borrowers for reserve ... (source=...)
+[borrowers-index] Initialized with N reserves
+[borrowers-index] Redis connection failed, falling back to memory mode
+```
+
+**Health Check:**
+```bash
+# Check predictive metrics
+curl localhost:3000/metrics | grep predictive
+
+# Check borrowers index status
+curl localhost:3000/metrics | grep borrowers_index
+
+# Check reserve recheck metrics
+curl localhost:3000/metrics | grep reserve_rechecks
+```
+
+---
+
 ## Future Enhancements
 
 - **Auto Close Factor:** Dynamic computation based on asset type
@@ -621,6 +851,7 @@ Micro-verification works alongside:
 - **Multi-Chain Support:** Extend to other Aave V3 deployments
 - **Advanced Eviction:** ML-based candidate prioritization
 - **Sub-Block Execution:** Full Flashblocks integration for mempool visibility
+- **Full Sprinter Integration:** Complete user position fetching for prestaging
 
 ---
 
@@ -642,5 +873,7 @@ The Real-time HF Detection system provides a **low-latency, opt-in** liquidation
 - **Production-ready:** Includes reconnect logic, metrics, and safety checks
 - **Efficient:** Multicall3 batching + event-driven checks
 - **Extensible:** Supports Flashblocks, Chainlink feeds, and future enhancements
+- **Predictive:** Integrates predictive HF projections for proactive detection
+- **Targeted:** Uses per-reserve borrower indexing for efficient rechecks
 
 Enable with confidence, monitor actively, rollback instantly if needed.
