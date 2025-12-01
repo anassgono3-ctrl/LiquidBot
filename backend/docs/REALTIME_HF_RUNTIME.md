@@ -85,6 +85,22 @@ The subgraph continues to serve as a **seeding source only**, populating the ini
 
 ---
 
+## Predictive Orchestrator Wiring
+
+The Predictive HF Orchestrator integrates with RealTimeHFService for pre-emptive liquidation detection:
+
+1. **Price updates**: PriceService calls `predictiveOrchestrator.updatePrice()` on every Chainlink event, feeding price changes into projection engine
+2. **Real reserve data**: UserSnapshotProvider fetches actual reserve data (collateralUsd, debtUsd, liquidationThreshold) from AaveDataService for accurate HF projections
+3. **Targeted evaluation**: Evaluates three candidate slices: (a) head-start near-critical (HF < 1.02), (b) price-touched users, (c) reserve-targeted borrowers via BorrowersIndexService
+4. **Micro-verification**: When `PREDICTIVE_MICRO_VERIFY_ENABLED=true` and projected HF < 1.0 + buffer, schedules immediate single-user HF check (respects per-block caps)
+5. **Sprinter pre-staging**: When `SPRINTER_ENABLED=true` and projected HF ≤ `PRESTAGE_HF_BPS/10000`, calls sprinterEngine with real debt/collateral token addresses and amounts from user snapshots
+6. **BorrowersIndex subsets**: On ReserveDataUpdated/price events, fetches impacted borrowers, intersects with near-critical cache, runs mini-multicall subset BEFORE broad sweep (latency ~50-100ms)
+7. **Classification audit**: Distinguishes late_detection (no HF<1 sample) from late_send (sample existed but no attempt); only marks raced when we attempted and lost
+
+Metrics: `predictive_micro_verify_scheduled_total`, `predictive_prestaged_total`, `subset_intersection_size`, `reserve_event_to_microverify_ms`
+
+---
+
 ## Configuration
 
 ### Environment Variables
