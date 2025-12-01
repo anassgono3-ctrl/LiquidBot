@@ -20,6 +20,8 @@ import { ProfitEstimator } from './ProfitEstimator.js';
 export type MissReason =
   | 'not_in_watch_set'
   | 'raced'
+  | 'late_detection'
+  | 'late_send'
   | 'hf_transient'
   | 'insufficient_profit'
   | 'execution_filtered'
@@ -167,25 +169,33 @@ export class LiquidationMissClassifier {
     const decision = this.executionDecisions.findDecision(userLower, eventTimestamp);
 
     if (!decision) {
-      notes.push('No execution decision found - likely raced by competitor');
+      // No execution decision found - classify based on whether we had HF<1 sample
       
-      // Check for HF transience
-      if (blocksSinceFirstSeen !== undefined && blocksSinceFirstSeen <= this.config.transientBlocks) {
-        notes.push(`Liquidatable for only ${blocksSinceFirstSeen} blocks (threshold: ${this.config.transientBlocks})`);
+      if (!firstSeen) {
+        // No HF<1 sample before TX - late detection
+        notes.push('No execution decision found - late detection (never saw HF<1 before liquidation)');
         this.clearFirstSeen(user);
         return {
-          reason: 'hf_transient',
+          reason: 'late_detection' as MissReason,
+          blocksSinceFirstSeen,
+          notes
+        };
+      } else {
+        // HF<1 sample existed but no attempt - late send
+        notes.push(`HF<1 sample existed (block ${firstSeen.blockNumber}, HF=${firstSeen.hf.toFixed(4)}) but no execution attempt - late send`);
+        
+        // Check for HF transience as additional context
+        if (blocksSinceFirstSeen !== undefined && blocksSinceFirstSeen <= this.config.transientBlocks) {
+          notes.push(`Liquidatable for only ${blocksSinceFirstSeen} blocks (threshold: ${this.config.transientBlocks}) - possibly too quick`);
+        }
+        
+        this.clearFirstSeen(user);
+        return {
+          reason: 'late_send' as MissReason,
           blocksSinceFirstSeen,
           notes
         };
       }
-
-      this.clearFirstSeen(user);
-      return {
-        reason: 'raced',
-        blocksSinceFirstSeen,
-        notes
-      };
     }
 
     // We have a decision - classify based on type and reason
