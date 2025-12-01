@@ -40,7 +40,11 @@ import {
   headstartLatencyMs,
   priceFeedEventsTotal,
   predictiveMicroVerifyScheduledTotal,
-  predictivePrestagedTotal
+  predictivePrestagedTotal,
+  subsetIntersectionSize,
+  reserveEventToMicroVerifyMs,
+  realtimePriceEmergencyScansTotal,
+  emergencyScanLatency
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
 import { normalizeAddress } from '../utils/Address.js';
@@ -1287,7 +1291,6 @@ export class RealTimeHFService extends EventEmitter {
             const targetedSubset = reserveBorrowers.filter(addr => nearCriticalSet.has(addr.toLowerCase()));
             
             // Record metrics for targeted subset
-            const { subsetIntersectionSize, reserveEventToMicroVerifyMs } = await import('../metrics/index.js');
             subsetIntersectionSize.observe({ trigger: 'reserve' }, targetedSubset.length);
             
             // Watched fast-path: check watched users with exposure to this reserve
@@ -1642,12 +1645,6 @@ export class RealTimeHFService extends EventEmitter {
       const startReserveEvent = Date.now();
       
       // Increment metric
-      const { 
-        realtimePriceEmergencyScansTotal, 
-        emergencyScanLatency,
-        subsetIntersectionSize,
-        reserveEventToMicroVerifyMs
-      } = await import('../metrics/index.js');
       realtimePriceEmergencyScansTotal.inc({ asset: symbol });
       
       // If BorrowersIndexService is available, fetch impacted borrowers and run targeted subset
@@ -3792,6 +3789,9 @@ export class RealTimeHFService extends EventEmitter {
         if (candidate.hfProjected < microVerifyThreshold) {
           // Respect per-block caps via canVerify
           if (this.microVerifier.canVerify(normalized)) {
+            // Increment metric before scheduling (not after success)
+            predictiveMicroVerifyScheduledTotal.inc({ scenario: candidate.scenario });
+            
             // Fire-and-forget to avoid blocking ingestion
             this.microVerifier.verify({
               user: normalized,
@@ -3804,7 +3804,6 @@ export class RealTimeHFService extends EventEmitter {
                   `[predictive-micro-verify] user=${normalized.slice(0, 10)}... ` +
                   `scenario=${candidate.scenario} hf=${result.hf.toFixed(4)} latency=${result.latencyMs}ms`
                 );
-                predictiveMicroVerifyScheduledTotal.inc({ scenario: candidate.scenario });
               }
             }).catch(err => {
               console.error(`[predictive-micro-verify] Error:`, err);
@@ -4002,8 +4001,9 @@ export class RealTimeHFService extends EventEmitter {
         `block=${currentBlock}`
       );
       
-      // FIXME: When SprinterEngine is fully wired, call:
-      // this.sprinterEngine.prestageFromPredictive(
+      // TODO: Sprinter integration pending
+      // When SprinterEngine is available and wired, call:
+      // await this.sprinterEngine?.prestageFromPredictive(
       //   normalized,
       //   largestDebt.asset,
       //   largestCollateral.asset,
@@ -4022,7 +4022,9 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Prestage a predictive candidate using SprinterEngine
    * Called from PredictiveOrchestrator listener when shouldPrestage is true
-   * DEPRECATED: Use prestageFromPredictiveCandidateWithRealData instead
+   * 
+   * @deprecated Use prestageFromPredictiveCandidateWithRealData instead.
+   * This method delegates to the new implementation with real data.
    */
   async prestageFromPredictiveCandidate(
     userAddress: string,
