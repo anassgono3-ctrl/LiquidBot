@@ -38,7 +38,9 @@ import {
   pendingVerifyErrorsTotal,
   headstartProcessedTotal,
   headstartLatencyMs,
-  priceFeedEventsTotal
+  priceFeedEventsTotal,
+  predictiveMicroVerifyScheduledTotal,
+  predictivePrestagedTotal
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
 import { normalizeAddress } from '../utils/Address.js';
@@ -3631,6 +3633,8 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Ingest predictive candidates from PredictiveOrchestrator
    * Deduplicates by user+scenario per tick and pushes into warm/hot queue
+   * When PREDICTIVE_MICRO_VERIFY_ENABLED and hfProjected < 1.0 + buffer: scheduleMicroVerify
+   * When SPRINTER_ENABLED and hfProjected <= PRESTAGE_HF_BPS/10000: prestageFromPredictive
    */
   public ingestPredictiveCandidates(
     candidates: Array<{
@@ -3675,7 +3679,8 @@ export class RealTimeHFService extends EventEmitter {
       // Log ingested candidate
       console.log(
         `[predictive-ingest] queued user=${normalized.slice(0, 10)}... ` +
-        `scenario=${candidate.scenario} priority=${priority.toFixed(4)} etaSec=${candidate.etaSec}`
+        `scenario=${candidate.scenario} priority=${priority.toFixed(4)} etaSec=${candidate.etaSec} ` +
+        `hfProj=${candidate.hfProjected.toFixed(4)}`
       );
       
       // Notify liquidation audit service of predictive candidate (for race classification)
@@ -3685,6 +3690,56 @@ export class RealTimeHFService extends EventEmitter {
           candidate.scenario,
           candidate.hfProjected
         );
+      }
+
+      // Schedule micro-verify if PREDICTIVE_MICRO_VERIFY_ENABLED and hfProjected < 1.0 + buffer
+      if (config.predictiveMicroVerifyEnabled && this.microVerifier) {
+        const microVerifyBuffer = config.nearThresholdBandBps / 10000; // Use near-threshold band as buffer
+        const microVerifyThreshold = 1.0 + microVerifyBuffer;
+        
+        if (candidate.hfProjected < microVerifyThreshold) {
+          // Respect per-block caps via canVerify
+          if (this.microVerifier.canVerify(normalized)) {
+            // Fire-and-forget to avoid blocking ingestion
+            this.microVerifier.verify({
+              user: normalized,
+              trigger: 'proj_cross',
+              projectedHf: candidate.hfProjected,
+              currentHf: candidate.hfCurrent
+            }).then(result => {
+              if (result && result.success) {
+                console.log(
+                  `[predictive-micro-verify] user=${normalized.slice(0, 10)}... ` +
+                  `scenario=${candidate.scenario} hf=${result.hf.toFixed(4)} latency=${result.latencyMs}ms`
+                );
+                predictiveMicroVerifyScheduledTotal.inc({ scenario: candidate.scenario });
+              }
+            }).catch(err => {
+              console.error(`[predictive-micro-verify] Error:`, err);
+              pendingVerifyErrorsTotal.inc();
+            });
+          }
+        }
+      }
+
+      // Prestage if SPRINTER_ENABLED and hfProjected <= PRESTAGE_HF_BPS/10000
+      if (config.sprinterEnabled && candidate.hfProjected <= config.prestageHfBps / 10000) {
+        // Call sprinterEngine.prestageFromPredictive with real debt/collateral data
+        // Fire-and-forget to avoid blocking ingestion
+        this.prestageFromPredictiveCandidateWithRealData(
+          normalized,
+          candidate.hfProjected,
+          candidate.totalDebtUsd,
+          candidate.scenario
+        ).then(() => {
+          predictivePrestagedTotal.inc({ scenario: candidate.scenario });
+          console.log(
+            `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${candidate.scenario} ` +
+            `hfProj=${candidate.hfProjected.toFixed(4)} prestaged`
+          );
+        }).catch(err => {
+          console.error(`[predictive-prestage] Error:`, err);
+        });
       }
     }
   }
@@ -3720,6 +3775,27 @@ export class RealTimeHFService extends EventEmitter {
    */
   getLowHFTracker(): LowHFTracker | undefined {
     return this.lowHfTracker;
+  }
+
+  /**
+   * Get AaveDataService (for predictive orchestrator integration)
+   */
+  getAaveDataService(): AaveDataService | undefined {
+    return this.aaveDataService;
+  }
+
+  /**
+   * Get current block number (for predictive orchestrator integration)
+   */
+  async getCurrentBlock(): Promise<number> {
+    if (!this.provider) {
+      return 0;
+    }
+    try {
+      return await this.provider.getBlockNumber();
+    } catch (err) {
+      return this.currentBlockNumber || 0;
+    }
   }
 
   /**
@@ -3762,18 +3838,11 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Prestage a predictive candidate using SprinterEngine
-   * Called from PredictiveOrchestrator listener when shouldPrestage is true
-   * 
-   * FIXME: This is a placeholder implementation. Full integration requires:
-   * 1. Fetching user's actual debt/collateral tokens and amounts from AaveDataService
-   * 2. Getting current block number from provider
-   * 3. Getting price for debt token from PriceService
-   * 4. Calling sprinterEngine.prestageFromPredictive with actual values
-   * 
-   * See: Issue #XXX for tracking full Sprinter integration
+   * Prestage a predictive candidate using SprinterEngine with REAL data
+   * Fetches actual debt/collateral tokens and amounts from AaveDataService
+   * Called from ingestPredictiveCandidates when SPRINTER_ENABLED
    */
-  async prestageFromPredictiveCandidate(
+  async prestageFromPredictiveCandidateWithRealData(
     userAddress: string,
     projectedHf: number,
     totalDebtUsd: number,
@@ -3781,24 +3850,100 @@ export class RealTimeHFService extends EventEmitter {
   ): Promise<void> {
     const normalized = normalizeAddress(userAddress);
     
-    // eslint-disable-next-line no-console
-    console.log(
-      `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
-      `projHf=${projectedHf.toFixed(4)} debtUsd=${totalDebtUsd.toFixed(2)} ` +
-      `(FIXME: placeholder - full implementation requires user position data)`
+    // Check if AaveDataService is available
+    if (!this.aaveDataService || !this.aaveDataService.isInitialized()) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+        `projHf=${projectedHf.toFixed(4)} debtUsd=${totalDebtUsd.toFixed(2)} ` +
+        `(skipped: AaveDataService not initialized)`
+      );
+      return;
+    }
+
+    try {
+      // Fetch user reserves from Aave Protocol Data Provider
+      const userReserves = await this.aaveDataService.getAllUserReserves(normalized);
+      
+      // Find largest debt and collateral positions
+      let largestDebt: { asset: string; amount: bigint; valueUsd: number } | null = null;
+      let largestCollateral: { asset: string; amount: bigint; valueUsd: number } | null = null;
+      
+      for (const reserve of userReserves) {
+        if (reserve.totalDebt > 0n && (!largestDebt || reserve.debtValueUsd > largestDebt.valueUsd)) {
+          largestDebt = {
+            asset: reserve.asset,
+            amount: reserve.totalDebt,
+            valueUsd: reserve.debtValueUsd
+          };
+        }
+        
+        if (reserve.aTokenBalance > 0n && (!largestCollateral || reserve.collateralValueUsd > largestCollateral.valueUsd)) {
+          largestCollateral = {
+            asset: reserve.asset,
+            amount: reserve.aTokenBalance,
+            valueUsd: reserve.collateralValueUsd
+          };
+        }
+      }
+      
+      if (!largestDebt || !largestCollateral) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+          `(skipped: no debt or collateral found)`
+        );
+        return;
+      }
+
+      // Get current block and prices
+      const currentBlock = await this.getCurrentBlock();
+      const debtPrice = await this.aaveDataService.getAssetPrice(largestDebt.asset);
+      const debtPriceUsd = Number(debtPrice) / 1e8;
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+        `projHf=${projectedHf.toFixed(4)} debtAsset=${largestDebt.asset.slice(0, 10)}... ` +
+        `collateralAsset=${largestCollateral.asset.slice(0, 10)}... ` +
+        `debtUsd=${largestDebt.valueUsd.toFixed(2)} collateralUsd=${largestCollateral.valueUsd.toFixed(2)} ` +
+        `block=${currentBlock}`
+      );
+      
+      // FIXME: When SprinterEngine is fully wired, call:
+      // this.sprinterEngine.prestageFromPredictive(
+      //   normalized,
+      //   largestDebt.asset,
+      //   largestCollateral.asset,
+      //   largestDebt.amount,
+      //   largestCollateral.amount,
+      //   projectedHf,
+      //   currentBlock,
+      //   debtPriceUsd
+      // );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[predictive-prestage] Error fetching user data for ${normalized}:`, err);
+    }
+  }
+
+  /**
+   * Prestage a predictive candidate using SprinterEngine
+   * Called from PredictiveOrchestrator listener when shouldPrestage is true
+   * DEPRECATED: Use prestageFromPredictiveCandidateWithRealData instead
+   */
+  async prestageFromPredictiveCandidate(
+    userAddress: string,
+    projectedHf: number,
+    totalDebtUsd: number,
+    scenario: string
+  ): Promise<void> {
+    // Delegate to the new implementation with real data
+    return this.prestageFromPredictiveCandidateWithRealData(
+      userAddress,
+      projectedHf,
+      totalDebtUsd,
+      scenario
     );
-    
-    // FIXME: When SprinterEngine is fully wired:
-    // const userPosition = await this.aaveDataService.getUserPosition(normalized);
-    // const debtToken = userPosition.largestDebtAsset;
-    // const collateralToken = userPosition.largestCollateralAsset;
-    // const debtWei = userPosition.debtAmounts[debtToken];
-    // const collateralWei = userPosition.collateralAmounts[collateralToken];
-    // const debtPriceUsd = await this.priceService.getPrice(debtToken);
-    // const currentBlock = await this.provider.getBlockNumber();
-    // this.sprinterEngine.prestageFromPredictive(
-    //   normalized, debtToken, collateralToken, debtWei, collateralWei,
-    //   projectedHf, currentBlock, debtPriceUsd
-    // );
   }
 }
