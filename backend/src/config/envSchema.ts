@@ -532,7 +532,13 @@ export const rawEnvSchema = z.object({
   // Enable detailed fast-path logging
   FASTPATH_LOG_DETAIL: z.string().optional(),
   // Enable fast-path latency metrics (Prometheus)
-  FASTPATH_LATENCY_METRICS: z.string().optional()
+  FASTPATH_LATENCY_METRICS: z.string().optional(),
+  
+  // ==== FILE LOGGING CONFIGURATION ====
+  // Enable file logging with daily rotation
+  LOG_FILE_ENABLED: z.string().optional(),
+  // File log retention in hours (default: 8)
+  LOG_FILE_RETENTION_HOURS: z.string().optional()
 });
 
 export const env = (() => {
@@ -992,6 +998,10 @@ export const env = (() => {
     
     // Tier 0: Address Normalization
     addressNormalizeLowercase: (parsed.ADDRESS_NORMALIZE_LOWERCASE || 'true').toLowerCase() === 'true',
+    
+    // File logging configuration
+    logFileEnabled: (parsed.LOG_FILE_ENABLED || 'false').toLowerCase() === 'true',
+    logFileRetentionHours: Number(parsed.LOG_FILE_RETENTION_HOURS || 8),
     
     // Tier 1: Index Jump Prediction
     indexJumpBpsTrigger: Number(parsed.INDEX_JUMP_BPS_TRIGGER || 3),

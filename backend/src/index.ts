@@ -1,8 +1,11 @@
 import { createServer } from "http";
+import { mkdirSync } from "fs";
+import { join } from "path";
 
 import express from "express";
 import cors from "cors";
 import { createLogger, format, transports } from "winston";
+import DailyRotateFile from "winston-daily-rotate-file";
 import { gql, GraphQLClient } from 'graphql-request';
 
 import { config } from "./config/index.js";
@@ -35,10 +38,44 @@ import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshot
 import type { UserSnapshot, ReserveData } from './risk/HFCalculator.js';
 import type { AaveDataService } from './services/AaveDataService.js';
 
+// Configure logger with optional file transport
+const loggerTransports: any[] = [new transports.Console()];
+
+// Add file transport if enabled
+if (config.logFileEnabled) {
+  // Ensure logs directory exists
+  const logsDir = join(process.cwd(), 'logs');
+  try {
+    mkdirSync(logsDir, { recursive: true });
+  } catch (err) {
+    console.error('[logger] Failed to create logs directory:', err);
+  }
+  
+  // Calculate retention in days from hours (minimum 1 day)
+  const retentionDays = Math.max(1, Math.ceil(config.logFileRetentionHours / 24));
+  
+  // Add rotating file transport
+  const fileTransport = new DailyRotateFile({
+    filename: join(logsDir, 'bot-%DATE%.log'),
+    datePattern: 'YYYY-MM-DD-HH', // Hourly rotation
+    maxSize: '50m', // Max 50MB per file
+    maxFiles: `${retentionDays}d`, // Retention based on config
+    format: format.combine(
+      format.timestamp(),
+      format.json()
+    ),
+    auditFile: join(logsDir, '.audit.json')
+  });
+  
+  loggerTransports.push(fileTransport);
+  
+  console.log(`[logger] File logging enabled: logs/bot-*.log (retention: ${config.logFileRetentionHours}h)`);
+}
+
 const logger = createLogger({
   level: "info",
   format: format.combine(format.timestamp(), format.json()),
-  transports: [new transports.Console()],
+  transports: loggerTransports,
 });
 
 /**

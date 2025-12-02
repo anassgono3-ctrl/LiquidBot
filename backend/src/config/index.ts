@@ -489,5 +489,9 @@ export const config = {
   get criticalLanePublishMinHf() { return env.criticalLanePublishMinHf; },
   get criticalLaneMinExecuteHf() { return env.criticalLaneMinExecuteHf; },
   get fastpathLogDetail() { return env.fastpathLogDetail; },
-  get fastpathLatencyMetrics() { return env.fastpathLatencyMetrics; }
+  get fastpathLatencyMetrics() { return env.fastpathLatencyMetrics; },
+  
+  // File logging configuration
+  get logFileEnabled() { return env.logFileEnabled; },
+  get logFileRetentionHours() { return env.logFileRetentionHours; }
 };
