@@ -35,6 +35,9 @@ interface CachedMetadata extends TokenMetadata {
 /**
  * Known Base mainnet tokens (static config)
  * Keyed by lowercase address for fast lookup
+ * 
+ * Note: Hardcoded for Base mainnet. For multi-network support,
+ * consider loading from environment or external configuration.
  */
 const KNOWN_TOKENS: Record<string, Omit<TokenMetadata, 'address'>> = {
   // Stablecoins
