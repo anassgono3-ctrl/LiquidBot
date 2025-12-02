@@ -6,6 +6,7 @@ import { calculateUsdValue } from '../utils/usdMath.js';
 import { baseToUsd, usdValue, formatTokenAmount, validateAmount, applyRay } from '../utils/decimals.js';
 
 import type { AssetMetadataCache } from './AssetMetadataCache.js';
+import type { TokenMetadataRegistry } from './TokenMetadataRegistry.js';
 
 // Aave Protocol Data Provider ABI (minimal interface)
 const PROTOCOL_DATA_PROVIDER_ABI = [
@@ -99,6 +100,7 @@ export class AaveDataService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private aaveMetadata: any | null = null; // AaveMetadata instance (optional, using any to avoid circular dependency)
   private metadataCache: AssetMetadataCache | null = null;
+  private tokenMetadataRegistry: TokenMetadataRegistry | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(provider?: ethers.JsonRpcProvider, aaveMetadata?: any, metadataCache?: AssetMetadataCache) {
@@ -123,6 +125,17 @@ export class AaveDataService {
    */
   setMetadataCache(metadataCache: AssetMetadataCache): void {
     this.metadataCache = metadataCache;
+  }
+
+  /**
+   * Set TokenMetadataRegistry instance for enhanced symbol resolution
+   */
+  setTokenMetadataRegistry(registry: TokenMetadataRegistry): void {
+    this.tokenMetadataRegistry = registry;
+    // Also wire AaveMetadata into the registry
+    if (this.aaveMetadata) {
+      registry.setAaveMetadata(this.aaveMetadata);
+    }
   }
 
   /**
@@ -369,8 +382,8 @@ export class AaveDataService {
         const debtValueUsd = calculateUsdValue(totalDebt, decimals, priceRaw);
         const collateralValueUsd = calculateUsdValue(userData.currentATokenBalance, decimals, priceRaw);
 
-        // Try to get symbol from a known mapping or use a placeholder
-        const symbol = this.getSymbolForAsset(asset);
+        // Get symbol using registry (async)
+        const symbol = await this.getSymbolForAsset(asset);
 
         results.push({
           asset,
@@ -397,10 +410,21 @@ export class AaveDataService {
 
   /**
    * Map asset address to symbol
-   * Uses AaveMetadata if available, otherwise falls back to hardcoded mapping
+   * Uses TokenMetadataRegistry for unified resolution with on-chain fallback
    */
-  private getSymbolForAsset(asset: string): string {
-    // Try to get symbol from AaveMetadata first
+  private async getSymbolForAsset(asset: string): Promise<string> {
+    // Use TokenMetadataRegistry if available (lazy on-chain fetch with cache)
+    if (this.tokenMetadataRegistry) {
+      try {
+        const metadata = await this.tokenMetadataRegistry.getMetadata(asset);
+        return metadata.symbol;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[aave-data] Failed to get symbol for ${asset} from registry:`, err);
+      }
+    }
+    
+    // Fallback to AaveMetadata if registry not available
     if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
       const reserve = this.aaveMetadata.getReserve(asset);
       if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
@@ -408,7 +432,7 @@ export class AaveDataService {
       }
     }
     
-    // Fallback to hardcoded mapping (Base mainnet)
+    // Last resort: hardcoded mapping (should rarely be needed now)
     const knownAssets: Record<string, string> = {
       '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
@@ -420,12 +444,7 @@ export class AaveDataService {
 
     const symbol = knownAssets[asset.toLowerCase()];
     
-    // Log if symbol is missing for debugging
-    if (!symbol) {
-      // eslint-disable-next-line no-console
-      console.warn(`[aave-data] symbol_missing: ${asset} - consider adding to AaveMetadata`);
-    }
-    
+    // No longer log missing symbols as registry will handle discovery
     return symbol || 'UNKNOWN';
   }
 

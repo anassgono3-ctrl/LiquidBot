@@ -532,7 +532,17 @@ export const rawEnvSchema = z.object({
   // Enable detailed fast-path logging
   FASTPATH_LOG_DETAIL: z.string().optional(),
   // Enable fast-path latency metrics (Prometheus)
-  FASTPATH_LATENCY_METRICS: z.string().optional()
+  FASTPATH_LATENCY_METRICS: z.string().optional(),
+  
+  // ==== RPC BUDGET & THROUGHPUT GOVERNANCE ====
+  // RPC budget capacity (burst tokens, default: 100)
+  RPC_BUDGET_BURST: z.string().optional(),
+  // RPC budget refill rate (tokens per second, default: 50)
+  RPC_BUDGET_CU_PER_SEC: z.string().optional(),
+  // Minimum spacing between RPC calls in milliseconds (default: 10)
+  RPC_BUDGET_MIN_SPACING_MS: z.string().optional(),
+  // Random jitter to add to RPC calls in milliseconds (default: 5)
+  RPC_JITTER_MS: z.string().optional()
 });
 
 export const env = (() => {
@@ -644,9 +654,16 @@ export const env = (() => {
     autoDiscoverFeeds: (parsed.AUTO_DISCOVER_FEEDS || 'true').toLowerCase() === 'true',
     
     // Reserve-targeted recheck configuration
-    reserveRecheckTopN: Number(parsed.RESERVE_RECHECK_TOP_N || 800),
+    // Clamp at runtime to prevent immediate spikes (max 300)
+    reserveRecheckTopN: Math.min(Number(parsed.RESERVE_RECHECK_TOP_N || 800), 300),
     reserveRecheckMaxBatch: Number(parsed.RESERVE_RECHECK_MAX_BATCH || 1200),
     reserveRecheckTopNByAsset: parsed.RESERVE_RECHECK_TOP_N_BY_ASSET,
+    
+    // RPC budget and throughput governance
+    rpcBudgetBurst: Number(parsed.RPC_BUDGET_BURST || 100),
+    rpcBudgetCuPerSec: Number(parsed.RPC_BUDGET_CU_PER_SEC || 50),
+    rpcBudgetMinSpacingMs: Number(parsed.RPC_BUDGET_MIN_SPACING_MS || 10),
+    rpcJitterMs: Number(parsed.RPC_JITTER_MS || 5),
     
     // Pending-state verification
     pendingVerifyEnabled: (parsed.PENDING_VERIFY_ENABLED || 'true').toLowerCase() === 'true',

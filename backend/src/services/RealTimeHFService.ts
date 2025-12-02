@@ -2438,25 +2438,11 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Enqueue event-driven batch check with coalescing
-   * Fast-lane: bypass coalescing for critical liquidation events (ReserveDataUpdated)
+   * Respects EVENT_BATCH_COALESCE_MS and EVENT_BATCH_MAX_PER_BLOCK
    */
   private enqueueEventBatch(users: string[], reserve: string | null, blockNumber: number, eventName?: string): void {
-    // Fast-lane: execute immediately for ReserveDataUpdated when fast-lane enabled
-    const isFastLaneEvent = config.fastLaneEnabled && (eventName === 'ReserveDataUpdated' || !eventName);
-    
-    if (isFastLaneEvent && reserve) {
-      // eslint-disable-next-line no-console
-      console.log(`[fast-lane] ReserveDataUpdated reserve=${reserve} block=${blockNumber} - bypassing coalesce`);
-      
-      // Execute immediately without coalescing
-      this.executeFastLaneBatch(users, reserve, blockNumber).catch(err => {
-        // eslint-disable-next-line no-console
-        console.error(`[fast-lane] Failed to execute fast-lane batch:`, err);
-      });
-      return;
-    }
-
-    // Standard path: use existing coalescing logic
+    // Standard path: use existing coalescing logic for ALL events
+    // This ensures one recheck per reserve per block and prevents RPC throttling
     const batchKey = reserve ? `block-${blockNumber}-reserve-${reserve}` : `block-${blockNumber}-users`;
 
     // Get or create batch entry

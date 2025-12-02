@@ -157,6 +157,15 @@ export const config = {
   get reserveRecheckTopN() { return env.reserveRecheckTopN; },
   get reserveRecheckMaxBatch() { return env.reserveRecheckMaxBatch; },
   
+  // RPC budget and throughput governance
+  get rpcBudgetBurst() { return env.rpcBudgetBurst; },
+  get rpcBudgetCuPerSec() { return env.rpcBudgetCuPerSec; },
+  get rpcBudgetMinSpacingMs() { return env.rpcBudgetMinSpacingMs; },
+  get rpcJitterMs() { return env.rpcJitterMs; },
+  
+  // RPC URL (fallback for RPC client)
+  get rpcUrl() { return env.rpcUrl || env.wsRpcUrl; },
+  
   // Pending-state verification
   get pendingVerifyEnabled() { return env.pendingVerifyEnabled; },
   
