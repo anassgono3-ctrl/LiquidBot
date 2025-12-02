@@ -13,6 +13,7 @@ import { computeUsd, expandVariableDebt } from '../utils/CanonicalUsdMath.js';
 import { TokenMetadataResolver } from '../services/TokenMetadataResolver.js';
 import type { ExecutionService } from '../services/ExecutionService.js';
 import type { DecisionTraceStore } from '../services/DecisionTraceStore.js';
+
 import { CriticalLaneMiniMulticall, type UserSnapshot } from './CriticalLaneMiniMulticall.js';
 import {
   recordAttempt,

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
+
 import { HealthFactorProjector, type AccountSnapshot, type PriceTrend, type DebtIndexTrend } from '../../src/services/HealthFactorProjector.js';
 
 describe('HealthFactorProjector', () => {

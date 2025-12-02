@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { PriceCache, GasCache, FastpathCache } from '../../../src/fastpath/FastpathPriceGasCache.js';
 
 describe('PriceCache', () => {

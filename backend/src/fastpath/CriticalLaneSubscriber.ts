@@ -8,6 +8,7 @@
 import type { Redis as IORedis } from 'ioredis';
 
 import { createSubscriberClient } from '../redis/RedisClientFactory.js';
+
 import { CriticalLaneExecutor, type CriticalEvent } from './CriticalLaneExecutor.js';
 
 /**

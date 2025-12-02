@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+
 import { ReserveEventCoalescer, type ReserveEvent, type CoalescedBatch } from '../../src/services/ReserveEventCoalescer.js';
 
 describe('ReserveEventCoalescer', () => {
@@ -117,7 +118,7 @@ describe('ReserveEventCoalescer', () => {
       perReserveCoalescing: true
     });
 
-    let emittedBatches: CoalescedBatch[] = [];
+    const emittedBatches: CoalescedBatch[] = [];
     
     perReserveCoalescer.on('batch', (batch) => {
       emittedBatches.push(batch as CoalescedBatch);
@@ -147,7 +148,7 @@ describe('ReserveEventCoalescer', () => {
   });
 
   it('should flush all pending batches on stop', async () => {
-    let emittedBatches: CoalescedBatch[] = [];
+    const emittedBatches: CoalescedBatch[] = [];
     
     coalescer.on('batch', (batch) => {
       emittedBatches.push(batch as CoalescedBatch);
@@ -187,7 +188,7 @@ describe('ReserveEventCoalescer', () => {
   });
 
   it('should handle rapid bursts efficiently', async () => {
-    let emittedBatches: CoalescedBatch[] = [];
+    const emittedBatches: CoalescedBatch[] = [];
     
     coalescer.on('batch', (batch) => {
       emittedBatches.push(batch as CoalescedBatch);

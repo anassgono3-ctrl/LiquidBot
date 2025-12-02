@@ -49,6 +49,9 @@ import {
 import { isZero } from '../utils/bigint.js';
 import { normalizeAddress } from '../utils/Address.js';
 import { maybeShadowExecute, type ShadowExecCandidate } from '../exec/shadowExecution.js';
+import { FastpathPublisher } from '../fastpath/FastpathPublisher.js';
+import { createRedisClient } from '../redis/RedisClientFactory.js';
+import { WatchSet } from '../watch/WatchSet.js';
 
 import { CandidateManager } from './CandidateManager.js';
 import type { SubgraphService } from './SubgraphService.js';
@@ -65,9 +68,6 @@ import { DecisionTraceStore } from './DecisionTraceStore.js';
 import { FeedDiscoveryService, type DiscoveredReserve } from './FeedDiscoveryService.js';
 import { PerAssetTriggerConfig } from './PerAssetTriggerConfig.js';
 import { AaveDataService } from './AaveDataService.js';
-import { FastpathPublisher } from '../fastpath/FastpathPublisher.js';
-import { createRedisClient } from '../redis/RedisClientFactory.js';
-import { WatchSet } from '../watch/WatchSet.js';
 
 // ABIs
 const MULTICALL3_ABI = [

@@ -6,6 +6,7 @@
  */
 
 import { config } from '../config/index.js';
+
 import { recordFastpathPhase } from './CriticalLaneMetrics.js';
 
 export interface LatencyPhases {

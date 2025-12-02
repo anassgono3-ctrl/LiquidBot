@@ -6,6 +6,7 @@
  */
 
 import { config } from '../config/index.js';
+
 import { HFCalculator, UserSnapshot } from './HFCalculator.js';
 import { PriceWindow } from './PriceWindow.js';
 import {

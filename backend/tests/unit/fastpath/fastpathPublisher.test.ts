@@ -3,6 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+
 import { FastpathPublisher } from '../../../src/fastpath/FastpathPublisher.js';
 
 describe('FastpathPublisher', () => {

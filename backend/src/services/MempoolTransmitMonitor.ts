@@ -2,8 +2,9 @@
 // Subscribes to pending transactions filtered by Chainlink aggregator addresses
 // Decodes transmit() calldata before price update is mined for early detection
 
-import { WebSocketProvider, JsonRpcProvider, Interface, Log } from 'ethers';
 import EventEmitter from 'events';
+
+import { WebSocketProvider, JsonRpcProvider, Interface, Log } from 'ethers';
 
 import { config } from '../config/index.js';
 import {

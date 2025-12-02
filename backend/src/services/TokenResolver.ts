@@ -14,6 +14,7 @@
 import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
+
 import { PriceService } from './PriceService.js';
 
 // ABIs

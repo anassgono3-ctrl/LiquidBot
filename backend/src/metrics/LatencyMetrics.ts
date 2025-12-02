@@ -3,6 +3,7 @@
  */
 
 import { Counter, Histogram, Gauge } from 'prom-client';
+
 import { metricsRegistry } from './registry.js';
 
 // Predictive candidates metrics

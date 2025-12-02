@@ -15,6 +15,7 @@
  */
 
 import { Contract, JsonRpcProvider } from 'ethers';
+
 import { getTokenOverride } from '../metadata/token-metadata-overrides.js';
 import { getGlobalRpcBudget } from '../rpc/RpcBudget.js';
 
@@ -244,7 +245,6 @@ export class TokenMetadataRegistry {
    * Get cache stats
    */
   getCacheStats() {
-    const now = Date.now();
     let validCount = 0;
     let staleCount = 0;
 

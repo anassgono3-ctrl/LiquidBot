@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+
 import { VectorizedHealthFactorCalculator, type AccountData } from '../../src/services/VectorizedHealthFactorCalculator.js';
 
 describe('VectorizedHealthFactorCalculator', () => {

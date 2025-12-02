@@ -6,6 +6,7 @@
  */
 
 import type { Redis as IORedis } from 'ioredis';
+
 import { config } from '../config/index.js';
 
 export interface FastpathEvent {

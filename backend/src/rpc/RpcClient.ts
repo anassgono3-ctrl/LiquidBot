@@ -12,8 +12,10 @@
  */
 
 import { JsonRpcProvider, FetchRequest } from 'ethers';
-import { getGlobalRpcBudget } from './RpcBudget.js';
+
 import { config } from '../config/index.js';
+
+import { getGlobalRpcBudget } from './RpcBudget.js';
 
 export type RpcErrorType = 
   | '429_rate_limit'

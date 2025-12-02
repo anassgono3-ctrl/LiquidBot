@@ -15,10 +15,6 @@
  */
 
 import { config } from '../config/index.js';
-import { PredictiveEngine } from './PredictiveEngine.js';
-import { PriceWindow } from './PriceWindow.js';
-import type { UserSnapshot } from './HFCalculator.js';
-import type { PredictiveCandidate } from './models/PredictiveCandidate.js';
 import {
   predictiveIngestedTotal,
   predictiveQueueEntriesTotal,
@@ -32,6 +28,11 @@ import {
   predictiveEtaDistributionSec,
   predictiveEvaluationDurationMs
 } from '../metrics/index.js';
+
+import { PredictiveEngine } from './PredictiveEngine.js';
+import { PriceWindow } from './PriceWindow.js';
+import type { UserSnapshot } from './HFCalculator.js';
+import type { PredictiveCandidate } from './models/PredictiveCandidate.js';
 
 export interface PredictiveOrchestratorConfig {
   enabled: boolean;

@@ -1,8 +1,9 @@
 import { Counter, Gauge, Histogram } from 'prom-client';
 
+import { registerCriticalLaneMetrics } from '../fastpath/CriticalLaneMetrics.js';
+
 import { metricsRegistry } from './registry.js';
 import { createExecutionMetrics, type ExecutionMetrics } from './execution.js';
-import { registerCriticalLaneMetrics } from '../fastpath/CriticalLaneMetrics.js';
 
 // Singleton execution metrics instance
 let _executionMetrics: ExecutionMetrics | null = null;
