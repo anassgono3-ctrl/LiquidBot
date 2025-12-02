@@ -59,11 +59,12 @@ describe('LiquidationMissClassifier', () => {
     });
   });
 
-  describe('raced classification', () => {
-    it('should classify as raced when no execution decision found', () => {
+  describe('late_detection and late_send classification', () => {
+    it('should classify as late_detection when no execution decision and no firstSeen', () => {
       const user = '0x' + '5'.repeat(40);
       const liquidator = '0x' + '6'.repeat(40);
       
+      // No firstSeen recorded - should be late_detection
       const result = classifier.classify(
         user,
         liquidator,
@@ -72,10 +73,12 @@ describe('LiquidationMissClassifier', () => {
         true // wasInWatchSet = true
       );
 
-      expect(result.reason).toBe('raced');
-      expect(result.notes.some(n => n.includes('No execution decision found'))).toBe(true);
+      expect(result.reason).toBe('late_detection');
+      expect(result.notes.some(n => n.includes('late detection'))).toBe(true);
     });
+  });
 
+  describe('raced classification', () => {
     it('should classify as raced when attempt was made with high gas', () => {
       const user = '0x' + '7'.repeat(40);
       const liquidator = '0x' + '8'.repeat(40);
@@ -109,7 +112,7 @@ describe('LiquidationMissClassifier', () => {
   });
 
   describe('hf_transient classification', () => {
-    it('should classify as hf_transient when liquidatable for very few blocks', () => {
+    it('should classify as late_send when HF<1 sample existed but no execution (even if transient)', () => {
       const user = '0x' + '9'.repeat(40);
       const liquidator = '0x' + 'a'.repeat(40);
       
@@ -117,6 +120,7 @@ describe('LiquidationMissClassifier', () => {
       classifier.recordFirstSeen(user, 12343, 0.98);
       
       // Liquidation event at block 12345 (only 2 blocks later, under threshold of 3)
+      // Should be late_send since HF<1 sample existed but no attempt
       const result = classifier.classify(
         user,
         liquidator,
@@ -125,12 +129,13 @@ describe('LiquidationMissClassifier', () => {
         true
       );
 
-      expect(result.reason).toBe('hf_transient');
+      expect(result.reason).toBe('late_send');
       expect(result.blocksSinceFirstSeen).toBe(2);
       expect(result.notes.some(n => n.includes('only 2 blocks'))).toBe(true);
+      expect(result.notes.some(n => n.includes('late send'))).toBe(true);
     });
 
-    it('should not classify as hf_transient when liquidatable for many blocks', () => {
+    it('should classify as late_send when HF<1 sample existed but no execution decision', () => {
       const user = '0x' + 'b'.repeat(40);
       const liquidator = '0x' + 'c'.repeat(40);
       
@@ -138,6 +143,7 @@ describe('LiquidationMissClassifier', () => {
       classifier.recordFirstSeen(user, 12340, 0.98);
       
       // Liquidation event at block 12350 (10 blocks later, over threshold of 3)
+      // No execution decision recorded - should be late_send
       const result = classifier.classify(
         user,
         liquidator,
@@ -146,8 +152,9 @@ describe('LiquidationMissClassifier', () => {
         true
       );
 
-      expect(result.reason).toBe('raced');
+      expect(result.reason).toBe('late_send');
       expect(result.blocksSinceFirstSeen).toBe(10);
+      expect(result.notes.some(n => n.includes('late send'))).toBe(true);
     });
   });
 

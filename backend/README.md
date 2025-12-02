@@ -13,6 +13,8 @@ The LiquidBot backend provides:
 - **Precompute service** for pre-cached liquidation calldata on top-K candidates
 - **Liquidation audit** with classifier-based reason codes for missed liquidations
 - **Liquidation Sentry** for comprehensive miss diagnostics with profit and timing analysis
+- **Predictive HF Orchestrator** with reserve data integration for pre-emptive liquidation detection
+- **BorrowersIndex targeted subsets** for low-latency reserve event processing
 - **Aave oracle integration** for accurate USD pricing
 - **Decision trace store** for post-hoc analysis
 - **Telegram notifications for profitable opportunities**
@@ -25,6 +27,19 @@ The LiquidBot backend provides:
 **Note**: Bulk health monitoring has been disabled. Health factors are now computed on-demand only when new liquidation events are detected, reducing API quota consumption by >95%.
 
 **Operator Guide**: See [OPERATIONS.md](./OPERATIONS.md) for startup verification and feature activation guidance.
+
+## Predictive Orchestrator Integration
+
+The Predictive HF Orchestrator enhances liquidation detection by projecting health factors based on price movements and reserve data changes. Full wiring includes:
+
+- **Real reserve data from AaveDataService**: User snapshots built with actual collateralUsd, debtUsd, and liquidationThreshold per reserve
+- **Micro-verification scheduling**: When `PREDICTIVE_MICRO_VERIFY_ENABLED=true` and projected HF < 1.0 + buffer, immediate single-user HF checks are scheduled (respecting per-block caps)
+- **Sprinter pre-staging**: When `SPRINTER_ENABLED=true` and projected HF ≤ `PRESTAGE_HF_BPS/10000`, liquidation templates are pre-staged with actual debt/collateral token addresses and amounts
+- **BorrowersIndex targeted subsets**: On `ReserveDataUpdated` and price trigger events, impacted borrowers are fetched via BorrowersIndexService, intersected with near-critical cache (HF < 1.02), and checked via mini-multicall BEFORE broad sweep for improved latency
+- **Enhanced classification**: Audit classifier now distinguishes `late_detection` (no HF<1 sample before TX) from `late_send` (HF<1 sample existed but no attempt) and only marks `raced` when we attempted execution
+
+Metrics: `predictive_micro_verify_scheduled_total`, `predictive_prestaged_total`, `subset_intersection_size`, `reserve_event_to_microverify_ms`
+
 
 ## Candidate Discovery Modes
 

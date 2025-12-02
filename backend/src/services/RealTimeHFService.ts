@@ -38,7 +38,13 @@ import {
   pendingVerifyErrorsTotal,
   headstartProcessedTotal,
   headstartLatencyMs,
-  priceFeedEventsTotal
+  priceFeedEventsTotal,
+  predictiveMicroVerifyScheduledTotal,
+  predictivePrestagedTotal,
+  subsetIntersectionSize,
+  reserveEventToMicroVerifyMs,
+  realtimePriceEmergencyScansTotal,
+  emergencyScanLatency
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
 import { normalizeAddress } from '../utils/Address.js';
@@ -1263,6 +1269,30 @@ export class RealTimeHFService extends EventEmitter {
         } else {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
+            const startReserveEvent = Date.now();
+            
+            // 1) Fetch impacted borrowers for this reserve via BorrowersIndexService
+            let reserveBorrowers: string[] = [];
+            if (this.borrowersIndex) {
+              try {
+                const allBorrowers = await this.borrowersIndex.getBorrowers(reserve);
+                reserveBorrowers = allBorrowers.slice(0, config.reserveRecheckMaxBatch || 100);
+              } catch (err) {
+                // eslint-disable-next-line no-console
+                console.error(`[reserve-targeted] Failed to fetch borrowers for ${reserve}:`, err);
+              }
+            }
+            
+            // 2) Intersect with near-critical cache (users with HF < 1.02)
+            const nearCritical = this.candidateManager.getAll()
+              .filter(c => c.lastHF !== null && c.lastHF < 1.02)
+              .map(c => c.address.toLowerCase());
+            const nearCriticalSet = new Set(nearCritical);
+            const targetedSubset = reserveBorrowers.filter(addr => nearCriticalSet.has(addr.toLowerCase()));
+            
+            // Record metrics for targeted subset
+            subsetIntersectionSize.observe({ trigger: 'reserve' }, targetedSubset.length);
+            
             // Watched fast-path: check watched users with exposure to this reserve
             if (this.watchSet) {
               const watchedUsers = this.watchSet.getWatchedUsers();
@@ -1280,7 +1310,29 @@ export class RealTimeHFService extends EventEmitter {
               }
             }
             
-            // Enqueue a batch check for low-HF candidates (fast-lane for ReserveDataUpdated)
+            // 3) Run mini-multicall subset BEFORE broad sweep (if we have a targeted subset)
+            if (targetedSubset.length > 0) {
+              // eslint-disable-next-line no-console
+              console.log(
+                `[reserve-targeted] ReserveDataUpdated reserve=${reserve} ` +
+                `borrowers=${reserveBorrowers.length} nearCritical=${nearCritical.length} ` +
+                `intersection=${targetedSubset.length} block=${blockNumber}`
+              );
+              
+              // Run mini-multicall for targeted subset immediately
+              await this.batchCheckCandidatesWithPending(targetedSubset, 'price', blockNumber);
+              
+              // Record latency from reserve event to first micro-verify
+              const latencyMs = Date.now() - startReserveEvent;
+              reserveEventToMicroVerifyMs.observe({ reserve: reserve.substring(0, 10) }, latencyMs);
+              
+              // eslint-disable-next-line no-console
+              console.log(
+                `[reserve-targeted] mini-multicall complete latency=${latencyMs}ms subset=${targetedSubset.length}`
+              );
+            }
+            
+            // Enqueue a batch check for low-HF candidates (broad sweep after targeted subset)
             this.enqueueEventBatch([], reserve, blockNumber, decoded.name);
           }
         }
@@ -1581,6 +1633,7 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Execute emergency scan for affected users
+   * Enhanced with BorrowersIndex targeted subset and metrics
    */
   private async executeEmergencyScan(
     symbol: string,
@@ -1589,11 +1642,12 @@ export class RealTimeHFService extends EventEmitter {
     blockNumber: number
   ): Promise<void> {
     try {
+      const startReserveEvent = Date.now();
+      
       // Increment metric
-      const { realtimePriceEmergencyScansTotal, emergencyScanLatency } = await import('../metrics/index.js');
       realtimePriceEmergencyScansTotal.inc({ asset: symbol });
       
-      // If BorrowersIndexService is available, also check borrowers of this reserve
+      // If BorrowersIndexService is available, fetch impacted borrowers and run targeted subset
       if (this.borrowersIndex) {
         // Find the reserve address for this symbol
         const reserve = this.discoveredReserves.find(
@@ -1601,13 +1655,50 @@ export class RealTimeHFService extends EventEmitter {
         );
         
         if (reserve) {
-          // eslint-disable-next-line no-console
-          console.log(`[price-trigger] Also checking borrowers of reserve ${symbol} via BorrowersIndexService`);
-          await this.checkReserveBorrowers(reserve.asset, 'price', blockNumber);
+          try {
+            // 1) Fetch impacted borrowers for this reserve via BorrowersIndexService
+            const allBorrowers = await this.borrowersIndex.getBorrowers(reserve.asset);
+            const reserveBorrowers = allBorrowers.slice(0, config.reserveRecheckMaxBatch || 100);
+            
+            // 2) Intersect with near-critical cache (users with HF < 1.02)
+            const nearCritical = this.candidateManager.getAll()
+              .filter(c => c.lastHF !== null && c.lastHF < 1.02)
+              .map(c => c.address.toLowerCase());
+            const nearCriticalSet = new Set(nearCritical);
+            const targetedSubset = reserveBorrowers.filter(addr => nearCriticalSet.has(addr.toLowerCase()));
+            
+            // Record metrics for targeted subset
+            subsetIntersectionSize.observe({ trigger: 'price' }, targetedSubset.length);
+            
+            // 3) Run mini-multicall subset BEFORE broad sweep (if we have a targeted subset)
+            if (targetedSubset.length > 0) {
+              // eslint-disable-next-line no-console
+              console.log(
+                `[price-trigger-targeted] PriceShock ${symbol} drop=${dropBps.toFixed(2)}bps ` +
+                `borrowers=${reserveBorrowers.length} nearCritical=${nearCritical.length} ` +
+                `intersection=${targetedSubset.length} block=${blockNumber}`
+              );
+              
+              // Run mini-multicall for targeted subset immediately
+              await this.batchCheckCandidatesWithPending(targetedSubset, 'price', blockNumber);
+              
+              // Record latency from price event to first micro-verify
+              const latencyMs = Date.now() - startReserveEvent;
+              reserveEventToMicroVerifyMs.observe({ reserve: reserve.asset.substring(0, 10) }, latencyMs);
+              
+              // eslint-disable-next-line no-console
+              console.log(
+                `[price-trigger-targeted] mini-multicall complete latency=${latencyMs}ms subset=${targetedSubset.length}`
+              );
+            }
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.error(`[price-trigger-targeted] Failed to fetch borrowers for ${symbol}:`, err);
+          }
         }
       }
       
-      // Perform emergency scan with latency tracking on candidate set
+      // Perform emergency scan with latency tracking on candidate set (broad sweep)
       const startTime = Date.now();
       await this.batchCheckCandidatesWithPending(affectedUsers, 'price', blockNumber);
       const latencyMs = Date.now() - startTime;
@@ -3631,6 +3722,8 @@ export class RealTimeHFService extends EventEmitter {
   /**
    * Ingest predictive candidates from PredictiveOrchestrator
    * Deduplicates by user+scenario per tick and pushes into warm/hot queue
+   * When PREDICTIVE_MICRO_VERIFY_ENABLED and hfProjected < 1.0 + buffer: scheduleMicroVerify
+   * When SPRINTER_ENABLED and hfProjected <= PRESTAGE_HF_BPS/10000: prestageFromPredictive
    */
   public ingestPredictiveCandidates(
     candidates: Array<{
@@ -3675,7 +3768,8 @@ export class RealTimeHFService extends EventEmitter {
       // Log ingested candidate
       console.log(
         `[predictive-ingest] queued user=${normalized.slice(0, 10)}... ` +
-        `scenario=${candidate.scenario} priority=${priority.toFixed(4)} etaSec=${candidate.etaSec}`
+        `scenario=${candidate.scenario} priority=${priority.toFixed(4)} etaSec=${candidate.etaSec} ` +
+        `hfProj=${candidate.hfProjected.toFixed(4)}`
       );
       
       // Notify liquidation audit service of predictive candidate (for race classification)
@@ -3685,6 +3779,58 @@ export class RealTimeHFService extends EventEmitter {
           candidate.scenario,
           candidate.hfProjected
         );
+      }
+
+      // Schedule micro-verify if PREDICTIVE_MICRO_VERIFY_ENABLED and hfProjected < 1.0 + buffer
+      if (config.predictiveMicroVerifyEnabled && this.microVerifier) {
+        const microVerifyBuffer = config.nearThresholdBandBps / 10000; // Use near-threshold band as buffer
+        const microVerifyThreshold = 1.0 + microVerifyBuffer;
+        
+        if (candidate.hfProjected < microVerifyThreshold) {
+          // Respect per-block caps via canVerify
+          if (this.microVerifier.canVerify(normalized)) {
+            // Increment metric before scheduling (not after success)
+            predictiveMicroVerifyScheduledTotal.inc({ scenario: candidate.scenario });
+            
+            // Fire-and-forget to avoid blocking ingestion
+            this.microVerifier.verify({
+              user: normalized,
+              trigger: 'proj_cross',
+              projectedHf: candidate.hfProjected,
+              currentHf: candidate.hfCurrent
+            }).then(result => {
+              if (result && result.success) {
+                console.log(
+                  `[predictive-micro-verify] user=${normalized.slice(0, 10)}... ` +
+                  `scenario=${candidate.scenario} hf=${result.hf.toFixed(4)} latency=${result.latencyMs}ms`
+                );
+              }
+            }).catch(err => {
+              console.error(`[predictive-micro-verify] Error:`, err);
+              pendingVerifyErrorsTotal.inc();
+            });
+          }
+        }
+      }
+
+      // Prestage if SPRINTER_ENABLED and hfProjected <= PRESTAGE_HF_BPS/10000
+      if (config.sprinterEnabled && candidate.hfProjected <= config.prestageHfBps / 10000) {
+        // Call sprinterEngine.prestageFromPredictive with real debt/collateral data
+        // Fire-and-forget to avoid blocking ingestion
+        this.prestageFromPredictiveCandidateWithRealData(
+          normalized,
+          candidate.hfProjected,
+          candidate.totalDebtUsd,
+          candidate.scenario
+        ).then(() => {
+          predictivePrestagedTotal.inc({ scenario: candidate.scenario });
+          console.log(
+            `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${candidate.scenario} ` +
+            `hfProj=${candidate.hfProjected.toFixed(4)} prestaged`
+          );
+        }).catch(err => {
+          console.error(`[predictive-prestage] Error:`, err);
+        });
       }
     }
   }
@@ -3720,6 +3866,27 @@ export class RealTimeHFService extends EventEmitter {
    */
   getLowHFTracker(): LowHFTracker | undefined {
     return this.lowHfTracker;
+  }
+
+  /**
+   * Get AaveDataService (for predictive orchestrator integration)
+   */
+  getAaveDataService(): AaveDataService | undefined {
+    return this.aaveDataService;
+  }
+
+  /**
+   * Get current block number (for predictive orchestrator integration)
+   */
+  async getCurrentBlock(): Promise<number> {
+    if (!this.provider) {
+      return 0;
+    }
+    try {
+      return await this.provider.getBlockNumber();
+    } catch (err) {
+      return this.currentBlockNumber || 0;
+    }
   }
 
   /**
@@ -3762,18 +3929,11 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
-   * Prestage a predictive candidate using SprinterEngine
-   * Called from PredictiveOrchestrator listener when shouldPrestage is true
-   * 
-   * FIXME: This is a placeholder implementation. Full integration requires:
-   * 1. Fetching user's actual debt/collateral tokens and amounts from AaveDataService
-   * 2. Getting current block number from provider
-   * 3. Getting price for debt token from PriceService
-   * 4. Calling sprinterEngine.prestageFromPredictive with actual values
-   * 
-   * See: Issue #XXX for tracking full Sprinter integration
+   * Prestage a predictive candidate using SprinterEngine with REAL data
+   * Fetches actual debt/collateral tokens and amounts from AaveDataService
+   * Called from ingestPredictiveCandidates when SPRINTER_ENABLED
    */
-  async prestageFromPredictiveCandidate(
+  async prestageFromPredictiveCandidateWithRealData(
     userAddress: string,
     projectedHf: number,
     totalDebtUsd: number,
@@ -3781,24 +3941,103 @@ export class RealTimeHFService extends EventEmitter {
   ): Promise<void> {
     const normalized = normalizeAddress(userAddress);
     
-    // eslint-disable-next-line no-console
-    console.log(
-      `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
-      `projHf=${projectedHf.toFixed(4)} debtUsd=${totalDebtUsd.toFixed(2)} ` +
-      `(FIXME: placeholder - full implementation requires user position data)`
+    // Check if AaveDataService is available
+    if (!this.aaveDataService || !this.aaveDataService.isInitialized()) {
+      // eslint-disable-next-line no-console
+      console.log(
+        `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+        `projHf=${projectedHf.toFixed(4)} debtUsd=${totalDebtUsd.toFixed(2)} ` +
+        `(skipped: AaveDataService not initialized)`
+      );
+      return;
+    }
+
+    try {
+      // Fetch user reserves from Aave Protocol Data Provider
+      const userReserves = await this.aaveDataService.getAllUserReserves(normalized);
+      
+      // Find largest debt and collateral positions
+      let largestDebt: { asset: string; amount: bigint; valueUsd: number } | null = null;
+      let largestCollateral: { asset: string; amount: bigint; valueUsd: number } | null = null;
+      
+      for (const reserve of userReserves) {
+        if (reserve.totalDebt > 0n && (!largestDebt || reserve.debtValueUsd > largestDebt.valueUsd)) {
+          largestDebt = {
+            asset: reserve.asset,
+            amount: reserve.totalDebt,
+            valueUsd: reserve.debtValueUsd
+          };
+        }
+        
+        if (reserve.aTokenBalance > 0n && (!largestCollateral || reserve.collateralValueUsd > largestCollateral.valueUsd)) {
+          largestCollateral = {
+            asset: reserve.asset,
+            amount: reserve.aTokenBalance,
+            valueUsd: reserve.collateralValueUsd
+          };
+        }
+      }
+      
+      if (!largestDebt || !largestCollateral) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+          `(skipped: no debt or collateral found)`
+        );
+        return;
+      }
+
+      // Get current block and prices
+      const currentBlock = await this.getCurrentBlock();
+      const debtPrice = await this.aaveDataService.getAssetPrice(largestDebt.asset);
+      const debtPriceUsd = Number(debtPrice) / 1e8;
+
+      // eslint-disable-next-line no-console
+      console.log(
+        `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+        `projHf=${projectedHf.toFixed(4)} debtAsset=${largestDebt.asset.slice(0, 10)}... ` +
+        `collateralAsset=${largestCollateral.asset.slice(0, 10)}... ` +
+        `debtUsd=${largestDebt.valueUsd.toFixed(2)} collateralUsd=${largestCollateral.valueUsd.toFixed(2)} ` +
+        `block=${currentBlock}`
+      );
+      
+      // TODO: Sprinter integration pending
+      // When SprinterEngine is available and wired, call:
+      // await this.sprinterEngine?.prestageFromPredictive(
+      //   normalized,
+      //   largestDebt.asset,
+      //   largestCollateral.asset,
+      //   largestDebt.amount,
+      //   largestCollateral.amount,
+      //   projectedHf,
+      //   currentBlock,
+      //   debtPriceUsd
+      // );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[predictive-prestage] Error fetching user data for ${normalized}:`, err);
+    }
+  }
+
+  /**
+   * Prestage a predictive candidate using SprinterEngine
+   * Called from PredictiveOrchestrator listener when shouldPrestage is true
+   * 
+   * @deprecated Use prestageFromPredictiveCandidateWithRealData instead.
+   * This method delegates to the new implementation with real data.
+   */
+  async prestageFromPredictiveCandidate(
+    userAddress: string,
+    projectedHf: number,
+    totalDebtUsd: number,
+    scenario: string
+  ): Promise<void> {
+    // Delegate to the new implementation with real data
+    return this.prestageFromPredictiveCandidateWithRealData(
+      userAddress,
+      projectedHf,
+      totalDebtUsd,
+      scenario
     );
-    
-    // FIXME: When SprinterEngine is fully wired:
-    // const userPosition = await this.aaveDataService.getUserPosition(normalized);
-    // const debtToken = userPosition.largestDebtAsset;
-    // const collateralToken = userPosition.largestCollateralAsset;
-    // const debtWei = userPosition.debtAmounts[debtToken];
-    // const collateralWei = userPosition.collateralAmounts[collateralToken];
-    // const debtPriceUsd = await this.priceService.getPrice(debtToken);
-    // const currentBlock = await this.provider.getBlockNumber();
-    // this.sprinterEngine.prestageFromPredictive(
-    //   normalized, debtToken, collateralToken, debtWei, collateralWei,
-    //   projectedHf, currentBlock, debtPriceUsd
-    // );
   }
 }

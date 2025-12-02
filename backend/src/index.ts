@@ -32,12 +32,51 @@ import { RealTimeHFService } from "./services/RealTimeHFService.js";
 import type { LiquidatableEvent } from "./services/RealTimeHFService.js";
 import { StartupDiagnosticsService } from "./services/StartupDiagnostics.js";
 import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
+import type { UserSnapshot, ReserveData } from './risk/HFCalculator.js';
+import type { AaveDataService } from './services/AaveDataService.js';
 
 const logger = createLogger({
   level: "info",
   format: format.combine(format.timestamp(), format.json()),
   transports: [new transports.Console()],
 });
+
+/**
+ * Helper function to build UserSnapshot reserves with REAL data from AaveDataService
+ * Used by PredictiveOrchestrator for accurate HF projections
+ */
+async function buildUserReserves(userAddress: string, aaveDataService: AaveDataService | undefined): Promise<ReserveData[]> {
+  if (!aaveDataService || !aaveDataService.isInitialized()) {
+    // Fallback: return empty reserves if service not available
+    return [];
+  }
+
+  try {
+    // Fetch all user reserves from Aave Protocol Data Provider
+    const userReserves = await aaveDataService.getAllUserReserves(userAddress);
+    
+    // Transform to ReserveData format required by HFCalculator
+    const reserves: ReserveData[] = [];
+    
+    for (const reserve of userReserves) {
+      // Get liquidation threshold from reserve config
+      const configData = await aaveDataService.getReserveConfigurationData(reserve.asset);
+      const liquidationThreshold = Number(configData.liquidationThreshold) / 10000; // Convert from bps
+      
+      reserves.push({
+        asset: reserve.asset,
+        debtUsd: reserve.debtValueUsd,
+        collateralUsd: reserve.collateralValueUsd,
+        liquidationThreshold
+      });
+    }
+    
+    return reserves;
+  } catch (err) {
+    logger.error(`[build-user-reserves] Error fetching reserves for ${userAddress}:`, err);
+    return [];
+  }
+}
 
 // Initialize metrics before any other modules attempt to use them
 initMetricsOnce();
@@ -304,24 +343,46 @@ if (config.useRealtimeHF) {
     });
     
     // Set up user provider for fallback evaluations using the candidate manager
+    // This provider fetches REAL reserve data from AaveDataService for predictive evaluation
     const userProvider: UserSnapshotProvider = {
       async getUserSnapshots(maxUsers: number) {
         const manager = realtimeHFService!.getCandidateManager();
         const allCandidates = manager.getAll();
         
-        // Sort by ascending HF (lowest first) for better candidate density
-        const sortedCandidates = allCandidates
-          .filter(c => c.lastHF !== null && c.lastHF < 1.2) // Only include near-threshold candidates
-          .sort((a, b) => (a.lastHF ?? 1) - (b.lastHF ?? 1))
-          .slice(0, maxUsers);
+        // Separate candidates into different slices for targeted evaluation
+        // 1) Head-start: near-critical slice (HF < 1.02)
+        const nearCritical = allCandidates
+          .filter(c => c.lastHF !== null && c.lastHF < 1.02)
+          .sort((a, b) => (a.lastHF ?? 1) - (b.lastHF ?? 1));
         
-        // Convert to UserSnapshot format
-        // Note: This is a simplified version - full reserve data would need to be fetched
-        return sortedCandidates.map(c => ({
-          address: c.address,
-          block: 0, // Block would need to be tracked from real-time service
-          reserves: [] // Reserves would need to be fetched separately for full HF calculation
-        }));
+        // 2) Price-trigger targeted: candidates touched by recent price events
+        // (already filtered by HF < 1.2 for better candidate density)
+        const priceTouched = allCandidates
+          .filter(c => c.lastHF !== null && c.lastHF >= 1.02 && c.lastHF < 1.2)
+          .sort((a, b) => (a.lastHF ?? 1) - (b.lastHF ?? 1));
+        
+        // Combine slices, prioritizing near-critical
+        const combined = [...nearCritical, ...priceTouched].slice(0, maxUsers);
+        
+        // Build UserSnapshot[] with reserves from CandidateManager/AaveDataService
+        const aaveDataService = realtimeHFService!.getAaveDataService();
+        const snapshots: UserSnapshot[] = [];
+        const currentBlock = await realtimeHFService!.getCurrentBlock();
+        
+        for (const candidate of combined) {
+          try {
+            const reserves = await buildUserReserves(candidate.address, aaveDataService);
+            snapshots.push({
+              address: candidate.address,
+              block: currentBlock,
+              reserves
+            });
+          } catch (err) {
+            logger.warn(`[predictive-user-provider] Failed to fetch reserves for ${candidate.address}:`, err);
+          }
+        }
+        
+        return snapshots;
       }
     };
     
