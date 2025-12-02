@@ -655,7 +655,19 @@ export const env = (() => {
     
     // Reserve-targeted recheck configuration
     // Clamp at runtime to prevent immediate spikes (max 300)
-    reserveRecheckTopN: Math.min(Number(parsed.RESERVE_RECHECK_TOP_N || 800), 300),
+    // Log warning if user setting exceeds cap
+    reserveRecheckTopN: (() => {
+      const userValue = Number(parsed.RESERVE_RECHECK_TOP_N || 800);
+      const clampedValue = Math.min(userValue, 300);
+      if (userValue > 300) {
+        console.warn(
+          `[config] RESERVE_RECHECK_TOP_N=${userValue} exceeds safe limit. ` +
+          `Clamped to 300 to prevent provider throttling. ` +
+          `Increase RPC_BUDGET_CU_PER_SEC if you need higher limits.`
+        );
+      }
+      return clampedValue;
+    })(),
     reserveRecheckMaxBatch: Number(parsed.RESERVE_RECHECK_MAX_BATCH || 1200),
     reserveRecheckTopNByAsset: parsed.RESERVE_RECHECK_TOP_N_BY_ASSET,
     

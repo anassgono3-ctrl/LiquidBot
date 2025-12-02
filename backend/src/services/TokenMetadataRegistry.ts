@@ -19,6 +19,11 @@ import { Contract, JsonRpcProvider } from 'ethers';
 import { getTokenOverride } from '../metadata/token-metadata-overrides.js';
 import { getGlobalRpcBudget } from '../rpc/RpcBudget.js';
 
+// Minimal interface for AaveMetadata to avoid circular dependency
+interface IAaveMetadata {
+  getReserve(address: string): { symbol: string; decimals: number } | null | undefined;
+}
+
 const ERC20_ABI = [
   'function symbol() external view returns (string)',
   'function decimals() external view returns (uint8)'
@@ -43,8 +48,7 @@ export class TokenMetadataRegistry {
   private readonly cacheTtlMs = 5 * 60 * 1000; // 5 minutes
   private readonly maxRetries = 3;
   private readonly budget = getGlobalRpcBudget();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private aaveMetadata: any | null = null; // Base metadata source
+  private aaveMetadata: IAaveMetadata | null = null; // Base metadata source
 
   constructor(provider: JsonRpcProvider) {
     this.provider = provider;
@@ -56,8 +60,7 @@ export class TokenMetadataRegistry {
   /**
    * Set AaveMetadata instance (base/authoritative source)
    */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  setAaveMetadata(aaveMetadata: any): void {
+  setAaveMetadata(aaveMetadata: IAaveMetadata): void {
     this.aaveMetadata = aaveMetadata;
   }
 
@@ -71,7 +74,7 @@ export class TokenMetadataRegistry {
     const normalized = address.toLowerCase();
 
     // 1. Check base metadata (AaveMetadata) - authoritative
-    if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
+    if (this.aaveMetadata) {
       const reserve = this.aaveMetadata.getReserve(normalized);
       if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
         return {
