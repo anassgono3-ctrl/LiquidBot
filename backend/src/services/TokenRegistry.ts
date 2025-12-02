@@ -197,8 +197,14 @@ export class TokenRegistry {
   
   /**
    * Normalize address to lowercase if ADDRESS_NORMALIZE_LOWERCASE=true
+   * Also validates address format to prevent issues with malformed inputs
    */
   private normalizeAddress(address: string): string {
+    // Basic Ethereum address validation (0x + 40 hex chars)
+    if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
+      throw new Error(`Invalid Ethereum address format: ${address}`);
+    }
+    
     return config.addressNormalizeLowercase ? address.toLowerCase() : address;
   }
   

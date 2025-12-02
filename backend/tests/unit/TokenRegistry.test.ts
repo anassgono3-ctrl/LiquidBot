@@ -77,6 +77,20 @@ describe('TokenRegistry', () => {
       expect(metadata1.symbol).toBe(metadata2.symbol);
     });
 
+    it('should throw error for invalid address format', async () => {
+      const invalidAddresses = [
+        '0x123',  // Too short
+        '0xGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG',  // Invalid hex
+        'not-an-address',  // Not hex
+        '',  // Empty
+      ];
+
+      for (const addr of invalidAddresses) {
+        await expect(registry.getTokenMeta(addr))
+          .rejects.toThrow('Invalid Ethereum address format');
+      }
+    });
+
     it('should throw error when provider not configured and token unknown', async () => {
       const registryNoProvider = new TokenRegistry(); // No provider
       const unknownAddress = '0x1234567890123456789012345678901234567890';

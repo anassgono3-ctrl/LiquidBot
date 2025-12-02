@@ -51,12 +51,12 @@ if (config.logFileEnabled) {
     console.error('[logger] Failed to create logs directory:', err);
   }
   
-  // Calculate retention - winston-daily-rotate-file uses '1d' format
-  // Since we rotate hourly, convert hours to fractional days
-  const retentionDays = config.logFileRetentionHours / 24;
-  const retentionSpec = retentionDays >= 1 
-    ? `${Math.ceil(retentionDays)}d` 
-    : `${config.logFileRetentionHours}h`;
+  // Calculate retention - winston-daily-rotate-file supports 'Nh' and 'Nd' formats
+  // Use hours directly for sub-24h retention, days for 24h+
+  const retentionHours = config.logFileRetentionHours;
+  const retentionSpec = retentionHours >= 24 
+    ? `${Math.floor(retentionHours / 24)}d`  // Use floor to not exceed configured retention
+    : `${retentionHours}h`;
   
   // Add rotating file transport
   const fileTransport = new DailyRotateFile({
