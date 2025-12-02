@@ -142,6 +142,10 @@ APPROVALS_AUTO_SEND=false
 # Multi-provider hedge
 SECONDARY_HEAD_RPC_URL=https://your-secondary-rpc.com
 HEAD_CHECK_HEDGE_MS=300
+
+# File logging (optional - for longer-duration output inspection)
+LOG_FILE_ENABLED=false             # Enable file logging with hourly rotation
+LOG_FILE_RETENTION_HOURS=8         # Keep rotated logs for N hours
 ```
 
 ### Performance Metrics
@@ -729,6 +733,31 @@ Event coalescing logs:
 ```
 [event-coalesce] executing batch (block=12345678, users=15, reserves=2)
 ```
+
+### File Logging Configuration
+
+For longer-duration output inspection without relying on Docker logs, enable file-based logging with automatic rotation:
+
+```bash
+# Enable file logging (default: false)
+LOG_FILE_ENABLED=true
+
+# Retention period in hours (default: 8)
+LOG_FILE_RETENTION_HOURS=8
+```
+
+When enabled:
+- Logs written to `./logs/bot-YYYY-MM-DD-HH.log` (hourly rotation)
+- Max file size: 50MB per file
+- Automatic pruning based on retention period
+- Async writes to prevent blocking hot paths
+- Console logging continues unchanged (additive, not replacing)
+
+Typical use cases:
+- Multi-hour test runs requiring full log history
+- Debugging race conditions across block boundaries  
+- Post-mortem analysis of missed liquidations
+- Performance profiling over extended periods
 
 ## Low-Latency Detection Upgrades
 
