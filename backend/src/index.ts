@@ -181,8 +181,8 @@ if (config.executionEnabled) {
       const redisUrl = config.redisUrl;
       if (redisUrl) {
         try {
-          const { default: Redis } = await import('ioredis');
-          const redis = new Redis(redisUrl, {
+          const ioredis = await import('ioredis');
+          const redis = new ioredis.Redis(redisUrl, {
             retryStrategy: (times: number) => Math.min(times * 50, 2000),
             maxRetriesPerRequest: 3
           });
