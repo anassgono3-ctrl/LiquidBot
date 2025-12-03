@@ -164,6 +164,13 @@ export class TokenMetadataRegistry {
     if (this.aaveMetadata) {
       const reserve = this.aaveMetadata.getReserve(normalized);
       if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
+        // Log resolution once per address
+        if (!this.warnedAddresses.has(normalized)) {
+          // eslint-disable-next-line no-console
+          console.log(`[token-registry] symbol_resolved via base: ${normalized} -> ${reserve.symbol}`);
+          this.warnedAddresses.add(normalized);
+        }
+        
         return {
           address: normalized,
           symbol: reserve.symbol,
