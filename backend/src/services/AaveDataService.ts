@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
 import { calculateUsdValue } from '../utils/usdMath.js';
-import { baseToUsd, usdValue, formatTokenAmount, validateAmount, applyRay } from '../utils/decimals.js';
+import { baseToUsd, usdValue, formatTokenAmount, validateAmount } from '../utils/decimals.js';
 
 import type { AssetMetadataCache } from './AssetMetadataCache.js';
 import type { TokenMetadataRegistry } from './TokenMetadataRegistry.js';
@@ -378,14 +378,9 @@ export class AaveDataService {
         const debtValueUsd = calculateUsdValue(totalDebt, decimals, priceRaw);
         const collateralValueUsd = calculateUsdValue(userData.currentATokenBalance, decimals, priceRaw);
 
-        // Try to get symbol - use TokenMetadataRegistry if available
-        let symbol = 'UNKNOWN';
-        if (this.tokenRegistry) {
-          const metadata = await this.tokenRegistry.get(asset);
-          symbol = metadata.symbol;
-        } else {
-          symbol = this.getSymbolForAsset(asset);
-        }
+        // Get symbol using registry-aware resolution
+        // getSymbolForAsset now uses TokenMetadataRegistry internally if available
+        const symbol = await this.getSymbolForAsset(asset);
 
         results.push({
           asset,
@@ -412,19 +407,46 @@ export class AaveDataService {
 
   /**
    * Map asset address to symbol
-   * Uses TokenMetadataRegistry if available (via async getUserReserves), 
-   * otherwise falls back to AaveMetadata, then hardcoded mapping
+   * Uses TokenMetadataRegistry if available for deterministic resolution:
+   * base metadata → overrides → on-chain (cache-backed)
+   * Falls back to AaveMetadata and hardcoded mapping if registry not available
    */
-  private getSymbolForAsset(asset: string): string {
-    // Try to get symbol from AaveMetadata
+  private async getSymbolForAsset(asset: string): Promise<string> {
+    // Normalize address to lowercase at the start
+    const normalizedAddress = asset.toLowerCase();
+    
+    // If TokenMetadataRegistry is available, use it (async path)
+    if (this.tokenRegistry) {
+      try {
+        const metadata = await this.tokenRegistry.get(normalizedAddress);
+        
+        // If resolution succeeded (not unknown), log and return
+        if (metadata.source !== 'unknown') {
+          // eslint-disable-next-line no-console
+          console.log(`[aave-data] symbol_resolved: ${normalizedAddress} -> ${metadata.symbol} (source: ${metadata.source})`);
+          return metadata.symbol;
+        }
+        
+        // If registry returned unknown (both override and on-chain failed), log once
+        // Note: Registry handles warn-once internally via its negative cache
+        // We just propagate the UNKNOWN result
+        return metadata.symbol; // 'UNKNOWN'
+      } catch (error) {
+        // Registry threw an error, continue to fallback
+        // eslint-disable-next-line no-console
+        console.warn(`[aave-data] TokenMetadataRegistry error for ${normalizedAddress}, using fallback:`, error);
+      }
+    }
+    
+    // Fallback: Try to get symbol from AaveMetadata (sync path)
     if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
-      const reserve = this.aaveMetadata.getReserve(asset);
+      const reserve = this.aaveMetadata.getReserve(normalizedAddress);
       if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
         return reserve.symbol;
       }
     }
     
-    // Fallback to hardcoded mapping (Base mainnet)
+    // Fallback to hardcoded mapping (Base mainnet) - sync path
     const knownAssets: Record<string, string> = {
       '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
@@ -434,12 +456,12 @@ export class AaveDataService {
       '0x2ae3f1ec7f1f5012cfeab0185bfc7aa3cf0dec22': 'cbETH',
     };
 
-    const symbol = knownAssets[asset.toLowerCase()];
+    const symbol = knownAssets[normalizedAddress];
     
-    // Log if symbol is missing for debugging
+    // Log if symbol is missing for debugging (fallback path only)
     if (!symbol) {
       // eslint-disable-next-line no-console
-      console.warn(`[aave-data] symbol_missing: ${asset} - consider adding to AaveMetadata`);
+      console.warn(`[aave-data] symbol_missing: ${normalizedAddress} - consider adding to TokenMetadataRegistry or AaveMetadata`);
     }
     
     return symbol || 'UNKNOWN';
