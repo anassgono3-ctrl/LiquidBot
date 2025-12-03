@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
 import { calculateUsdValue } from '../utils/usdMath.js';
-import { baseToUsd, usdValue, formatTokenAmount, validateAmount, applyRay } from '../utils/decimals.js';
+import { baseToUsd, usdValue, formatTokenAmount, validateAmount } from '../utils/decimals.js';
 
 import type { AssetMetadataCache } from './AssetMetadataCache.js';
 import type { TokenMetadataRegistry } from './TokenMetadataRegistry.js';
@@ -378,14 +378,8 @@ export class AaveDataService {
         const debtValueUsd = calculateUsdValue(totalDebt, decimals, priceRaw);
         const collateralValueUsd = calculateUsdValue(userData.currentATokenBalance, decimals, priceRaw);
 
-        // Try to get symbol - use TokenMetadataRegistry if available
-        let symbol = 'UNKNOWN';
-        if (this.tokenRegistry) {
-          const metadata = await this.tokenRegistry.get(asset);
-          symbol = metadata.symbol;
-        } else {
-          symbol = this.getSymbolForAsset(asset);
-        }
+        // Get symbol using TokenMetadataRegistry or fallback methods
+        const symbol = await this.getSymbolForAsset(asset);
 
         results.push({
           asset,
@@ -412,11 +406,17 @@ export class AaveDataService {
 
   /**
    * Map asset address to symbol
-   * Uses TokenMetadataRegistry if available (via async getUserReserves), 
+   * Uses TokenMetadataRegistry if available for proper resolution chain,
    * otherwise falls back to AaveMetadata, then hardcoded mapping
    */
-  private getSymbolForAsset(asset: string): string {
-    // Try to get symbol from AaveMetadata
+  private async getSymbolForAsset(asset: string): Promise<string> {
+    // If TokenMetadataRegistry is available, use it for full resolution chain
+    if (this.tokenRegistry) {
+      const metadata = await this.tokenRegistry.get(asset);
+      return metadata.symbol;
+    }
+    
+    // Fallback: Try to get symbol from AaveMetadata
     if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
       const reserve = this.aaveMetadata.getReserve(asset);
       if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
@@ -424,7 +424,7 @@ export class AaveDataService {
       }
     }
     
-    // Fallback to hardcoded mapping (Base mainnet)
+    // Final fallback to hardcoded mapping (Base mainnet)
     const knownAssets: Record<string, string> = {
       '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
@@ -437,6 +437,7 @@ export class AaveDataService {
     const symbol = knownAssets[asset.toLowerCase()];
     
     // Log if symbol is missing for debugging
+    // NOTE: This warning should rarely appear now that TokenMetadataRegistry is used
     if (!symbol) {
       // eslint-disable-next-line no-console
       console.warn(`[aave-data] symbol_missing: ${asset} - consider adding to AaveMetadata`);
