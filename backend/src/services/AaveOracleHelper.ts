@@ -54,9 +54,17 @@ export class AaveOracleHelper {
   private readonly metadataTtlMs = 600000; // 10 minutes
   private readonly priceTtlMs = 60000; // 1 minute (for block-tagged reads)
   private initialized = false;
+  private tokenRegistry: import('./TokenMetadataRegistry.js').TokenMetadataRegistry | null = null;
 
   constructor(provider: ethers.JsonRpcProvider) {
     this.provider = provider;
+  }
+
+  /**
+   * Set TokenMetadataRegistry instance for symbol/decimals resolution
+   */
+  setTokenRegistry(tokenRegistry: import('./TokenMetadataRegistry.js').TokenMetadataRegistry): void {
+    this.tokenRegistry = tokenRegistry;
   }
 
   /**
@@ -117,20 +125,39 @@ export class AaveOracleHelper {
     }
 
     try {
-      const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
-      const decimals = await token.decimals();
+      let decimals: number;
+      let symbol: string;
       
-      // Update cache (fetch symbol at the same time if not cached)
-      const existingSymbol = cached?.symbol;
-      const symbol = existingSymbol || await this.fetchSymbol(tokenAddress);
+      // Try TokenMetadataRegistry first
+      if (this.tokenRegistry) {
+        try {
+          const metadata = await this.tokenRegistry.get(normalized);
+          decimals = metadata.decimals;
+          symbol = metadata.symbol;
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`[aave-oracle] TokenMetadataRegistry failed for ${normalized}, falling back to ERC20:`, err);
+          
+          // Fallback to direct ERC20 call
+          const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
+          decimals = Number(await token.decimals());
+          symbol = cached?.symbol || await this.fetchSymbol(tokenAddress);
+        }
+      } else {
+        // No registry, use direct ERC20 call
+        const token = new ethers.Contract(tokenAddress, ERC20_ABI, this.provider);
+        decimals = Number(await token.decimals());
+        symbol = cached?.symbol || await this.fetchSymbol(tokenAddress);
+      }
       
+      // Update cache
       this.metadataCache.set(normalized, {
-        decimals: Number(decimals),
+        decimals,
         symbol,
         timestamp: Date.now()
       });
       
-      return Number(decimals);
+      return decimals;
     } catch (error) {
       // eslint-disable-next-line no-console
       console.error(`[aave-oracle] Failed to get decimals for ${tokenAddress}:`, error);
@@ -150,6 +177,26 @@ export class AaveOracleHelper {
       return cached.symbol;
     }
 
+    // Try TokenMetadataRegistry first
+    if (this.tokenRegistry) {
+      try {
+        const metadata = await this.tokenRegistry.get(normalized);
+        
+        // Update cache
+        this.metadataCache.set(normalized, {
+          decimals: metadata.decimals,
+          symbol: metadata.symbol,
+          timestamp: Date.now()
+        });
+        
+        return metadata.symbol;
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(`[aave-oracle] TokenMetadataRegistry failed for ${normalized}, falling back to ERC20:`, err);
+      }
+    }
+
+    // Fallback to direct ERC20 call
     return await this.fetchSymbol(tokenAddress);
   }
 
