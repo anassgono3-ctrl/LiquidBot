@@ -126,29 +126,31 @@ export class AaveDataService {
     if (provider instanceof ethers.WebSocketProvider) {
       this.wsProvider = provider;
       
-      // Setup event listeners for WebSocket health tracking
-      this.wsProvider.on('open', () => {
-        this.wsHealthy = true;
-        // eslint-disable-next-line no-console
-        console.log('[provider] ws_recovered');
-      });
-      
-      this.wsProvider.on('close', () => {
-        this.wsHealthy = false;
-        // eslint-disable-next-line no-console
-        console.log('[provider] ws_unhealthy; routing eth_call via http');
-      });
-      
+      // Setup error event listener for WebSocket health tracking
+      // Note: ethers.js v6 WebSocketProvider doesn't emit 'open'/'close' events
+      // We track health via errors and assume healthy by default
       this.wsProvider.on('error', (error: Error) => {
         this.wsHealthy = false;
         // eslint-disable-next-line no-console
         console.log('[provider] ws_unhealthy; routing eth_call via http', error.message);
       });
       
-      // WebSocketProvider.ready is a Promise, not a boolean
-      // Check if provider is already ready (connected)
-      // We'll mark as healthy when the provider successfully connects
-      this.wsHealthy = false; // Start as unhealthy until confirmed connected
+      // Start optimistically as healthy - will be marked unhealthy on errors
+      // The callWithFallback method will detect provider destroyed errors and fall back to HTTP
+      this.wsHealthy = true;
+      
+      // Wait for provider to be ready asynchronously
+      // Cast to any to access the ready Promise since TypeScript may not infer it correctly
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (this.wsProvider as any).ready.then(() => {
+        this.wsHealthy = true;
+        // eslint-disable-next-line no-console
+        console.log('[provider] ws_ready; using WebSocket for eth_call operations');
+      }).catch((error: Error) => {
+        this.wsHealthy = false;
+        // eslint-disable-next-line no-console
+        console.log('[provider] ws_failed_to_connect; will route eth_call via http', error.message);
+      });
       
       // Create HTTP fallback provider if RPC_URL is configured
       const httpRpcUrl = process.env.RPC_URL;
@@ -262,13 +264,18 @@ export class AaveDataService {
       // Check if error is provider destroyed using ethers error codes
       const isProviderDestroyed = this.isProviderDestroyedError(error);
       
-      if (isProviderDestroyed && this.httpProvider) {
-        // eslint-disable-next-line no-console
-        console.log(`[provider] ws_unhealthy; routing eth_call via http (${method} retry after error)`);
+      if (isProviderDestroyed) {
+        // Mark WebSocket as unhealthy so future calls route through HTTP
+        this.wsHealthy = false;
         
-        // Fallback to HTTP provider
-        const httpContract = new ethers.Contract(contractAddress, contractAbi, this.httpProvider);
-        return await httpContract[method](...args);
+        if (this.httpProvider) {
+          // eslint-disable-next-line no-console
+          console.log(`[provider] ws_unhealthy; routing eth_call via http (${method} retry after error)`);
+          
+          // Fallback to HTTP provider
+          const httpContract = new ethers.Contract(contractAddress, contractAbi, this.httpProvider);
+          return await httpContract[method](...args);
+        }
       }
       
       // Re-throw if not a provider destroyed error or no fallback available
