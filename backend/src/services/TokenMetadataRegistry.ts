@@ -17,7 +17,6 @@
 import { Contract, JsonRpcProvider } from 'ethers';
 import type { Redis } from 'ioredis';
 
-import { config } from '../config/index.js';
 import type { AaveMetadata } from '../aave/AaveMetadata.js';
 
 export interface TokenMetadata {

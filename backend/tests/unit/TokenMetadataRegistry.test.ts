@@ -107,35 +107,7 @@ describe('TokenMetadataRegistry', () => {
       // Not in Redis cache
       mockRedis.get.mockResolvedValue(null);
 
-      // Create a new registry with a provider that has mocked methods
-      const mockProviderWithContract = {
-        call: vi.fn()
-      };
-      
-      // Import Contract and mock it per-test
-      const { Contract } = await import('ethers');
-      const originalContract = Contract;
-      
-      // Create a simple mock that returns the contract methods
-      const mockContractInstance = {
-        symbol: vi.fn().mockResolvedValue('CUSTOM'),
-        decimals: vi.fn().mockResolvedValue(18)
-      };
-      
-      // Spy on Contract constructor
-      const ContractSpy = vi.fn(() => mockContractInstance);
-      
-      // Temporarily replace Contract in the module
-      const tokenMetadataModule = await import('../../src/services/TokenMetadataRegistry.js');
-      
-      // Create registry with mock provider (will use real Contract but we'll intercept calls)
-      const testRegistry = new tokenMetadataModule.TokenMetadataRegistry({
-        provider: mockProviderWithContract as any,
-        aaveMetadata: mockAaveMetadata,
-        redis: mockRedis
-      });
-      
-      // For this test, we'll skip it since mocking ethers.Contract properly is complex
+      // For this test, we skip complex Contract mocking
       // The functionality works but the test infrastructure needs more setup
       // Instead, test the fallback behavior
       const result = await registry.get(address);
