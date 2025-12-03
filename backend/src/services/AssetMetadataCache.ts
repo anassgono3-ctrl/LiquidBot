@@ -60,6 +60,7 @@ export class AssetMetadataCache {
   private priceCache = new Map<string, PriceData>();
   private ethPriceCache: PriceData | null = null;
   private ethPriceFeed: string | null = null;
+  private tokenRegistry: import('./TokenMetadataRegistry.js').TokenMetadataRegistry | null = null;
 
   constructor(provider: ethers.JsonRpcProvider) {
     this.provider = provider;
@@ -68,6 +69,13 @@ export class AssetMetadataCache {
       AAVE_ORACLE_ABI,
       provider
     );
+  }
+
+  /**
+   * Set TokenMetadataRegistry instance for symbol resolution
+   */
+  setTokenRegistry(tokenRegistry: import('./TokenMetadataRegistry.js').TokenMetadataRegistry): void {
+    this.tokenRegistry = tokenRegistry;
   }
 
   /**
@@ -95,11 +103,38 @@ export class AssetMetadataCache {
     const token = new ethers.Contract(assetAddress, ERC20_ABI, this.provider);
     
     try {
-      // Fetch symbol, decimals in parallel
-      const [symbol, decimals] = await Promise.all([
-        token.symbol(),
-        token.decimals()
-      ]);
+      let symbol: string;
+      let decimals: number;
+      
+      // Try to use TokenMetadataRegistry first for consistent resolution
+      if (this.tokenRegistry) {
+        try {
+          const metadata = await this.tokenRegistry.get(assetAddress);
+          symbol = metadata.symbol;
+          decimals = metadata.decimals;
+          
+          // Log if resolved via registry (for debugging)
+          if (metadata.source !== 'unknown') {
+            // eslint-disable-next-line no-console
+            console.log(`[metadata-cache] Resolved via TokenMetadataRegistry: ${assetAddress} -> ${symbol} (source: ${metadata.source})`);
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`[metadata-cache] TokenMetadataRegistry failed for ${assetAddress}, falling back to direct ERC20 call:`, err);
+          
+          // Fallback to direct ERC20 calls
+          [symbol, decimals] = await Promise.all([
+            token.symbol(),
+            token.decimals().then(d => Number(d))
+          ]);
+        }
+      } else {
+        // No registry available, use direct ERC20 calls
+        [symbol, decimals] = await Promise.all([
+          token.symbol(),
+          token.decimals().then(d => Number(d))
+        ]);
+      }
 
       // Try to get price feed address from Aave oracle
       let priceFeedAddress: string | undefined;
@@ -126,7 +161,7 @@ export class AssetMetadataCache {
       return {
         address: assetAddress,
         symbol,
-        decimals: Number(decimals),
+        decimals,
         priceFeedAddress,
         priceFeedDecimals: priceFeedDecimals || 8, // Default to 8 (Chainlink standard)
         lastUpdate: Date.now()
