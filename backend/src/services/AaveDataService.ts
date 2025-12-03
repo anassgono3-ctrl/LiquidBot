@@ -407,36 +407,25 @@ export class AaveDataService {
 
   /**
    * Map asset address to symbol
-   * Uses TokenMetadataRegistry if available for deterministic resolution:
-   * base metadata → overrides → on-chain (cache-backed)
-   * Falls back to AaveMetadata and hardcoded mapping if registry not available
+   * Priority order when TokenMetadataRegistry available:
+   *   1. Delegate to TokenMetadataRegistry (which checks base → overrides → on-chain)
+   * 
+   * Fallback when TokenMetadataRegistry NOT available:
+   *   1. Check AaveMetadata
+   *   2. Check hardcoded mapping
    */
   private async getSymbolForAsset(asset: string): Promise<string> {
     // Normalize address to lowercase at the start
     const normalizedAddress = asset.toLowerCase();
     
-    // Priority 1: Check base metadata (authoritative source)
-    if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
-      const reserve = this.aaveMetadata.getReserve(normalizedAddress);
-      if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
-        return reserve.symbol;
-      }
-    }
-    
-    // Priority 2: Use TokenMetadataRegistry if available (handles overrides + on-chain)
+    // If TokenMetadataRegistry is available, delegate to it (handles base → overrides → on-chain)
     if (this.tokenRegistry) {
       try {
         const metadata = await this.tokenRegistry.get(normalizedAddress);
         
         // Registry returns symbol (may be UNKNOWN if resolution failed)
         // Do NOT log here - registry handles logging internally
-        if (metadata.source !== 'unknown') {
-          return metadata.symbol;
-        }
-        
-        // Registry returned unknown - propagate it
-        // Registry already logged the warning via its negative cache logic
-        return metadata.symbol; // 'UNKNOWN'
+        return metadata.symbol;
       } catch (error) {
         // Registry threw an error, continue to fallback
         // eslint-disable-next-line no-console
@@ -444,7 +433,16 @@ export class AaveDataService {
       }
     }
     
-    // Priority 3: Fallback to hardcoded mapping (Base mainnet) when registry not available
+    // Fallback path (only when registry not available)
+    // Priority 1: Check base metadata (AaveMetadata)
+    if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
+      const reserve = this.aaveMetadata.getReserve(normalizedAddress);
+      if (reserve && reserve.symbol && reserve.symbol !== 'UNKNOWN') {
+        return reserve.symbol;
+      }
+    }
+    
+    // Priority 2: Check hardcoded mapping (Base mainnet)
     const knownAssets: Record<string, string> = {
       '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913': 'USDC',
       '0x50c5725949a6f0c72e6c4a641f24049a917db0cb': 'DAI',
@@ -461,7 +459,7 @@ export class AaveDataService {
 
     const symbol = knownAssets[normalizedAddress];
     
-    // Log if symbol is missing for debugging (fallback path only - when registry not available)
+    // Log if symbol is missing (fallback path only - when registry not available)
     if (!symbol) {
       // eslint-disable-next-line no-console
       console.warn(`[aave-data] symbol_missing: ${normalizedAddress} - consider adding to TokenMetadataRegistry or AaveMetadata`);
