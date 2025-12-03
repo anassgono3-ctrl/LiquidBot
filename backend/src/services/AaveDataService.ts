@@ -3,7 +3,7 @@ import { ethers } from 'ethers';
 
 import { config } from '../config/index.js';
 import { calculateUsdValue } from '../utils/usdMath.js';
-import { baseToUsd, usdValue, formatTokenAmount, validateAmount, applyRay } from '../utils/decimals.js';
+import { baseToUsd, usdValue, formatTokenAmount, validateAmount } from '../utils/decimals.js';
 
 import type { AssetMetadataCache } from './AssetMetadataCache.js';
 import type { TokenMetadataRegistry } from './TokenMetadataRegistry.js';
