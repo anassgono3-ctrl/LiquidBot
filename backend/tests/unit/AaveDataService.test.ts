@@ -187,4 +187,212 @@ describe('AaveDataService', () => {
       expect(totalDebt).toBe(0n);
     });
   });
+
+  describe('getSymbolForAsset', () => {
+    let mockProvider: ethers.JsonRpcProvider;
+    let service: AaveDataService;
+    let mockTokenRegistry: any;
+    
+    beforeEach(() => {
+      // Create mock provider
+      mockProvider = {
+        getNetwork: vi.fn().mockResolvedValue({ chainId: 8453n })
+      } as unknown as ethers.JsonRpcProvider;
+      
+      service = new AaveDataService(mockProvider);
+      
+      // Create mock TokenMetadataRegistry
+      mockTokenRegistry = {
+        get: vi.fn()
+      };
+      
+      service.setTokenRegistry(mockTokenRegistry);
+    });
+
+    it('should normalize address to lowercase before lookup', async () => {
+      const mixedCaseAddress = '0x833589FCD6EDB6E08F4C7C32D4F71B54BDA02913';
+      const lowerCaseAddress = mixedCaseAddress.toLowerCase();
+      
+      // Mock registry to return override
+      mockTokenRegistry.get.mockResolvedValue({
+        address: lowerCaseAddress,
+        symbol: 'USDC',
+        decimals: 6,
+        source: 'override'
+      });
+      
+      // Call private method via reflection for testing
+      const result = await (service as any).getSymbolForAsset(mixedCaseAddress);
+      
+      expect(result).toBe('USDC');
+      expect(mockTokenRegistry.get).toHaveBeenCalledWith(lowerCaseAddress);
+    });
+
+    it('should resolve symbol via TokenMetadataRegistry override when not in base', async () => {
+      const address = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+      
+      // Mock registry to return override (base doesn't have it)
+      mockTokenRegistry.get.mockResolvedValue({
+        address,
+        symbol: 'USDC',
+        decimals: 6,
+        source: 'override'
+      });
+      
+      const result = await (service as any).getSymbolForAsset(address);
+      
+      expect(result).toBe('USDC');
+      expect(mockTokenRegistry.get).toHaveBeenCalledWith(address);
+    });
+
+    it('should resolve symbol via TokenMetadataRegistry on-chain when not in base or overrides', async () => {
+      const address = '0x1234567890123456789012345678901234567890';
+      
+      // Mock registry to return on-chain result
+      mockTokenRegistry.get.mockResolvedValue({
+        address,
+        symbol: 'TOKEN',
+        decimals: 18,
+        source: 'onchain'
+      });
+      
+      const result = await (service as any).getSymbolForAsset(address);
+      
+      expect(result).toBe('TOKEN');
+      expect(mockTokenRegistry.get).toHaveBeenCalledWith(address);
+    });
+
+    it('should return UNKNOWN when registry fails to resolve', async () => {
+      const address = '0x1234567890123456789012345678901234567890';
+      
+      // Mock registry to return unknown (both override and on-chain failed)
+      mockTokenRegistry.get.mockResolvedValue({
+        address,
+        symbol: 'UNKNOWN',
+        decimals: 18,
+        source: 'unknown'
+      });
+      
+      const result = await (service as any).getSymbolForAsset(address);
+      
+      expect(result).toBe('UNKNOWN');
+      expect(mockTokenRegistry.get).toHaveBeenCalledWith(address);
+    });
+
+    it('should not log symbol_missing when registry resolves successfully', async () => {
+      const consoleSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const address = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+      
+      // Mock registry to return override
+      mockTokenRegistry.get.mockResolvedValue({
+        address,
+        symbol: 'USDC',
+        decimals: 6,
+        source: 'override'
+      });
+      
+      await (service as any).getSymbolForAsset(address);
+      
+      // Should NOT log symbol_missing
+      expect(consoleSpy).not.toHaveBeenCalledWith(
+        expect.stringContaining('[aave-data] symbol_missing')
+      );
+      
+      consoleSpy.mockRestore();
+    });
+
+    it('should log symbol_resolved when registry succeeds', async () => {
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      const address = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+      
+      // Mock registry to return override
+      mockTokenRegistry.get.mockResolvedValue({
+        address,
+        symbol: 'USDC',
+        decimals: 6,
+        source: 'override'
+      });
+      
+      await (service as any).getSymbolForAsset(address);
+      
+      // Should log symbol_resolved with source
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('[aave-data] symbol_resolved')
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('USDC')
+      );
+      expect(consoleSpy).toHaveBeenCalledWith(
+        expect.stringContaining('source: override')
+      );
+      
+      consoleSpy.mockRestore();
+    });
+
+    it('should use fallback when TokenMetadataRegistry is not set', async () => {
+      // Create service without registry
+      const serviceNoRegistry = new AaveDataService(mockProvider);
+      const address = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+      
+      // Should use hardcoded fallback
+      const result = await (serviceNoRegistry as any).getSymbolForAsset(address);
+      
+      expect(result).toBe('USDC');
+    });
+
+    it('should handle base metadata with missing symbol by routing through registry', async () => {
+      const address = '0x60a3e35cc302bfa44cb288bc5a4f316fdb1adb42'; // EURC
+      
+      // Mock AaveMetadata to have the address but with UNKNOWN symbol
+      const mockAaveMetadata = {
+        getReserve: vi.fn().mockReturnValue({
+          symbol: 'UNKNOWN',
+          decimals: 6,
+          underlyingAddress: address
+        })
+      };
+      service.setAaveMetadata(mockAaveMetadata);
+      
+      // Mock registry to return override
+      mockTokenRegistry.get.mockResolvedValue({
+        address,
+        symbol: 'EURC',
+        decimals: 6,
+        source: 'override'
+      });
+      
+      const result = await (service as any).getSymbolForAsset(address);
+      
+      // Should use registry's result, not base metadata's UNKNOWN
+      expect(result).toBe('EURC');
+    });
+
+    it('should respect base metadata when it has a valid symbol', async () => {
+      const address = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
+      
+      // Mock AaveMetadata to have the address with a valid symbol
+      const mockAaveMetadata = {
+        getReserve: vi.fn().mockReturnValue({
+          symbol: 'AUTHORITATIVE_USDC',
+          decimals: 6,
+          underlyingAddress: address
+        })
+      };
+      service.setAaveMetadata(mockAaveMetadata);
+      
+      // Registry should return base metadata (which is what it would do internally)
+      // because TokenMetadataRegistry checks base first
+      mockTokenRegistry.get.mockResolvedValue({
+        address,
+        symbol: 'AUTHORITATIVE_USDC', // Must match what AaveMetadata has
+        decimals: 6,
+        source: 'base' // Indicates it came from base metadata
+      });
+      
+      const result = await (service as any).getSymbolForAsset(address);
+      
+      // Should use registry which internally checks base first
+      expect(result).toBe('AUTHORITATIVE_USDC');
+    });
+  });
 });
