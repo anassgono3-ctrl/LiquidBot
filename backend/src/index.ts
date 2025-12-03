@@ -197,10 +197,8 @@ if (config.executionEnabled) {
       }
       
       // Wire the registry into services that need it
-      // Note: we need to access the internal aaveDataService from executionService
-      // For now, we'll add a method to set it
-      if (executionService && typeof (executionService as any).setTokenRegistry === 'function') {
-        (executionService as any).setTokenRegistry(tokenRegistry);
+      if (executionService && typeof executionService.setTokenRegistry === 'function') {
+        executionService.setTokenRegistry(tokenRegistry);
       }
       
       logger.info('[token-registry] Initialized and wired into services');

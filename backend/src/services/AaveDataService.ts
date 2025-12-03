@@ -412,17 +412,10 @@ export class AaveDataService {
 
   /**
    * Map asset address to symbol
-   * Uses TokenMetadataRegistry if available, then AaveMetadata, then fallback to hardcoded mapping
+   * Uses TokenMetadataRegistry if available (via async getUserReserves), 
+   * otherwise falls back to AaveMetadata, then hardcoded mapping
    */
   private getSymbolForAsset(asset: string): string {
-    // Try TokenMetadataRegistry first (synchronous fallback for now)
-    // In future, this method could be made async to fully leverage the registry
-    if (this.tokenRegistry) {
-      // For now, use synchronous checks only
-      // The registry will be properly integrated in getUserReserves which is already async
-      // This is a transitional implementation
-    }
-    
     // Try to get symbol from AaveMetadata
     if (this.aaveMetadata && typeof this.aaveMetadata.getReserve === 'function') {
       const reserve = this.aaveMetadata.getReserve(asset);
