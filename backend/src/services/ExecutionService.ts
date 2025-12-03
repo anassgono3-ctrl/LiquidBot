@@ -139,6 +139,16 @@ export class ExecutionService {
   }
 
   /**
+   * Set TokenMetadataRegistry instance (for dependency injection)
+   */
+  setTokenRegistry(tokenRegistry: import('./TokenMetadataRegistry.js').TokenMetadataRegistry): void {
+    // Update AaveDataService with the token registry
+    if (this.aaveDataService) {
+      this.aaveDataService.setTokenRegistry(tokenRegistry);
+    }
+  }
+
+  /**
    * Check if Chainlink price feed is stale for an asset
    * NOTE: This is a placeholder for future implementation. Currently, Aave oracle
    * handles price staleness checks internally. See PRICE_STALENESS_SEC config.

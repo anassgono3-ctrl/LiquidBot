@@ -156,7 +156,7 @@ if (config.executionEnabled) {
 }
 
 // Initialize AaveMetadata if RPC is configured (async initialization deferred)
-// Use async IIFE to initialize AaveMetadata
+// Use async IIFE to initialize AaveMetadata and TokenMetadataRegistry
 (async () => {
   // Check if we have an RPC URL configured for execution
   const rpcUrl = process.env.RPC_URL;
@@ -169,6 +169,39 @@ if (config.executionEnabled) {
       await metadata.initialize();
       executionService.setAaveMetadata(metadata);
       logger.info(`[aave-metadata] Initialized with ${metadata.getReserveCount()} reserves`);
+      
+      // Initialize TokenMetadataRegistry
+      const { TokenMetadataRegistry } = await import('./services/TokenMetadataRegistry.js');
+      const tokenRegistry = new TokenMetadataRegistry({
+        provider,
+        aaveMetadata: metadata
+      });
+      
+      // Try to connect Redis for distributed caching
+      const redisUrl = config.redisUrl;
+      if (redisUrl) {
+        try {
+          const ioredis = await import('ioredis');
+          const redis = new ioredis.Redis(redisUrl, {
+            retryStrategy: (times: number) => Math.min(times * 50, 2000),
+            maxRetriesPerRequest: 3
+          });
+          await redis.ping();
+          tokenRegistry.setRedis(redis);
+          logger.info('[token-registry] Initialized with Redis caching');
+        } catch (redisError) {
+          logger.warn('[token-registry] Redis not available, using in-memory cache only:', redisError);
+        }
+      } else {
+        logger.info('[token-registry] Initialized with in-memory cache (Redis not configured)');
+      }
+      
+      // Wire the registry into services that need it
+      if (executionService && typeof executionService.setTokenRegistry === 'function') {
+        executionService.setTokenRegistry(tokenRegistry);
+      }
+      
+      logger.info('[token-registry] Initialized and wired into services');
     } catch (error) {
       logger.error('[aave-metadata] Failed to initialize:', error);
     }
