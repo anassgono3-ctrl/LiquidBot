@@ -301,7 +301,7 @@ describe('AaveDataService', () => {
       consoleSpy.mockRestore();
     });
 
-    it('should log symbol_resolved when registry succeeds', async () => {
+    it('should NOT log in AaveDataService when registry succeeds (registry handles logging)', async () => {
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       const address = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
       
@@ -315,15 +315,9 @@ describe('AaveDataService', () => {
       
       await (service as any).getSymbolForAsset(address);
       
-      // Should log symbol_resolved with source
-      expect(consoleSpy).toHaveBeenCalledWith(
+      // AaveDataService should NOT log - registry handles logging
+      expect(consoleSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_resolved')
-      );
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('USDC')
-      );
-      expect(consoleSpy).toHaveBeenCalledWith(
-        expect.stringContaining('source: override')
       );
       
       consoleSpy.mockRestore();
