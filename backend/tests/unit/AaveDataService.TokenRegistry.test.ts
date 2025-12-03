@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { ethers } from 'ethers';
 
 import { AaveDataService } from '../../src/services/AaveDataService.js';
@@ -10,6 +10,14 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
   let mockAaveMetadata: any;
   let tokenRegistry: TokenMetadataRegistry;
   let aaveDataService: AaveDataService;
+  let consoleSpy: any;
+
+  /**
+   * Helper function to get the private getSymbolForAsset method
+   */
+  function getSymbolForAsset(service: AaveDataService, address: string): Promise<string> {
+    return (service as any).getSymbolForAsset.call(service, address);
+  }
 
   beforeEach(() => {
     // Create mock provider
@@ -35,6 +43,14 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
     aaveDataService.setTokenRegistry(tokenRegistry);
   });
 
+  afterEach(() => {
+    // Restore all console spies
+    if (consoleSpy) {
+      consoleSpy.mockRestore();
+      consoleSpy = null;
+    }
+  });
+
   describe('Symbol Resolution via TokenMetadataRegistry', () => {
     it('should resolve USDC via override without symbol_missing warning', async () => {
       const usdcAddress = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
@@ -42,14 +58,12 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       // Mock AaveMetadata doesn't have USDC
       mockAaveMetadata.getReserve.mockReturnValue(undefined);
 
-      // Spy on console.warn to verify no warning is emitted
+      // Spy on console to verify logging behavior
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      // Call the private method through reflection (testing internal behavior)
-      // In real usage, this is called internally by getAllUserReserves
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(usdcAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, usdcAddress);
 
       expect(symbol).toBe('USDC');
       
@@ -62,9 +76,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should resolve cbBTC via override without symbol_missing warning', async () => {
@@ -74,9 +85,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(cbBTCAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, cbBTCAddress);
 
       expect(symbol).toBe('cbBTC');
       expect(logSpy).toHaveBeenCalledWith(
@@ -85,9 +96,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should resolve weETH via override without symbol_missing warning', async () => {
@@ -97,9 +105,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(weETHAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, weETHAddress);
 
       expect(symbol).toBe('weETH');
       expect(logSpy).toHaveBeenCalledWith(
@@ -108,9 +116,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should resolve wstETH via override without symbol_missing warning', async () => {
@@ -120,9 +125,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(wstETHAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, wstETHAddress);
 
       expect(symbol).toBe('wstETH');
       expect(logSpy).toHaveBeenCalledWith(
@@ -131,9 +136,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should resolve cbETH via override without symbol_missing warning', async () => {
@@ -143,9 +145,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(cbETHAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, cbETHAddress);
 
       expect(symbol).toBe('cbETH');
       expect(logSpy).toHaveBeenCalledWith(
@@ -154,9 +156,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should resolve AAVE via override without symbol_missing warning', async () => {
@@ -166,9 +165,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(aaveAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, aaveAddress);
 
       expect(symbol).toBe('AAVE');
       expect(logSpy).toHaveBeenCalledWith(
@@ -177,9 +176,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should resolve EURC via override without symbol_missing warning', async () => {
@@ -189,9 +185,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(eurcAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, eurcAddress);
 
       expect(symbol).toBe('EURC');
       expect(logSpy).toHaveBeenCalledWith(
@@ -200,9 +196,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should resolve USDbC via override without symbol_missing warning', async () => {
@@ -212,9 +205,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = { mockRestore: () => { warnSpy.mockRestore(); logSpy.mockRestore(); } };
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(usdBCAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, usdBCAddress);
 
       expect(symbol).toBe('USDbC');
       expect(logSpy).toHaveBeenCalledWith(
@@ -223,9 +216,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).not.toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
-      logSpy.mockRestore();
     });
 
     it('should normalize addresses to lowercase during resolution', async () => {
@@ -233,8 +223,7 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       
       mockAaveMetadata.getReserve.mockReturnValue(undefined);
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(mixedCaseAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, mixedCaseAddress);
 
       expect(symbol).toBe('USDC');
       
@@ -251,8 +240,7 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
         decimals: 6
       });
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(usdcAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, usdcAddress);
 
       // Should use base metadata, not override
       expect(symbol).toBe('CUSTOM_USDC');
@@ -264,22 +252,19 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       mockAaveMetadata.getReserve.mockReturnValue(undefined);
 
       const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      consoleSpy = logSpy;
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      
       // First call
-      const symbol1 = await getSymbolForAsset(usdcAddress);
+      const symbol1 = await getSymbolForAsset(aaveDataService, usdcAddress);
       expect(symbol1).toBe('USDC');
       expect(logSpy).toHaveBeenCalledTimes(1);
       
       logSpy.mockClear();
       
-      // Second call - should use cache (no additional log)
-      const symbol2 = await getSymbolForAsset(usdcAddress);
+      // Second call - should use cache (no additional log due to warn-once behavior)
+      const symbol2 = await getSymbolForAsset(aaveDataService, usdcAddress);
       expect(symbol2).toBe('USDC');
-      expect(logSpy).not.toHaveBeenCalled(); // Already warned once
-
-      logSpy.mockRestore();
+      expect(logSpy).not.toHaveBeenCalled();
     });
 
     it('should handle unknown addresses with on-chain fallback', async () => {
@@ -289,9 +274,9 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
 
       // Without a working provider, on-chain will fail and use negative cache
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      consoleSpy = warnSpy;
 
-      const getSymbolForAsset = (aaveDataService as any).getSymbolForAsset.bind(aaveDataService);
-      const symbol = await getSymbolForAsset(unknownAddress);
+      const symbol = await getSymbolForAsset(aaveDataService, unknownAddress);
 
       // Should return UNKNOWN after on-chain fetch fails
       expect(symbol).toBe('UNKNOWN');
@@ -300,8 +285,6 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('[token-registry] symbol_missing')
       );
-
-      warnSpy.mockRestore();
     });
   });
 
@@ -313,8 +296,7 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       const usdcAddress = '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913';
       mockAaveMetadata.getReserve.mockReturnValue(undefined);
 
-      const getSymbolForAsset = (serviceWithoutRegistry as any).getSymbolForAsset.bind(serviceWithoutRegistry);
-      const symbol = await getSymbolForAsset(usdcAddress);
+      const symbol = await getSymbolForAsset(serviceWithoutRegistry, usdcAddress);
 
       // Should still resolve via hardcoded mapping
       expect(symbol).toBe('USDC');
@@ -327,16 +309,14 @@ describe('AaveDataService - TokenMetadataRegistry Integration', () => {
       mockAaveMetadata.getReserve.mockReturnValue(undefined);
 
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      consoleSpy = warnSpy;
 
-      const getSymbolForAsset = (serviceWithoutRegistry as any).getSymbolForAsset.bind(serviceWithoutRegistry);
-      const symbol = await getSymbolForAsset(unknownAddress);
+      const symbol = await getSymbolForAsset(serviceWithoutRegistry, unknownAddress);
 
       expect(symbol).toBe('UNKNOWN');
       expect(warnSpy).toHaveBeenCalledWith(
         expect.stringContaining('[aave-data] symbol_missing')
       );
-
-      warnSpy.mockRestore();
     });
   });
 });
