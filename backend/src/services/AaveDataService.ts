@@ -259,10 +259,8 @@ export class AaveDataService {
       // Try with current provider (likely WS)
       return await contract[method](...args);
     } catch (error) {
-      // Check if error is provider destroyed
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isProviderDestroyed = errorMessage.includes('provider destroyed') || 
-                                   errorMessage.includes('UNSUPPORTED_OPERATION');
+      // Check if error is provider destroyed using ethers error codes
+      const isProviderDestroyed = this.isProviderDestroyedError(error);
       
       if (isProviderDestroyed && this.httpProvider) {
         // eslint-disable-next-line no-console
@@ -276,6 +274,28 @@ export class AaveDataService {
       // Re-throw if not a provider destroyed error or no fallback available
       throw error;
     }
+  }
+
+  /**
+   * Check if error is a provider destroyed error
+   * @param error The error to check
+   * @returns true if error is provider destroyed
+   */
+  private isProviderDestroyedError(error: unknown): boolean {
+    if (!error) return false;
+    
+    // Check for ethers error code
+    if (typeof error === 'object' && 'code' in error) {
+      const errorCode = (error as { code?: string }).code;
+      if (errorCode === 'UNSUPPORTED_OPERATION') {
+        return true;
+      }
+    }
+    
+    // Fallback to message checking
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    return errorMessage.includes('provider destroyed') || 
+           errorMessage.includes('UNSUPPORTED_OPERATION');
   }
 
   /**
@@ -527,43 +547,13 @@ export class AaveDataService {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    // If WS is unhealthy, route directly to HTTP
-    if (!this.wsHealthy && this.httpProvider) {
-      // eslint-disable-next-line no-console
-      console.log('[provider] ws_unhealthy; routing eth_call via http');
-      const httpContract = new ethers.Contract(
-        config.aaveUiPoolDataProvider,
-        UI_POOL_DATA_PROVIDER_ABI,
-        this.httpProvider
-      );
-      return await httpContract.getReservesList(config.aaveAddressesProvider);
-    }
-
-    try {
-      // Try with current provider (likely WS)
-      return await this.uiPoolDataProvider.getReservesList(config.aaveAddressesProvider);
-    } catch (error) {
-      // Check if error is provider destroyed
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isProviderDestroyed = errorMessage.includes('provider destroyed') || 
-                                   errorMessage.includes('UNSUPPORTED_OPERATION');
-      
-      if (isProviderDestroyed && this.httpProvider) {
-        // eslint-disable-next-line no-console
-        console.log('[provider] ws_unhealthy; routing eth_call via http (retry after error)');
-        
-        // Fallback to HTTP provider
-        const httpContract = new ethers.Contract(
-          config.aaveUiPoolDataProvider,
-          UI_POOL_DATA_PROVIDER_ABI,
-          this.httpProvider
-        );
-        return await httpContract.getReservesList(config.aaveAddressesProvider);
-      }
-      
-      // Re-throw if not a provider destroyed error or no fallback available
-      throw error;
-    }
+    return await this.callWithFallback<string[]>(
+      this.uiPoolDataProvider,
+      'getReservesList',
+      [config.aaveAddressesProvider],
+      config.aaveUiPoolDataProvider,
+      UI_POOL_DATA_PROVIDER_ABI
+    );
   }
 
   /**
