@@ -421,6 +421,26 @@ export class RealTimeHFService extends EventEmitter {
   }
 
   /**
+   * Set TokenMetadataRegistry instance (for dependency injection)
+   */
+  setTokenRegistry(tokenRegistry: import('./TokenMetadataRegistry.js').TokenMetadataRegistry): void {
+    // Update AaveDataService with the token registry
+    if (this.aaveDataService) {
+      this.aaveDataService.setTokenRegistry(tokenRegistry);
+    }
+  }
+
+  /**
+   * Set AaveMetadata instance (for dependency injection)
+   */
+  setAaveMetadata(aaveMetadata: import('../aave/AaveMetadata.js').AaveMetadata): void {
+    // Update AaveDataService with the Aave metadata
+    if (this.aaveDataService) {
+      this.aaveDataService.setAaveMetadata(aaveMetadata);
+    }
+  }
+
+  /**
    * Initialize and start the real-time service
    */
   async start(): Promise<void> {

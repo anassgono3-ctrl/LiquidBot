@@ -155,6 +155,11 @@ if (config.executionEnabled) {
   logger.info('[config] EXECUTION_ENABLED=false (execution disabled)');
 }
 
+// Module-level references for AaveMetadata and TokenMetadataRegistry
+// These will be initialized asynchronously and used by multiple services
+let aaveMetadata: import('./aave/AaveMetadata.js').AaveMetadata | undefined;
+let tokenMetadataRegistry: import('./services/TokenMetadataRegistry.js').TokenMetadataRegistry | undefined;
+
 // Initialize AaveMetadata if RPC is configured (async initialization deferred)
 // Use async IIFE to initialize AaveMetadata and TokenMetadataRegistry
 (async () => {
@@ -167,6 +172,10 @@ if (config.executionEnabled) {
       const { AaveMetadata } = await import('./aave/AaveMetadata.js');
       const metadata = new AaveMetadata(provider);
       await metadata.initialize();
+      
+      // Store in module-level variable for use by other services
+      aaveMetadata = metadata;
+      
       executionService.setAaveMetadata(metadata);
       logger.info(`[aave-metadata] Initialized with ${metadata.getReserveCount()} reserves`);
       
@@ -176,6 +185,9 @@ if (config.executionEnabled) {
         provider,
         aaveMetadata: metadata
       });
+      
+      // Store in module-level variable for use by other services
+      tokenMetadataRegistry = tokenRegistry;
       
       // Try to connect Redis for distributed caching
       const redisUrl = config.redisUrl;
@@ -199,14 +211,29 @@ if (config.executionEnabled) {
       // Wire the registry into services that need it
       if (executionService && typeof executionService.setTokenRegistry === 'function') {
         executionService.setTokenRegistry(tokenRegistry);
+        executionService.setAaveMetadata(metadata);
       }
       
-      logger.info('[token-registry] Initialized and wired into services');
+      // Note: realtimeHFService may not be initialized yet (it's created later)
+      // We'll wire it asynchronously below after this initialization completes
+      
+      logger.info('[token-registry] Initialized and wired into ExecutionService');
     } catch (error) {
       logger.error('[aave-metadata] Failed to initialize:', error);
     }
   }
-})().catch(err => logger.error('[aave-metadata] Initialization error:', err));
+})().then(() => {
+  // Wire TokenMetadataRegistry into RealTimeHFService if it was created
+  // This runs after the async initialization above completes
+  if (realtimeHFService && tokenMetadataRegistry) {
+    realtimeHFService.setTokenRegistry(tokenMetadataRegistry);
+    logger.info('[token-registry] Wired into RealTimeHFService');
+  }
+  if (realtimeHFService && aaveMetadata) {
+    realtimeHFService.setAaveMetadata(aaveMetadata);
+    logger.info('[aave-metadata] Wired into RealTimeHFService');
+  }
+}).catch(err => logger.error('[aave-metadata] Initialization error:', err));
 
 // Initialize on-demand health factor service (only when USE_SUBGRAPH=true and not mocking)
 let onDemandHealthFactor: OnDemandHealthFactor | undefined;
@@ -271,6 +298,9 @@ if (config.useRealtimeHF) {
     priceService,
     predictiveOrchestrator 
   });
+  
+  // Note: AaveMetadata and TokenMetadataRegistry will be wired asynchronously
+  // after they're initialized in the async IIFE above
   
   // Handle liquidatable events
   realtimeHFService.on('liquidatable', async (event: LiquidatableEvent) => {
