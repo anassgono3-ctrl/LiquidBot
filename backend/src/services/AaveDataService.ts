@@ -93,6 +93,9 @@ export interface ReserveData {
  */
 export class AaveDataService {
   private provider: ethers.JsonRpcProvider | null = null;
+  private wsProvider: ethers.WebSocketProvider | null = null;
+  private httpProvider: ethers.JsonRpcProvider | null = null;
+  private wsHealthy = false;
   private protocolDataProvider: ethers.Contract | null = null;
   private oracle: ethers.Contract | null = null;
   private pool: ethers.Contract | null = null;
@@ -107,9 +110,65 @@ export class AaveDataService {
     if (provider) {
       this.provider = provider;
       this.initializeContracts();
+      
+      // Setup dual providers if WebSocket is configured
+      this.setupDualProviders(provider);
     }
     this.aaveMetadata = aaveMetadata || null;
     this.metadataCache = metadataCache || null;
+  }
+  
+  /**
+   * Setup WebSocket and HTTP providers with health tracking
+   */
+  private setupDualProviders(provider: ethers.JsonRpcProvider): void {
+    // Check if provider is WebSocket
+    if (provider instanceof ethers.WebSocketProvider) {
+      this.wsProvider = provider;
+      
+      // Setup event listeners for WebSocket health tracking
+      this.wsProvider.on('open', () => {
+        this.wsHealthy = true;
+        // eslint-disable-next-line no-console
+        console.log('[provider] ws_recovered');
+      });
+      
+      this.wsProvider.on('close', () => {
+        this.wsHealthy = false;
+        // eslint-disable-next-line no-console
+        console.log('[provider] ws_unhealthy; routing eth_call via http');
+      });
+      
+      this.wsProvider.on('error', (error: Error) => {
+        this.wsHealthy = false;
+        // eslint-disable-next-line no-console
+        console.log('[provider] ws_unhealthy; routing eth_call via http', error.message);
+      });
+      
+      // WebSocketProvider.ready is a Promise, not a boolean
+      // Check if provider is already ready (connected)
+      // We'll mark as healthy when the provider successfully connects
+      this.wsHealthy = false; // Start as unhealthy until confirmed connected
+      
+      // Create HTTP fallback provider if RPC_URL is configured
+      const httpRpcUrl = process.env.RPC_URL;
+      if (httpRpcUrl) {
+        this.httpProvider = new ethers.JsonRpcProvider(httpRpcUrl);
+        // eslint-disable-next-line no-console
+        console.log('[provider] Initialized dual providers: WS + HTTP fallback');
+      }
+    } else {
+      // HTTP provider only
+      this.httpProvider = provider;
+      this.wsHealthy = false;
+    }
+  }
+  
+  /**
+   * Check if WebSocket provider is healthy
+   */
+  isWsHealthy(): boolean {
+    return this.wsHealthy;
   }
   
   /**
@@ -175,6 +234,51 @@ export class AaveDataService {
   }
 
   /**
+   * Execute a contract call with fallback to HTTP provider on WebSocket failure
+   * @param contract The contract instance to call
+   * @param method The method name to call
+   * @param args The arguments to pass to the method
+   * @param contractAddress The contract address (for fallback)
+   * @param contractAbi The contract ABI (for fallback)
+   * @returns The result of the contract call
+   */
+  private async callWithFallback<T>(
+    contract: ethers.Contract,
+    method: string,
+    args: unknown[],
+    contractAddress: string,
+    contractAbi: string[]
+  ): Promise<T> {
+    // If WS is unhealthy, route directly to HTTP
+    if (!this.wsHealthy && this.httpProvider) {
+      const httpContract = new ethers.Contract(contractAddress, contractAbi, this.httpProvider);
+      return await httpContract[method](...args);
+    }
+
+    try {
+      // Try with current provider (likely WS)
+      return await contract[method](...args);
+    } catch (error) {
+      // Check if error is provider destroyed
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isProviderDestroyed = errorMessage.includes('provider destroyed') || 
+                                   errorMessage.includes('UNSUPPORTED_OPERATION');
+      
+      if (isProviderDestroyed && this.httpProvider) {
+        // eslint-disable-next-line no-console
+        console.log(`[provider] ws_unhealthy; routing eth_call via http (${method} retry after error)`);
+        
+        // Fallback to HTTP provider
+        const httpContract = new ethers.Contract(contractAddress, contractAbi, this.httpProvider);
+        return await httpContract[method](...args);
+      }
+      
+      // Re-throw if not a provider destroyed error or no fallback available
+      throw error;
+    }
+  }
+
+  /**
    * Get reserve token addresses (aToken, stableDebt, variableDebt)
    */
   async getReserveTokenAddresses(asset: string): Promise<ReserveTokenAddresses> {
@@ -182,7 +286,18 @@ export class AaveDataService {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    const result = await this.protocolDataProvider.getReserveTokensAddresses(asset);
+    const result = await this.callWithFallback<{
+      aTokenAddress: string;
+      stableDebtTokenAddress: string;
+      variableDebtTokenAddress: string;
+    }>(
+      this.protocolDataProvider,
+      'getReserveTokensAddresses',
+      [asset],
+      config.aaveProtocolDataProvider,
+      PROTOCOL_DATA_PROVIDER_ABI
+    );
+    
     return {
       aTokenAddress: result.aTokenAddress,
       stableDebtTokenAddress: result.stableDebtTokenAddress,
@@ -198,7 +313,25 @@ export class AaveDataService {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    const result = await this.protocolDataProvider.getReserveConfigurationData(asset);
+    const result = await this.callWithFallback<{
+      decimals: bigint;
+      ltv: bigint;
+      liquidationThreshold: bigint;
+      liquidationBonus: bigint;
+      reserveFactor: bigint;
+      usageAsCollateralEnabled: boolean;
+      borrowingEnabled: boolean;
+      stableBorrowRateEnabled: boolean;
+      isActive: boolean;
+      isFrozen: boolean;
+    }>(
+      this.protocolDataProvider,
+      'getReserveConfigurationData',
+      [asset],
+      config.aaveProtocolDataProvider,
+      PROTOCOL_DATA_PROVIDER_ABI
+    );
+    
     return {
       decimals: result.decimals,
       ltv: result.ltv,
@@ -221,7 +354,24 @@ export class AaveDataService {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    const result = await this.protocolDataProvider.getUserReserveData(asset, user);
+    const result = await this.callWithFallback<{
+      currentATokenBalance: bigint;
+      currentStableDebt: bigint;
+      currentVariableDebt: bigint;
+      principalStableDebt: bigint;
+      scaledVariableDebt: bigint;
+      stableBorrowRate: bigint;
+      liquidityRate: bigint;
+      stableRateLastUpdated: bigint;
+      usageAsCollateralEnabled: boolean;
+    }>(
+      this.protocolDataProvider,
+      'getUserReserveData',
+      [asset, user],
+      config.aaveProtocolDataProvider,
+      PROTOCOL_DATA_PROVIDER_ABI
+    );
+    
     return {
       currentATokenBalance: result.currentATokenBalance,
       currentStableDebt: result.currentStableDebt,
@@ -243,7 +393,13 @@ export class AaveDataService {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    return await this.oracle.getAssetPrice(asset);
+    return await this.callWithFallback<bigint>(
+      this.oracle,
+      'getAssetPrice',
+      [asset],
+      config.aaveOracle,
+      ORACLE_ABI
+    );
   }
 
   /**
@@ -254,7 +410,21 @@ export class AaveDataService {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    const result = await this.pool.getUserAccountData(user);
+    const result = await this.callWithFallback<{
+      totalCollateralBase: bigint;
+      totalDebtBase: bigint;
+      availableBorrowsBase: bigint;
+      currentLiquidationThreshold: bigint;
+      ltv: bigint;
+      healthFactor: bigint;
+    }>(
+      this.pool,
+      'getUserAccountData',
+      [user],
+      config.aavePool,
+      POOL_ABI
+    );
+    
     return {
       totalCollateralBase: result.totalCollateralBase,
       totalDebtBase: result.totalDebtBase,
@@ -300,7 +470,27 @@ export class AaveDataService {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    const result = await this.pool.getReserveData(asset);
+    const result = await this.callWithFallback<{
+      unbacked: bigint;
+      accruedToTreasuryScaled: bigint;
+      totalAToken: bigint;
+      totalStableDebt: bigint;
+      totalVariableDebt: bigint;
+      liquidityRate: bigint;
+      variableBorrowRate: bigint;
+      stableBorrowRate: bigint;
+      averageStableBorrowRate: bigint;
+      liquidityIndex: bigint;
+      variableBorrowIndex: bigint;
+      lastUpdateTimestamp: bigint;
+    }>(
+      this.pool,
+      'getReserveData',
+      [asset],
+      config.aavePool,
+      POOL_ABI
+    );
+    
     return {
       unbacked: result.unbacked,
       accruedToTreasuryScaled: result.accruedToTreasuryScaled,
@@ -330,13 +520,50 @@ export class AaveDataService {
 
   /**
    * Get list of all reserves in the protocol
+   * Uses WebSocket provider when healthy, falls back to HTTP on error
    */
   async getReservesList(): Promise<string[]> {
     if (!this.uiPoolDataProvider) {
       throw new Error('AaveDataService not initialized with provider');
     }
 
-    return await this.uiPoolDataProvider.getReservesList(config.aaveAddressesProvider);
+    // If WS is unhealthy, route directly to HTTP
+    if (!this.wsHealthy && this.httpProvider) {
+      // eslint-disable-next-line no-console
+      console.log('[provider] ws_unhealthy; routing eth_call via http');
+      const httpContract = new ethers.Contract(
+        config.aaveUiPoolDataProvider,
+        UI_POOL_DATA_PROVIDER_ABI,
+        this.httpProvider
+      );
+      return await httpContract.getReservesList(config.aaveAddressesProvider);
+    }
+
+    try {
+      // Try with current provider (likely WS)
+      return await this.uiPoolDataProvider.getReservesList(config.aaveAddressesProvider);
+    } catch (error) {
+      // Check if error is provider destroyed
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const isProviderDestroyed = errorMessage.includes('provider destroyed') || 
+                                   errorMessage.includes('UNSUPPORTED_OPERATION');
+      
+      if (isProviderDestroyed && this.httpProvider) {
+        // eslint-disable-next-line no-console
+        console.log('[provider] ws_unhealthy; routing eth_call via http (retry after error)');
+        
+        // Fallback to HTTP provider
+        const httpContract = new ethers.Contract(
+          config.aaveUiPoolDataProvider,
+          UI_POOL_DATA_PROVIDER_ABI,
+          this.httpProvider
+        );
+        return await httpContract.getReservesList(config.aaveAddressesProvider);
+      }
+      
+      // Re-throw if not a provider destroyed error or no fallback available
+      throw error;
+    }
   }
 
   /**
