@@ -272,6 +272,10 @@ export const config = {
   get liquidationDebtAssets() { return env.liquidationDebtAssets; },
   get minRepayUsd() { return env.minRepayUsd; },
   get maxTargetUsersPerTick() { return env.maxTargetUsersPerTick; },
+  
+  // On-chain executor
+  get rpcUrl() { return process.env.RPC_URL; },
+  get chainId() { return env.chainId; },
 
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
