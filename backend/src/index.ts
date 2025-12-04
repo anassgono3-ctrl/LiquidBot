@@ -92,6 +92,13 @@ async function buildUserReserves(userAddress: string, aaveDataService: AaveDataS
     return [];
   }
 
+  // Guard: If WebSocket is unhealthy, skip to avoid provider destroyed errors
+  // Service will automatically route through HTTP when needed
+  if (!aaveDataService.isWsHealthy()) {
+    // eslint-disable-next-line no-console
+    console.log(`[provider] ws_unhealthy; buildUserReserves will use http fallback for ${userAddress}`);
+  }
+
   try {
     // Fetch all user reserves from Aave Protocol Data Provider
     const userReserves = await aaveDataService.getAllUserReserves(userAddress);
