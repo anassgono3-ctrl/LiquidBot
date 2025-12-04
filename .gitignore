@@ -63,3 +63,6 @@ yarn-error.log*
 # Misc
 .cache/
 .parcel-cache/
+
+# Script outputs
+scripts/output/
