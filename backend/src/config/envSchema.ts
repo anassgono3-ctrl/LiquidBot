@@ -538,7 +538,45 @@ export const rawEnvSchema = z.object({
   // Enable file logging with daily rotation
   LOG_FILE_ENABLED: z.string().optional(),
   // File log retention in hours (default: 8)
-  LOG_FILE_RETENTION_HOURS: z.string().optional()
+  LOG_FILE_RETENTION_HOURS: z.string().optional(),
+  
+  // ==== PYTH NETWORK INTEGRATION ====
+  // Enable Pyth price feeds for predictive early-warning
+  PYTH_ENABLED: z.string().optional(),
+  // Pyth WebSocket URL for price streaming
+  PYTH_WS_URL: z.string().optional(),
+  // Pyth HTTP URL for price history
+  PYTH_HTTP_URL: z.string().optional(),
+  // Comma-separated list of asset symbols to track (e.g., WETH,WBTC,cbETH)
+  PYTH_ASSETS: z.string().optional(),
+  // Maximum age in seconds before price considered stale
+  PYTH_STALE_SECS: z.string().optional(),
+  
+  // ==== TWAP SANITY CHECK CONFIGURATION ====
+  // Enable DEX TWAP sanity checking
+  TWAP_ENABLED: z.string().optional(),
+  // TWAP window in seconds (default: 300 = 5 minutes)
+  TWAP_WINDOW_SEC: z.string().optional(),
+  // Maximum allowed price deviation percentage (default: 0.012 = 1.2%)
+  TWAP_DELTA_PCT: z.string().optional(),
+  // JSON array of pool configs: [{"symbol":"WETH","pool":"0x...","dex":"uniswap_v3"}]
+  TWAP_POOLS: z.string().optional(),
+  
+  // ==== PRE-SUBMIT LIQUIDATION PIPELINE ====
+  // Enable pre-submit liquidation transactions ahead of Chainlink updates
+  PRE_SUBMIT_ENABLED: z.string().optional(),
+  // Maximum ETA in seconds to consider for pre-submit (default: 90)
+  PRE_SUBMIT_ETA_MAX: z.string().optional(),
+  // Health factor trigger buffer (default: 1.02)
+  HF_TRIGGER_BUFFER: z.string().optional(),
+  // Gas price margin/buffer percentage (default: 0.10 = 10%)
+  GAS_PRICE_MARGIN: z.string().optional(),
+  // Time-to-live in blocks for pending pre-submits (default: 40)
+  TTL_BLOCKS: z.string().optional(),
+  // Minimum position size in USD (optional, defaults to MIN_DEBT_USD)
+  PRE_SUBMIT_MIN_POSITION_USD: z.string().optional(),
+  // Enable telemetry for pre-submit pipeline
+  TELEMETRY_PRE_SUBMIT_ENABLED: z.string().optional()
 });
 
 export const env = (() => {
@@ -1009,6 +1047,38 @@ export const env = (() => {
     
     // Tier 1: Risk Ordering Enhancement
     riskOrderingSimple: (parsed.RISK_ORDERING_SIMPLE || 'true').toLowerCase() === 'true',
+    
+    // ==== PYTH NETWORK INTEGRATION ====
+    pythEnabled: (parsed.PYTH_ENABLED || 'false').toLowerCase() === 'true',
+    pythWsUrl: parsed.PYTH_WS_URL || 'wss://hermes.pyth.network/ws',
+    pythHttpUrl: parsed.PYTH_HTTP_URL || 'https://hermes.pyth.network',
+    pythAssets: (parsed.PYTH_ASSETS || 'WETH,WBTC,cbETH,USDC')
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0),
+    pythStaleSecs: Number(parsed.PYTH_STALE_SECS || 10),
+    
+    // ==== TWAP SANITY CHECK CONFIGURATION ====
+    twapEnabled: (parsed.TWAP_ENABLED || 'false').toLowerCase() === 'true',
+    twapWindowSec: Number(parsed.TWAP_WINDOW_SEC || 300),
+    twapDeltaPct: Number(parsed.TWAP_DELTA_PCT || 0.012),
+    twapPools: (() => {
+      try {
+        return parsed.TWAP_POOLS ? JSON.parse(parsed.TWAP_POOLS) : [];
+      } catch (err) {
+        console.warn('[config] Failed to parse TWAP_POOLS, using empty array');
+        return [];
+      }
+    })(),
+    
+    // ==== PRE-SUBMIT LIQUIDATION PIPELINE ====
+    preSubmitEnabled: (parsed.PRE_SUBMIT_ENABLED || 'false').toLowerCase() === 'true',
+    preSubmitEtaMax: Number(parsed.PRE_SUBMIT_ETA_MAX || 90),
+    hfTriggerBuffer: Number(parsed.HF_TRIGGER_BUFFER || 1.02),
+    gasPriceMargin: Number(parsed.GAS_PRICE_MARGIN || 0.10),
+    ttlBlocks: Number(parsed.TTL_BLOCKS || 40),
+    preSubmitMinPositionUsd: parsed.PRE_SUBMIT_MIN_POSITION_USD ? Number(parsed.PRE_SUBMIT_MIN_POSITION_USD) : undefined,
+    telemetryPreSubmitEnabled: (parsed.TELEMETRY_PRE_SUBMIT_ENABLED || 'true').toLowerCase() === 'true',
     
     // ==== CRITICAL LANE FOR SUB-1.0 HF LIQUIDATIONS ====
     criticalLaneEnabled: (parsed.CRITICAL_LANE_ENABLED || 'true').toLowerCase() === 'true',
