@@ -42,7 +42,6 @@ const BASE_TOKENS = {
   DAI: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb",
   cbETH: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
   wstETH: "0xc1CBa3fCea344f92D9239c08C0568f6F2F0ee452",
-  AAVE: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5", // Note: This is actually the Aave Pool address, not AAVE token
 };
 
 // Quote tokens to pair against (USDC and WETH are most liquid)
@@ -223,9 +222,10 @@ async function main() {
   // Display top pools
   const topPools = pools.slice(0, 10);
   topPools.forEach((pool, idx) => {
-    const liquidityETH = (BigInt(pool.liquidity) / BigInt(1e18)).toString();
+    // Note: Uniswap V3 liquidity is measured as sqrt(x*y) in fixed-point representation
+    // This raw value is not directly comparable to token amounts
     console.log(
-      `${idx + 1}. ${pool.asset}/${pool.quote} (${pool.feePercent}%) - Liquidity: ${liquidityETH} (raw: ${pool.liquidity})`
+      `${idx + 1}. ${pool.asset}/${pool.quote} (${pool.feePercent}%) - Liquidity: ${pool.liquidity} (raw units)`
     );
     console.log(`   Address: ${pool.address}`);
     console.log(`   Cardinality: ${pool.observationCardinality}`);

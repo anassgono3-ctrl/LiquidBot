@@ -35,6 +35,9 @@ const PYTH_ASSETS = (process.env.PYTH_ASSETS || "ETH,BTC,USDC")
   .split(",")
   .map((s) => s.trim().toUpperCase());
 
+// Placeholder feed ID that should never be used in production
+const ZERO_FEED_ID = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
 // Default feed IDs (subset of config/pyth-feeds.example.json)
 const DEFAULT_FEED_MAP = {
   "ETH/USD": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
@@ -93,7 +96,7 @@ function resolveFeedIds(assets, feedMap) {
         feedMap[`${asset}/ETH`];
     }
 
-    if (feedId && feedId !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+    if (feedId && feedId !== ZERO_FEED_ID) {
       feedIds.push(feedId);
       symbolToId[asset] = feedId;
       console.log(`  ✓ ${asset} -> ${feedId.substring(0, 10)}...`);

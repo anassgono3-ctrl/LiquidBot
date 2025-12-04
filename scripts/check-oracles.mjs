@@ -32,6 +32,9 @@ const TWAP_WINDOW_SEC = parseInt(process.env.TWAP_WINDOW_SEC || "300", 10);
 const TWAP_DELTA_PCT = parseFloat(process.env.TWAP_DELTA_PCT || "3");
 const PRICE_STALENESS_SEC = parseInt(process.env.PRICE_STALENESS_SEC || "900", 10);
 
+// Placeholder feed ID that should never be used in production
+const ZERO_FEED_ID = "0x0000000000000000000000000000000000000000000000000000000000000000";
+
 // ABIs
 const CHAINLINK_AGGREGATOR_ABI = [
   "function latestRoundData() view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound)",
@@ -243,7 +246,7 @@ async function main() {
       pythFeedMap[asset] ||
       pythFeedMap[`${asset.replace("W", "")}/USD`];
 
-    if (pythFeedId && pythFeedId !== "0x0000000000000000000000000000000000000000000000000000000000000000") {
+    if (pythFeedId && pythFeedId !== ZERO_FEED_ID) {
       console.log(`\n📡 Pyth (${pythFeedId.substring(0, 10)}...):`);
       result.pyth = await fetchPythPrice(pythFeedId);
       if (result.pyth) {
@@ -316,14 +319,17 @@ async function main() {
     }
 
     if (result.twap && result.chainlink) {
-      // Note: TWAP might be a ratio, not USD price
-      const twapDelta = calcDelta(result.twap.price, 1); // Compare ratio to 1.0
-      console.log(`   TWAP deviation from 1.0: ${twapDelta?.toFixed(2)}%`);
+      // Note: TWAP returns a price ratio (token0/token1), not a USD price
+      // Direct comparison to 1.0 is not meaningful without knowing which token is token0/token1
+      // This is informational only - proper validation requires normalizing both to USD
+      const twapRatio = result.twap.price;
+      console.log(`   TWAP price ratio (informational): ${twapRatio.toFixed(6)}`);
+      console.log(`   (Note: TWAP comparison requires USD price normalization)`);
     }
 
     if (result.pyth && result.twap) {
       // This comparison may not be meaningful if TWAP is a ratio
-      console.log("   (TWAP comparison requires price normalization)");
+      console.log("   (TWAP vs Pyth comparison requires price normalization)");
     }
 
     // Summary for this asset
