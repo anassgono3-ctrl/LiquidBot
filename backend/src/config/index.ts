@@ -272,6 +272,10 @@ export const config = {
   get liquidationDebtAssets() { return env.liquidationDebtAssets; },
   get minRepayUsd() { return env.minRepayUsd; },
   get maxTargetUsersPerTick() { return env.maxTargetUsersPerTick; },
+  
+  // On-chain executor
+  get rpcUrl() { return process.env.RPC_URL; },
+  get chainId() { return env.chainId; },
 
   // Rate limiting
   rateLimitWindowMs: 60 * 1000, // 1 minute
@@ -493,5 +497,27 @@ export const config = {
   
   // File logging configuration
   get logFileEnabled() { return env.logFileEnabled; },
-  get logFileRetentionHours() { return env.logFileRetentionHours; }
+  get logFileRetentionHours() { return env.logFileRetentionHours; },
+  
+  // Pyth Network Integration
+  get pythEnabled() { return env.pythEnabled; },
+  get pythWsUrl() { return env.pythWsUrl; },
+  get pythHttpUrl() { return env.pythHttpUrl; },
+  get pythAssets() { return env.pythAssets; },
+  get pythStaleSecs() { return env.pythStaleSecs; },
+  
+  // TWAP Sanity Check Configuration
+  get twapEnabled() { return env.twapEnabled; },
+  get twapWindowSec() { return env.twapWindowSec; },
+  get twapDeltaPct() { return env.twapDeltaPct; },
+  get twapPools() { return env.twapPools; },
+  
+  // Pre-Submit Liquidation Pipeline
+  get preSubmitEnabled() { return env.preSubmitEnabled; },
+  get preSubmitEtaMax() { return env.preSubmitEtaMax; },
+  get hfTriggerBuffer() { return env.hfTriggerBuffer; },
+  get gasPriceMargin() { return env.gasPriceMargin; },
+  get ttlBlocks() { return env.ttlBlocks; },
+  get preSubmitMinPositionUsd() { return env.preSubmitMinPositionUsd; },
+  get telemetryPreSubmitEnabled() { return env.telemetryPreSubmitEnabled; }
 };

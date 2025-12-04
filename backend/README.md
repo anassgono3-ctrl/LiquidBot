@@ -41,6 +41,87 @@ The Predictive HF Orchestrator enhances liquidation detection by projecting heal
 Metrics: `predictive_micro_verify_scheduled_total`, `predictive_prestaged_total`, `subset_intersection_size`, `reserve_event_to_microverify_ms`
 
 
+## Pre-Submit Liquidation Pipeline
+
+The Pre-Submit Liquidation Pipeline enables LiquidBot to submit liquidation transactions **ahead** of Chainlink oracle updates by using Pyth Network as an early-warning price feed. This feature reduces execution latency and increases competitiveness in volatile market conditions.
+
+### Key Principles
+
+1. **Chainlink Remains Oracle-of-Record**: All on-chain liquidation validation uses Chainlink prices
+2. **Pyth is Early-Warning Only**: Used to predict when Chainlink will update and trigger liquidations
+3. **Safety-First Architecture**: Multiple gates prevent false positives and wasted gas
+4. **Feature-Flagged**: Can be completely disabled without impacting existing functionality
+
+### Components
+
+- **PythListener**: Subscribes to Pyth Network WebSocket for real-time price updates
+- **TwapSanity**: Validates prices against DEX TWAP to detect manipulation
+- **PreSubmitManager**: Decision logic for when to pre-submit liquidation transactions
+- **OnChainConfirmWatcher**: Monitors on-chain outcomes and correlates with Chainlink rounds
+
+### Quick Start
+
+```bash
+# Enable Pyth price feeds
+PYTH_ENABLED=true
+PYTH_ASSETS=WETH,WBTC,cbETH,USDC
+
+# Enable TWAP sanity checks (optional)
+TWAP_ENABLED=true
+TWAP_POOLS='[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3"}]'
+
+# Enable pre-submit liquidations
+PRE_SUBMIT_ENABLED=true
+PRE_SUBMIT_ETA_MAX=90
+HF_TRIGGER_BUFFER=1.02
+GAS_PRICE_MARGIN=0.10
+TTL_BLOCKS=40
+
+# Reuse existing execution config
+EXECUTION_PRIVATE_KEY=0x...
+RPC_URL=https://base-mainnet.g.alchemy.com/v2/YOUR-API-KEY
+```
+
+### Decision Gates
+
+The pre-submit manager applies the following gates before submitting a transaction:
+
+1. **Feature Enabled**: `PRE_SUBMIT_ENABLED=true`
+2. **ETA Gate**: `etaSec <= PRE_SUBMIT_ETA_MAX` OR candidate flagged for fast-path
+3. **HF Projection Gate**: `hfProjected <= HF_TRIGGER_BUFFER`
+4. **Position Size Gate**: `debtUsd >= PRE_SUBMIT_MIN_POSITION_USD` (defaults to `MIN_DEBT_USD`)
+5. **TWAP Sanity Gate** (if enabled): Price deviation within `TWAP_DELTA_PCT`
+
+### Observability
+
+When enabled, the following Prometheus metrics are exposed:
+
+**Pyth Metrics:**
+- `pyth_price_updates_total{symbol}`: Total price updates received
+- `pyth_stale_prices_total{symbol}`: Stale prices detected
+- `pyth_connection_errors_total`: Connection errors
+- `pyth_price_age_sec{symbol}`: Price age histogram
+
+**Pre-Submit Metrics:**
+- `pre_submit_attempts_total{result}`: Attempts (submitted/gate_failed/error)
+- `pre_submit_gate_failures_total{gate}`: Gate failures by type
+- `pre_submit_outcomes_total{outcome}`: Outcomes (success/reverted/expired)
+- `pre_submit_time_to_mine_sec`: Time-to-mine histogram
+- `pre_submit_eta_accuracy_sec`: ETA prediction accuracy
+
+### Safety Notes
+
+⚠️ **Important Safety Considerations:**
+
+- Pyth prices are **NOT** used for on-chain validation (Chainlink only)
+- TWAP checks help prevent acting on manipulated prices
+- Minimum position size prevents wasting gas on small liquidations
+- TTL cleanup removes expired pending transactions
+- All features can be disabled via environment variables
+
+For detailed configuration options, see [docs/params.md](../docs/params.md) and [docs/specs/PreSubmitPipeline.md](../docs/specs/PreSubmitPipeline.md).
+
+
 ## Candidate Discovery Modes
 
 LiquidBot supports two discovery modes controlled by the `USE_SUBGRAPH` environment variable:
