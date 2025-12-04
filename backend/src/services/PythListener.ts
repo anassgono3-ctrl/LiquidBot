@@ -14,7 +14,6 @@
 import WebSocket from 'ws';
 import { config } from '../config/index.js';
 import {
-  pythPriceUpdatesTotal,
   pythConnectionErrorsTotal,
   pythReconnectsTotal,
   recordPythPriceUpdate
@@ -229,33 +228,34 @@ export class PythListener {
   /**
    * Process a price update from Pyth
    */
-  private processPriceUpdate(message: any): void {
+  private processPriceUpdate(message: Record<string, unknown>): void {
     try {
-      const priceData = message.price_feed;
+      const priceData = message.price_feed as Record<string, unknown> | undefined;
       if (!priceData) {
         return;
       }
 
-      const feedId = priceData.id;
-      const price = priceData.price;
-      const publishTime = priceData.publish_time || Math.floor(Date.now() / 1000);
+      const feedId = priceData.id as string;
+      const price = priceData.price as Record<string, unknown> | undefined;
+      const publishTime = (priceData.publish_time as number) || Math.floor(Date.now() / 1000);
 
-      if (!price || !price.price) {
+      if (!price || !(price.price)) {
         return;
       }
 
       // Find symbol for this feed ID
-      const symbol = Object.entries(PYTH_PRICE_FEED_IDS).find(
-        ([_, id]) => id === feedId
-      )?.[0];
+      const symbolEntry = Object.entries(PYTH_PRICE_FEED_IDS).find(
+        ([, id]) => id === feedId
+      );
+      const symbol = symbolEntry?.[0];
 
       if (!symbol) {
         return;
       }
 
       // Parse price (Pyth uses exponent notation)
-      const priceValue = Number(price.price) * Math.pow(10, price.expo);
-      const confidence = price.conf ? Number(price.conf) * Math.pow(10, price.expo) : undefined;
+      const priceValue = Number(price.price) * Math.pow(10, Number(price.expo));
+      const confidence = price.conf ? Number(price.conf) * Math.pow(10, Number(price.expo)) : undefined;
 
       // Check staleness
       const now = Math.floor(Date.now() / 1000);

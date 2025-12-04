@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
 import { OnChainConfirmWatcher } from '../../src/services/OnChainConfirmWatcher.js';
+import type { PreSubmitManager } from '../../src/services/PreSubmitManager.js';
 
 describe('OnChainConfirmWatcher', () => {
   let watcher: OnChainConfirmWatcher;
@@ -43,7 +44,10 @@ describe('OnChainConfirmWatcher', () => {
 
   describe('PreSubmitManager integration', () => {
     it('should accept PreSubmitManager reference', () => {
-      const mockManager = {} as any;
+      const mockManager = {
+        getPendingPreSubmits: () => new Map(),
+        cleanupExpired: async () => 0
+      } as unknown as PreSubmitManager;
       expect(() => watcher.setPreSubmitManager(mockManager)).not.toThrow();
     });
   });

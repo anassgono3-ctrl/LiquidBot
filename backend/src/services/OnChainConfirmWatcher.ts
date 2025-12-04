@@ -10,9 +10,27 @@
  */
 
 import { ethers } from 'ethers';
+
 import { config } from '../config/index.js';
-import type { PreSubmitManager } from './PreSubmitManager.js';
 import { recordPreSubmitOutcome } from '../metrics/preSubmitMetrics.js';
+
+import type { PreSubmitManager } from './PreSubmitManager.js';
+
+// Import PendingPreSubmit type
+interface PendingPreSubmit {
+  txHash: string;
+  user: string;
+  collateralAsset: string;
+  debtAsset: string;
+  debtToCover: string;
+  submittedBlock: number;
+  submittedTime: number;
+  etaSec: number;
+  hfProjected: number;
+  debtUsd: number;
+  gasEstimated: number;
+  gasPriceGwei: number;
+}
 
 // Chainlink Aggregator V3 Interface ABI (minimal)
 const AGGREGATOR_V3_ABI = [
@@ -170,7 +188,7 @@ export class OnChainConfirmWatcher {
 
     try {
       // Check for Chainlink round changes
-      const roundChanged = await this.checkChainlinkRoundChanges();
+      await this.checkChainlinkRoundChanges();
 
       // Get pending pre-submits
       const pending = this.preSubmitManager.getPendingPreSubmits();
@@ -181,7 +199,7 @@ export class OnChainConfirmWatcher {
 
       // Process each pending pre-submit
       for (const [txHash, metadata] of pending.entries()) {
-        await this.processPendingTransaction(txHash, metadata, blockNumber);
+        await this.processPendingTransaction(txHash, metadata);
       }
 
       // Cleanup expired
@@ -244,8 +262,7 @@ export class OnChainConfirmWatcher {
    */
   private async processPendingTransaction(
     txHash: string,
-    metadata: any,
-    currentBlock: number
+    metadata: PendingPreSubmit
   ): Promise<void> {
     if (!this.provider || !this.aavePool) {
       return;
