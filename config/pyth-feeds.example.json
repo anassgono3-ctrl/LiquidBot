@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "description": "Pyth Network feed IDs for common assets on Base mainnet. Feed IDs can be found at https://pyth.network/developers/price-feed-ids",
+  "feeds": {
+    "ETH/USD": {
+      "id": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "description": "Ethereum / US Dollar",
+      "asset_type": "Crypto"
+    },
+    "BTC/USD": {
+      "id": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "description": "Bitcoin / US Dollar",
+      "asset_type": "Crypto"
+    },
+    "USDC/USD": {
+      "id": "0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
+      "description": "USD Coin / US Dollar",
+      "asset_type": "Crypto"
+    },
+    "WETH/USD": {
+      "id": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "description": "Wrapped Ethereum / US Dollar (same as ETH/USD)",
+      "asset_type": "Crypto"
+    },
+    "cbETH/ETH": {
+      "id": "0x15ecddd26d49e1a8f1de9376ebebc03916ede873447c1255d2d5891b92ce5717",
+      "description": "Coinbase Wrapped Staked ETH / ETH",
+      "asset_type": "Crypto"
+    },
+    "wstETH/USD": {
+      "id": "0x6df640f3b8963d8f8358f791f352b8364513f6ab1cca5ed3f1f7b5448980e784",
+      "description": "Lido Wrapped Staked ETH / US Dollar",
+      "asset_type": "Crypto"
+    },
+    "weETH/ETH": {
+      "id": "PLACEHOLDER_CHECK_PYTH_REGISTRY",
+      "description": "Wrapped eETH / ETH (Feed ID not confirmed - verify at https://pyth.network/developers/price-feed-ids)",
+      "asset_type": "Crypto",
+      "warning": "This is a placeholder. Do not use in production without verifying the correct feed ID."
+    },
+    "AAVE/USD": {
+      "id": "0x2b9ab1e972a281585084148ba1389800799bd4be63b957507db1349314e47445",
+      "description": "Aave / US Dollar",
+      "asset_type": "Crypto"
+    },
+    "DAI/USD": {
+      "id": "0xb0948a5e5313200c632b51bb5ca32f6de0d36e9950a942d19751e833f70dabfd",
+      "description": "Dai Stablecoin / US Dollar",
+      "asset_type": "Crypto"
+    }
+  },
+  "caveats": [
+    "Feed IDs are current as of 2024. Always verify against the official Pyth registry at https://pyth.network/developers/price-feed-ids",
+    "Some specialized feeds (e.g., weETH/ETH) may not be available. Use proxy calculations or Chainlink fallback.",
+    "Pyth prices are updated based on on-chain demand. Not all feeds update at the same frequency.",
+    "For ratio feeds (e.g., cbETH/ETH), compose with base asset feed (ETH/USD) to get USD pricing."
+  ],
+  "usage": {
+    "environment_variable": "Set PYTH_FEED_MAP_PATH to the path of this file (or your custom version)",
+    "override": "You can create a custom version of this file with different feeds or IDs"
+  }
+}
