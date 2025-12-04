@@ -64,5 +64,6 @@ yarn-error.log*
 .cache/
 .parcel-cache/
 
-# Script outputs
-scripts/output/
+# Script outputs (but keep .gitkeep)
+scripts/output/*
+!scripts/output/.gitkeep
