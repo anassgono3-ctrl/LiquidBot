@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pyth Price Feed IDs for Base Network",
+  "description": "Mapping of asset symbols to Pyth Network price feed IDs",
+  "type": "object",
+  "properties": {
+    "feeds": {
+      "type": "object",
+      "description": "Symbol to Pyth feed ID mappings",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "feedId": {
+            "type": "string",
+            "description": "Pyth price feed ID (hex string with 0x prefix)",
+            "pattern": "^0x[0-9a-f]{64}$"
+          },
+          "description": {
+            "type": "string",
+            "description": "Human-readable description of the feed"
+          },
+          "source": {
+            "type": "string",
+            "description": "Original feed name or type (e.g., 'ETH/USD', 'BTC/USD')"
+          },
+          "isProxy": {
+            "type": "boolean",
+            "description": "True if this symbol uses another asset's feed as a proxy"
+          }
+        },
+        "required": ["feedId", "description"]
+      }
+    }
+  },
+  "feeds": {
+    "WETH": {
+      "feedId": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "description": "Wrapped Ether (ETH/USD)",
+      "source": "ETH/USD",
+      "isProxy": false
+    },
+    "WBTC": {
+      "feedId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "description": "Wrapped Bitcoin (BTC/USD)",
+      "source": "BTC/USD",
+      "isProxy": false
+    },
+    "cbETH": {
+      "feedId": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "description": "Coinbase Wrapped Staked ETH (uses ETH/USD as proxy)",
+      "source": "ETH/USD",
+      "isProxy": true
+    },
+    "USDC": {
+      "feedId": "0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
+      "description": "USD Coin (USDC/USD)",
+      "source": "USDC/USD",
+      "isProxy": false
+    },
+    "cbBTC": {
+      "feedId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "description": "Coinbase Wrapped Bitcoin (uses BTC/USD as proxy)",
+      "source": "BTC/USD",
+      "isProxy": true
+    },
+    "AAVE": {
+      "feedId": "0x2b9ab1e972a281585084148ba1389800799bd4be63b957507db1349314e47445",
+      "description": "Aave Token (AAVE/USD)",
+      "source": "AAVE/USD",
+      "isProxy": false
+    },
+    "weETH": {
+      "feedId": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "description": "Wrapped eETH (uses ETH/USD as proxy)",
+      "source": "ETH/USD",
+      "isProxy": true
+    }
+  }
+}

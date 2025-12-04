@@ -25,6 +25,15 @@ PYTH_ASSETS=WETH,WBTC,cbETH,USDC,cbBTC,AAVE
 PYTH_STALE_SECS=10
 ```
 
+**Validation:**
+Use `npm run check:oracles` to validate Pyth connectivity and staleness:
+```bash
+npm run check:oracles -- --assets WETH,cbETH --verbose
+```
+
+**Feed ID Mapping:**
+Pyth feed IDs are defined in `backend/src/services/PythListener.ts`. For reference, see `backend/src/config/pyth-feeds.example.json` which provides a JSON mapping of symbols to Pyth feed IDs for Base network.
+
 ### TWAP Sanity Check
 
 | Parameter | Type | Default | Description |
@@ -51,8 +60,31 @@ PYTH_STALE_SECS=10
 TWAP_ENABLED=true
 TWAP_WINDOW_SEC=300
 TWAP_DELTA_PCT=0.012
-TWAP_POOLS='[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3","token0IsAsset":true}]'
+TWAP_POOLS='[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3","token0IsAsset":true},{"symbol":"cbETH","pool":"0x...","dex":"uniswap_v3","token0IsAsset":false}]'
 ```
+
+**Pool Discovery:**
+Use `npm run discover:twap` to automatically find suitable Uniswap V3 pools on Base:
+```bash
+# Discover pools for default assets (WETH, cbETH, cbBTC, weETH)
+npm run discover:twap
+
+# Custom assets and quotes
+npm run discover:twap -- --symbols WETH,cbETH,cbBTC --quotes USDC,WETH --fees 500,3000
+
+# Filter by minimum liquidity
+npm run discover:twap -- --min-liquidity 100000
+```
+
+The tool outputs a ready-to-paste `TWAP_POOLS` configuration string. See [scripts/README-twap-discovery.md](../backend/scripts/README-twap-discovery.md) for details.
+
+**Validation:**
+After configuring `TWAP_POOLS`, validate the setup with:
+```bash
+npm run check:oracles
+```
+
+This checks TWAP price deviations against Chainlink/Pyth reference prices and reports any pools that exceed the `TWAP_DELTA_PCT` threshold.
 
 ### Pre-Submit Configuration
 
