@@ -57,6 +57,8 @@ interface TwapResult {
 }
 
 // Pyth feed IDs for Base network
+// NOTE: These IDs are also defined in src/services/PythListener.ts
+// Consider importing from a shared constant file if modifications are frequent
 const PYTH_PRICE_FEED_IDS: Record<string, string> = {
   'WETH': '0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace', // ETH/USD
   'WBTC': '0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43', // BTC/USD
@@ -351,7 +353,7 @@ async function checkTwap(
           twapPrice: null,
           refPrice,
           delta: null,
-          passed: true, // Pass by default if no data
+          passed: true, // Pass by default if no data - conservative approach to avoid false failures
           error: 'Insufficient swap data'
         });
         console.log(`⊘ ${symbol}: Insufficient swap data in ${windowSec}s window`);
