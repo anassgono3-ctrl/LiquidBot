@@ -155,10 +155,11 @@ export class PreSubmitManager implements PredictiveEventListener {
 
       // Gate 5: TWAP sanity check (if enabled)
       if (this.twapSanity.isEnabled()) {
-        // For now, we'll skip detailed TWAP check and just log
-        // In a real implementation, we'd extract the price from candidate
-        // and verify against TWAP
-        console.log('[pre-submit] TWAP sanity check skipped (not fully implemented)');
+        // TODO: Implement full TWAP validation
+        // Currently, TWAP is enabled but validation is a placeholder
+        // For production, extract price from candidate and validate against TWAP
+        // This is documented as a known limitation
+        console.log('[pre-submit] TWAP sanity check enabled but not fully implemented (placeholder)');
       }
 
       // All gates passed - build and submit transaction
@@ -185,10 +186,14 @@ export class PreSubmitManager implements PredictiveEventListener {
       const hfProjected = candidate.hfProjected;
       const etaSec = candidate.etaSec ?? 0;
 
-      // For this minimal implementation, we'll use placeholder addresses
-      // In a real implementation, these would come from the candidate object
-      const collateralAsset = '0x4200000000000000000000000000000000000006'; // WETH placeholder
-      const debtAsset = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC placeholder
+      // TODO: Extract actual collateral and debt asset addresses from candidate
+      // Currently using placeholder addresses - this is a known limitation
+      // The PredictiveCandidate interface should be extended to include:
+      // - collateralAssets: string[]
+      // - debtAssets: string[]
+      // For MVP, we use WETH/USDC as defaults
+      const collateralAsset = '0x4200000000000000000000000000000000000006'; // WETH
+      const debtAsset = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'; // USDC
       
       // Calculate debt to cover (50% close factor as default)
       const closeFactorPct = 0.5;

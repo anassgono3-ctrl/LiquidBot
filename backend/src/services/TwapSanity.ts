@@ -24,6 +24,8 @@ interface TwapPoolConfig {
   pool: string; // Pool contract address
   dex: 'uniswap_v3' | 'sushiswap' | 'curve';
   token0IsAsset?: boolean; // If true, asset is token0; else token1
+  token0Decimals?: number; // Optional: decimals for token0 (default: 18)
+  token1Decimals?: number; // Optional: decimals for token1 (default: 6 for USDC)
 }
 
 interface TwapSanityResult {
@@ -88,7 +90,9 @@ export class TwapSanity {
       this.poolConfigs.set(poolConfig.symbol.toUpperCase(), {
         ...poolConfig,
         pool: poolAddress,
-        token0IsAsset: poolConfig.token0IsAsset ?? true
+        token0IsAsset: poolConfig.token0IsAsset ?? true,
+        token0Decimals: poolConfig.token0Decimals ?? 18,
+        token1Decimals: poolConfig.token1Decimals ?? 6
       });
     }
 
@@ -239,10 +243,11 @@ export class TwapSanity {
         }
 
         // Compute price from swap
+        // Use configured decimals instead of hard-coded values
         // If token0 is the asset, price = |amount1| / |amount0|
         // Else price = |amount0| / |amount1|
-        const absAmount0 = Math.abs(Number(ethers.formatUnits(amount0, 18)));
-        const absAmount1 = Math.abs(Number(ethers.formatUnits(amount1, 6))); // Assuming USDC decimals
+        const absAmount0 = Math.abs(Number(ethers.formatUnits(amount0, poolConfig.token0Decimals || 18)));
+        const absAmount1 = Math.abs(Number(ethers.formatUnits(amount1, poolConfig.token1Decimals || 6)));
 
         if (absAmount0 === 0 || absAmount1 === 0) {
           continue;
