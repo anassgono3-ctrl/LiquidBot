@@ -865,6 +865,48 @@ export class PriceService {
   }
 
   /**
+   * Accept external price update (e.g., from Pyth Network)
+   * 
+   * This method allows external price sources to inject price updates
+   * into the PriceService cache. The price is tagged with a source identifier
+   * and timestamp for tracking purposes.
+   * 
+   * NOTE: External prices are used ONLY for predictive analysis, NOT for
+   * on-chain liquidation validation (which always uses Chainlink/Aave Oracle)
+   * 
+   * @param symbol Token symbol (e.g., 'WETH')
+   * @param price Price in USD
+   * @param timestamp Unix timestamp of price update
+   * @param source Price source identifier ('pyth' | 'twap' | 'external')
+   * @param block Optional block number
+   */
+  public acceptExternalUpdate(
+    symbol: string,
+    price: number,
+    timestamp: number,
+    source: 'pyth' | 'twap' | 'external' = 'external',
+    block?: number
+  ): void {
+    const normalizedSymbol = symbol.toUpperCase();
+    
+    // Update cache with external price
+    this.priceCache.set(normalizedSymbol, {
+      price,
+      timestamp
+    });
+
+    // Log the update
+    console.log(
+      `[price] External update from ${source}: ${normalizedSymbol}=$${price.toFixed(2)} (age: ${Math.floor(Date.now() / 1000 - timestamp)}s)`
+    );
+
+    // Notify PredictiveOrchestrator if callback registered
+    if (this.onPriceUpdate && block !== undefined) {
+      this.onPriceUpdate(normalizedSymbol, price, timestamp, block);
+    }
+  }
+
+  /**
    * Clear the price cache (useful for testing)
    */
   clearCache(): void {
