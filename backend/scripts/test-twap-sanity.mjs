@@ -195,8 +195,16 @@ async function main() {
     // Fetch Chainlink price if available
     const chainlinkFeed = chainlinkFeeds[symbol];
     if (!chainlinkFeed) {
-      console.log(`  ⚠️  No Chainlink feed configured for ${symbol}, skipping comparison\n`);
-      results.push({ symbol, success: true, twapPrice: twapResult.price, chainlinkPrice: null });
+      console.log(`  ⚠️  No Chainlink feed configured for ${symbol}, skipping comparison`);
+      console.log(`     Configure CHAINLINK_FEEDS to enable sanity checking\n`);
+      results.push({ 
+        symbol, 
+        success: true, 
+        twapPrice: twapResult.price, 
+        chainlinkPrice: null,
+        skipped: true,
+        reason: 'no_chainlink_feed'
+      });
       continue;
     }
 
@@ -237,23 +245,34 @@ async function main() {
   console.log("\n✨ Summary");
   console.log("=========================================\n");
 
-  const passed = results.filter((r) => r.success).length;
-  const failed = results.length - passed;
+  const passed = results.filter((r) => r.success && !r.skipped).length;
+  const skipped = results.filter((r) => r.skipped).length;
+  const failed = results.length - passed - skipped;
 
   console.log(`Total: ${results.length}`);
   console.log(`Passed: ${passed}`);
+  if (skipped > 0) {
+    console.log(`Skipped: ${skipped} (no Chainlink feed configured)`);
+  }
   console.log(`Failed: ${failed}\n`);
 
   for (const result of results) {
-    const status = result.success ? "✅ PASS" : "❌ FAIL";
-    const deltaStr = result.deltaPct
-      ? ` (Δ ${result.deltaPct.toFixed(2)}%)`
-      : "";
-    console.log(`  ${status} ${result.symbol}${deltaStr}`);
+    if (result.skipped) {
+      const status = "⚠️  SKIP";
+      console.log(`  ${status} ${result.symbol} (no Chainlink feed)`);
+    } else {
+      const status = result.success ? "✅ PASS" : "❌ FAIL";
+      const deltaStr = result.deltaPct
+        ? ` (Δ ${result.deltaPct.toFixed(2)}%)`
+        : "";
+      console.log(`  ${status} ${result.symbol}${deltaStr}`);
+    }
   }
 
-  if (failed === 0) {
+  if (failed === 0 && skipped < results.length) {
     console.log("\n✅ All TWAP sanity checks passed\n");
+  } else if (failed === 0 && skipped === results.length) {
+    console.log("\n⚠️  All checks skipped - configure CHAINLINK_FEEDS to enable validation\n");
   } else {
     console.log("\n⚠️  Some TWAP sanity checks failed - review deltas and configuration\n");
   }
