@@ -551,6 +551,8 @@ export const rawEnvSchema = z.object({
   PYTH_ASSETS: z.string().optional(),
   // Maximum age in seconds before price considered stale
   PYTH_STALE_SECS: z.string().optional(),
+  // Path to JSON file mapping asset symbols to Pyth feed IDs
+  PYTH_FEED_MAP_PATH: z.string().optional(),
   
   // ==== TWAP SANITY CHECK CONFIGURATION ====
   // Enable DEX TWAP sanity checking
@@ -1057,6 +1059,7 @@ export const env = (() => {
       .map(s => s.trim())
       .filter(s => s.length > 0),
     pythStaleSecs: Number(parsed.PYTH_STALE_SECS || 10),
+    pythFeedMapPath: parsed.PYTH_FEED_MAP_PATH || '',
     
     // ==== TWAP SANITY CHECK CONFIGURATION ====
     twapEnabled: (parsed.TWAP_ENABLED || 'false').toLowerCase() === 'true',
