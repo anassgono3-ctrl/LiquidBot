@@ -43,7 +43,7 @@ const BASE_TOKENS = {
   cbETH: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
   WBTC: "0x1a35EE4640b0A3B87705B0A4B45D227Ba60Ca2ad", // WBTC on Base
   cbBTC: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", // Coinbase Wrapped BTC
-  weETH: "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A", // Wrapped eETH
+  weETH: "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A", // Wrapped eETH (Ether.fi)
   AAVE: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5", // Placeholder - update with actual
 };
 

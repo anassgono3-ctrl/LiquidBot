@@ -193,7 +193,7 @@ npm run start
 
 **Problem**: The pool's observation cardinality is insufficient for TWAP calculations.
 
-**Observation**: The script displays the cardinality in the summary. Uniswap V3 TWAPs require at least ~15 observations for a 5-minute window.
+**Observation**: The script displays the cardinality in the summary. Uniswap V3 TWAPs require sufficient observations for the desired time window. For a 5-minute TWAP window with 12-second blocks (typical on Ethereum mainnet), you need approximately 300 seconds / 12 seconds = 25 observations. Base has faster blocks (~2 seconds), so a 5-minute window needs ~150 observations. A cardinality of at least 1000 provides a good buffer.
 
 **Solution**:
 - If cardinality is too low, the pool owner needs to increase it on-chain (not something you can do)
