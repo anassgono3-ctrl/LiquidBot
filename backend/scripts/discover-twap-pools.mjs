@@ -392,8 +392,9 @@ async function main() {
     }
     
     console.log("\n✅ Ready-to-paste TWAP_POOLS configuration:\n");
-    const twapPoolsString = safeStringify(results);
-    console.log(`TWAP_POOLS='${JSON.stringify(results)}'`);
+    // Use compact JSON without extra spaces for .env pasting
+    const twapPoolsCompact = JSON.stringify(results);
+    console.log(`TWAP_POOLS='${twapPoolsCompact}'`);
   }
 
   console.log("\n✅ Discovery complete\n");
