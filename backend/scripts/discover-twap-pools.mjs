@@ -12,12 +12,18 @@
  *
  * Usage:
  *   node scripts/discover-twap-pools.mjs
- *   TWAP_TARGETS=WETH,cbETH,WBTC node scripts/discover-twap-pools.mjs
+ *   node scripts/discover-twap-pools.mjs --assets WETH,cbETH --quotes USDC,WETH --feeTiers 500,3000
  *   RPC_URL=https://mainnet.base.org node scripts/discover-twap-pools.mjs
+ *
+ * CLI Options:
+ *   --assets: Comma-separated asset symbols to discover pools for (overrides TWAP_TARGETS env var)
+ *   --quotes: Comma-separated quote token symbols (default: USDC,WETH)
+ *   --feeTiers: Comma-separated fee tiers in bps (default: 500,3000,10000)
+ *   --timeoutMs: Timeout in milliseconds for RPC requests (default: 10000)
  *
  * Environment variables:
  *   - RPC_URL: Base RPC endpoint (required)
- *   - TWAP_TARGETS: Comma-separated asset symbols to discover pools for
+ *   - TWAP_TARGETS: Comma-separated asset symbols to discover pools for (default: WETH,cbETH,cbBTC,weETH)
  *   - AAVE_PROTOCOL_DATA_PROVIDER: Aave Protocol Data Provider address
  *   - MIN_LIQUIDITY: Minimum pool liquidity threshold (default: 0)
  */
@@ -37,11 +43,13 @@ const BASE_TOKENS = {
   cbETH: "0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22",
   WBTC: "0x1a35EE4640b0A3B87705B0A4B45D227Ba60Ca2ad", // WBTC on Base
   cbBTC: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf", // Coinbase Wrapped BTC
+  weETH: "0x04C0599Ae5A44757c0af6F9eC3b93da8976c150A", // Wrapped eETH
   AAVE: "0xA238Dd80C259a72e81d7e4664a9801593F98d1c5", // Placeholder - update with actual
 };
 
-const FEE_TIERS = [500, 3000, 10000]; // 0.05%, 0.3%, 1%
-const QUOTE_TOKENS = ["USDC", "WETH"]; // Common quote tokens for pairing
+const DEFAULT_FEE_TIERS = [500, 3000, 10000]; // 0.05%, 0.3%, 1%
+const DEFAULT_QUOTE_TOKENS = ["USDC", "WETH"]; // Common quote tokens for pairing
+const DEFAULT_TARGETS = ["WETH", "cbETH", "cbBTC", "weETH"]; // Base-native assets
 
 // ABIs
 const FACTORY_ABI = [
@@ -71,6 +79,42 @@ function parseTargets(targetsEnv) {
     .split(",")
     .map((s) => s.trim().toUpperCase())
     .filter((s) => s.length > 0);
+}
+
+/**
+ * Parse command-line arguments
+ */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const options = {
+    assets: null,
+    quotes: null,
+    feeTiers: null,
+    timeoutMs: 10000,
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg.startsWith("--")) {
+      const key = arg.slice(2);
+      const value = args[i + 1];
+      if (key === "assets" && value) {
+        options.assets = parseTargets(value);
+        i++;
+      } else if (key === "quotes" && value) {
+        options.quotes = parseTargets(value);
+        i++;
+      } else if (key === "feeTiers" && value) {
+        options.feeTiers = value.split(",").map((f) => parseInt(f.trim(), 10));
+        i++;
+      } else if (key === "timeoutMs" && value) {
+        options.timeoutMs = parseInt(value, 10);
+        i++;
+      }
+    }
+  }
+
+  return options;
 }
 
 /**
@@ -169,7 +213,7 @@ function rankPools(pools) {
 }
 
 /**
- * Format pool for output
+ * Format pool for output (with BigInt serialization fix)
  */
 function formatPoolConfig(symbol, pool, quoteSymbol) {
   return {
@@ -178,8 +222,18 @@ function formatPoolConfig(symbol, pool, quoteSymbol) {
     dex: "uniswap_v3",
     fee: pool.fee,
     quote: quoteSymbol,
-    liquidity: pool.liquidity,
   };
+}
+
+/**
+ * Custom JSON serializer to handle BigInt values
+ */
+function safeStringify(obj, indent = 2) {
+  return JSON.stringify(
+    obj,
+    (key, value) => (typeof value === "bigint" ? value.toString() : value),
+    indent
+  );
 }
 
 /**
@@ -192,7 +246,22 @@ async function main() {
     process.exit(1);
   }
 
-  const targets = parseTargets(process.env.TWAP_TARGETS || "WETH,cbETH,WBTC");
+  // Parse CLI arguments
+  const cliOptions = parseArgs();
+  
+  // Determine targets: CLI > env var > default
+  let targets = cliOptions.assets;
+  if (!targets || targets.length === 0) {
+    const envTargets = parseTargets(process.env.TWAP_TARGETS);
+    targets = envTargets.length > 0 ? envTargets : DEFAULT_TARGETS;
+  }
+  
+  // Determine quote tokens: CLI > default
+  const quoteTokens = cliOptions.quotes || DEFAULT_QUOTE_TOKENS;
+  
+  // Determine fee tiers: CLI > default
+  const feeTiers = cliOptions.feeTiers || DEFAULT_FEE_TIERS;
+  
   const aaveDataProvider =
     process.env.AAVE_PROTOCOL_DATA_PROVIDER ||
     "0xC4Fcf9893072d61Cc2899C0054877Cb752587981";
@@ -202,8 +271,9 @@ async function main() {
   console.log("=========================================\n");
   console.log(`RPC URL: ${rpcUrl}`);
   console.log(`Targets: ${targets.join(", ")}`);
-  console.log(`Quote Tokens: ${QUOTE_TOKENS.join(", ")}`);
-  console.log(`Fee Tiers: ${FEE_TIERS.join(", ")}\n`);
+  console.log(`Quote Tokens: ${quoteTokens.join(", ")}`);
+  console.log(`Fee Tiers: ${feeTiers.join(", ")}`);
+  console.log(`Timeout: ${cliOptions.timeoutMs}ms\n`);
 
   const provider = new ethers.JsonRpcProvider(rpcUrl);
   const factory = new ethers.Contract(
@@ -233,7 +303,7 @@ async function main() {
     const poolsForAsset = [];
 
     // Check all quote tokens and fee tiers
-    for (const quoteSymbol of QUOTE_TOKENS) {
+    for (const quoteSymbol of quoteTokens) {
       const quoteAddress = BASE_TOKENS[quoteSymbol];
       if (!quoteAddress) {
         console.warn(
@@ -249,7 +319,9 @@ async function main() {
         continue;
       }
 
-      for (const fee of FEE_TIERS) {
+      console.log(`  Checking ${symbol}/${quoteSymbol} pools...`);
+
+      for (const fee of feeTiers) {
         const poolAddress = await discoverPool(
           factory,
           tokenAddress,
@@ -257,25 +329,27 @@ async function main() {
           fee
         );
         if (!poolAddress) {
+          console.log(`    Fee ${fee}: No pool found`);
           continue;
         }
 
         const metrics = await getPoolMetrics(provider, poolAddress);
         if (!metrics) {
+          console.log(`    Fee ${fee}: Failed to fetch metrics`);
           continue;
         }
 
         // Filter by minimum liquidity
         if (BigInt(metrics.liquidity) < minLiquidity) {
           console.log(
-            `  ⚠️  Pool ${poolAddress} (${quoteSymbol}, fee ${fee}) below min liquidity: ${metrics.liquidity}`
+            `    Fee ${fee}: Below min liquidity (${metrics.liquidity})`
           );
           continue;
         }
 
         poolsForAsset.push({ ...metrics, quoteSymbol });
         console.log(
-          `  ✅ Found pool: ${poolAddress} (${quoteSymbol}, fee ${fee}, liquidity: ${metrics.liquidity})`
+          `    ✅ Fee ${fee}: Found pool ${poolAddress.slice(0, 10)}... (liquidity: ${metrics.liquidity})`
         );
       }
     }
@@ -302,15 +376,23 @@ async function main() {
   }
 
   // Output final TWAP_POOLS configuration
-  console.log("\n\n✨ TWAP_POOLS Configuration");
+  console.log("\n\n✨ TWAP Pool Discovery Summary");
   console.log("=========================================\n");
 
   if (results.length === 0) {
     console.log("No pools discovered. Verify targets and RPC connectivity.");
   } else {
-    const twapPoolsJson = JSON.stringify(results, null, 2);
-    console.log(twapPoolsJson);
-    console.log("\n\nReady to paste into .env:");
+    console.log("Discovered pools:\n");
+    for (const result of results) {
+      console.log(`  ${result.symbol}:`);
+      console.log(`    Address: ${result.pool}`);
+      console.log(`    Quote: ${result.quote}`);
+      console.log(`    Fee: ${result.fee}`);
+      console.log("");
+    }
+    
+    console.log("\n✅ Ready-to-paste TWAP_POOLS configuration:\n");
+    const twapPoolsString = safeStringify(results);
     console.log(`TWAP_POOLS='${JSON.stringify(results)}'`);
   }
 
