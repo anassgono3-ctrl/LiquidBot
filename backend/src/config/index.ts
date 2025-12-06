@@ -505,6 +505,7 @@ export const config = {
   get pythHttpUrl() { return env.pythHttpUrl; },
   get pythAssets() { return env.pythAssets; },
   get pythStaleSecs() { return env.pythStaleSecs; },
+  get pythFeedMapPath() { return env.pythFeedMapPath; },
   
   // TWAP Sanity Check Configuration
   get twapEnabled() { return env.twapEnabled; },
