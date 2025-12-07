@@ -51,6 +51,10 @@ const DEFAULT_FEE_TIERS = [500, 3000, 10000]; // 0.05%, 0.3%, 1%
 const DEFAULT_QUOTE_TOKENS = ["USDC", "WETH"]; // Common quote tokens for pairing
 const DEFAULT_TARGETS = ["WETH", "cbETH", "cbBTC", "weETH"]; // Base-native assets
 
+// TWAP validation constants
+const BASE_AVG_BLOCK_TIME_SEC = 2; // Base network average block time
+const MIN_OBSERVATIONS_SAFE_DEFAULT = 100; // Conservative minimum for robust TWAP
+
 // ABIs
 const FACTORY_ABI = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
@@ -213,6 +217,40 @@ function rankPools(pools) {
 }
 
 /**
+ * Validate pool for TWAP suitability
+ */
+async function validatePoolForTwap(provider, poolAddress, windowSec = 300) {
+  try {
+    const pool = new ethers.Contract(poolAddress, POOL_ABI, provider);
+    const slot0 = await pool.slot0();
+    
+    const observationCardinality = slot0.observationCardinality;
+    const observationCardinalityNext = slot0.observationCardinalityNext;
+    
+    // Check if pool has sufficient observation history
+    // Base has ~2 second block time, so 300s window needs ~150 observations
+    const minObservationsNeeded = Math.ceil(windowSec / BASE_AVG_BLOCK_TIME_SEC);
+    const hasEnoughHistory = observationCardinality >= Math.min(minObservationsNeeded, MIN_OBSERVATIONS_SAFE_DEFAULT);
+    
+    return {
+      isValid: hasEnoughHistory,
+      observationCardinality,
+      observationCardinalityNext,
+      recommendation: hasEnoughHistory 
+        ? "✅ Pool suitable for TWAP"
+        : `⚠️  Pool may have insufficient observation history (${observationCardinality} < ${minObservationsNeeded} recommended for ${windowSec}s window)`
+    };
+  } catch (err) {
+    return {
+      isValid: false,
+      observationCardinality: 0,
+      observationCardinalityNext: 0,
+      recommendation: `❌ Pool validation failed: ${err.message}`
+    };
+  }
+}
+
+/**
  * Format pool for output (with BigInt serialization fix)
  */
 function formatPoolConfig(symbol, pool, quoteSymbol) {
@@ -371,6 +409,10 @@ async function main() {
     console.log(
       `     Observation Cardinality: ${bestPool.observationCardinality}`
     );
+    
+    // Validate pool for TWAP suitability
+    const validation = await validatePoolForTwap(provider, bestPool.address);
+    console.log(`     ${validation.recommendation}`);
 
     results.push(formatPoolConfig(symbol, bestPool, bestPool.quoteSymbol));
   }

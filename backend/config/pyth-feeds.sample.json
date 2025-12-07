@@ -36,8 +36,12 @@
       "description": "cbETH/USD"
     },
     "weETH": {
-      "feedId": "0x8d8f8ab10e0bb2d2b7e7f964b0f6b8c7f0c4b0c9e5d5f5f5f5f5f5f5f5f5f5f5",
-      "description": "weETH/ETH (placeholder - verify actual feed ID)"
+      "feedId": "0x359f00c7fd1c2b45046395a944c7e2de0b8cac2194484fbc209f83b7ecbf85b5",
+      "description": "weETH/USD"
+    },
+    "wstETH": {
+      "feedId": "0x6df640f3b8963d8f8358f791f352b8364513f6ab1cca5ed3f1f7b5448980e784",
+      "description": "wstETH/USD"
     },
     "DAI": {
       "feedId": "0xb0948a5e5313200c632b51bb5ca32f6de0d36e9950a942d19751e833f70dabfd",
@@ -51,8 +55,8 @@
   "notes": [
     "Feed IDs are 32-byte hex strings (66 characters including 0x prefix)",
     "Always verify feed IDs at https://pyth.network/developers/price-feed-ids",
-    "weETH feed ID is a placeholder and should be updated with the actual feed ID",
-    "For ratio feeds (e.g., cbETH/ETH, weETH/ETH), you may need to compose with ETH/USD",
+    "These feed IDs are for Pyth Network's price feeds available on Base and other chains",
+    "Most feeds are direct USD pairs; ratio feeds like wstETH/ETH may require composition",
     "Update this file with additional assets as needed for your deployment"
   ]
 }

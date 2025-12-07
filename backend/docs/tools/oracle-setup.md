@@ -24,12 +24,15 @@ Add the following to your `.env` file:
 ```bash
 # Pyth Network Integration
 PYTH_ENABLED=false  # Set to true when ready to enable
+# Base URL for Pyth Hermes REST API (endpoints like /v2/updates/price/latest are appended by code)
 PYTH_HTTP_URL=https://hermes.pyth.network
 PYTH_WS_URL=wss://hermes.pyth.network/ws
 PYTH_ASSETS=WETH,WBTC,cbETH,USDC
 PYTH_STALE_SECS=10
 PYTH_FEED_MAP_PATH=./config/pyth-feeds.json
 ```
+
+**Important:** `PYTH_HTTP_URL` should be set to the base URL only (`https://hermes.pyth.network`), **not** to a specific endpoint like `/v2/price_feeds`. The application code will append the correct endpoint paths (e.g., `/v2/updates/price/latest?ids[]=<feedId>`) automatically.
 
 ### 1.2 Create Feed Map
 
@@ -218,12 +221,15 @@ EXECUTION_ENABLED=true  # Enable actual execution
 ### Pyth Connectivity Issues
 
 **Problem:** REST API returns no data or stale prices
-- **Solution:** Verify `PYTH_HTTP_URL` is correct (default: `https://hermes.pyth.network`)
+- **Solution:** Verify `PYTH_HTTP_URL` is set to base URL only: `https://hermes.pyth.network` (not `/v2/price_feeds`)
+- **Solution:** The code will automatically append endpoints like `/v2/updates/price/latest?ids[]=<feedId>`
 - **Solution:** Check feed IDs in `PYTH_FEED_MAP_PATH` against https://pyth.network/developers/price-feed-ids
+- **Solution:** Ensure your network can reach hermes.pyth.network (check firewall/proxy)
 
 **Problem:** SSE stream not receiving updates
 - **Solution:** Verify network allows WebSocket/SSE connections
-- **Solution:** Check firewall rules for outbound HTTPS
+- **Solution:** Check firewall rules for outbound HTTPS and WSS
+- **Solution:** Some corporate networks block WebSocket - use HTTP polling as fallback
 
 ### TWAP Pool Discovery Issues
 
