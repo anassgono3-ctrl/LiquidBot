@@ -9,6 +9,24 @@ The oracle discovery and validation tooling helps operators:
 2. **Validate Pyth connectivity** - Test Pyth Hermes REST and SSE endpoints
 3. **Verify TWAP sanity** - Compare TWAP prices against Chainlink to ensure accuracy
 
+## Important Notes on ethers v6 and BigInt Handling
+
+The oracle tooling uses **ethers v6**, which represents Chainlink oracle answers and blockchain values as **BigInt** types. To avoid precision loss and conversion errors:
+
+- **Always use `ethers.formatUnits()`** when converting Chainlink prices or token amounts to decimals
+- **Never use** `Number(bigIntValue) / 10**decimals` as this can cause overflow or precision loss
+- Example: `parseFloat(ethers.formatUnits(latestRound.answer, decimals))` instead of `Number(latestRound.answer) / 10**decimals`
+
+### Uniswap V3 TWAP Price Orientation
+
+Uniswap V3 TWAP prices are always expressed as **token1 per token0**:
+- For a WETH/USDC pool where token0=WETH and token1=USDC, the price represents **USDC per WETH**
+- This is effectively the USD price of ETH (since USDC ≈ 1 USD)
+- For pools with quote=WETH (e.g., AAVE/WETH), you must multiply the TWAP by Chainlink ETH/USD to get USD per asset
+- Always check token0/token1 addresses to confirm price orientation
+
+The scripts automatically fetch and display token0/token1 addresses for verification.
+
 ## Prerequisites
 
 - Node.js 18+ installed
@@ -155,6 +173,10 @@ Max Delta: 1.20%
 ------------------------------------------------------------
 Pool: 0x4C36388bE6F416A29C8d8Eee81C771cE6bE14B18
   TWAP Price: 3250.456123 (avg tick: 123456.78)
+  Observation Cardinality: 100
+  Token0: 0x4200000000000000000000000000000000000006
+  Token1: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+  Note: Price is token1/token0 (for WETH/USDC: USDC per WETH ≈ USD price)
   Chainlink Price: 3251.120000 (age: 12s)
   Delta: 0.663877 (0.02%)
   ✅ PASS - Delta within threshold
@@ -252,6 +274,24 @@ EXECUTION_ENABLED=true  # Enable actual execution
 **Problem:** TWAP computation fails
 - **Solution:** Verify `TWAP_WINDOW_SEC` doesn't exceed pool observation history
 - **Solution:** Check RPC endpoint supports historical queries (archive node may be needed)
+
+**Problem:** TWAP price is near zero or inverted
+- **Solution:** Check token0/token1 orientation in the pool (price is always token1/token0)
+- **Solution:** For non-USD quote tokens (e.g., WETH), multiply TWAP by Chainlink WETH/USD to get USD price
+- **Solution:** Verify the pool uses the expected quote token (USDC for direct USD pricing)
+
+**Problem:** Observation cardinality too low error
+- **Solution:** The pool doesn't have enough historical observations for the requested TWAP window
+- **Solution:** Reduce `TWAP_WINDOW_SEC` to a smaller value
+- **Solution:** Contact pool creator to increase observation cardinality via `increaseObservationCardinalityNext()`
+
+### BigInt Conversion Errors
+
+**Problem:** "Cannot convert BigInt to number" or precision loss errors
+- **Solution:** Ensure you're using `ethers.formatUnits()` for all BigInt-to-decimal conversions
+- **Solution:** Never use `Number(bigIntValue) / 10**decimals` pattern
+- **Solution:** The oracle scripts have been updated to handle ethers v6 BigInt properly
+- **Solution:** If writing custom code, always: `parseFloat(ethers.formatUnits(value, decimals))`
 
 ## Advanced Configuration
 
