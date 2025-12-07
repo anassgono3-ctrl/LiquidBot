@@ -149,9 +149,10 @@ function parseArgs() {
         console.error('Error: --window requires a numeric argument (seconds)');
         process.exit(1);
       }
-      const windowValue = parseInt(args[++i], 10);
+      const windowArg = args[++i];
+      const windowValue = parseInt(windowArg, 10);
       if (isNaN(windowValue) || windowValue <= 0) {
-        console.error(`Error: --window must be a positive number, got: ${args[i]}`);
+        console.error(`Error: --window must be a positive number, got: ${windowArg}`);
         process.exit(1);
       }
       parsed.window = windowValue;
@@ -160,9 +161,10 @@ function parseArgs() {
         console.error('Error: --delta requires a numeric argument (decimal percentage)');
         process.exit(1);
       }
-      const deltaValue = parseFloat(args[++i]);
+      const deltaArg = args[++i];
+      const deltaValue = parseFloat(deltaArg);
       if (isNaN(deltaValue) || deltaValue < 0 || deltaValue > 1) {
-        console.error(`Error: --delta must be a number between 0 and 1, got: ${args[i]}`);
+        console.error(`Error: --delta must be a number between 0 and 1, got: ${deltaArg}`);
         process.exit(1);
       }
       parsed.delta = deltaValue;
