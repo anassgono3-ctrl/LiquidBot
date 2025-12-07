@@ -1,5 +1,4 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "TWAP Pools Configuration",
   "description": "Sample configuration for TWAP pool validation. Discovered pools should be validated for sufficient observation cardinality using discover-twap-pools.mjs",
   "pools": [
