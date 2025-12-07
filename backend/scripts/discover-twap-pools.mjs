@@ -213,6 +213,40 @@ function rankPools(pools) {
 }
 
 /**
+ * Validate pool for TWAP suitability
+ */
+async function validatePoolForTwap(provider, poolAddress, windowSec = 300) {
+  try {
+    const pool = new ethers.Contract(poolAddress, POOL_ABI, provider);
+    const slot0 = await pool.slot0();
+    
+    const observationCardinality = slot0.observationCardinality;
+    const observationCardinalityNext = slot0.observationCardinalityNext;
+    
+    // Check if pool has sufficient observation history
+    // Base has ~2 second block time, so 300s window needs ~150 observations
+    const minObservationsNeeded = Math.ceil(windowSec / 2);
+    const hasEnoughHistory = observationCardinality >= Math.min(minObservationsNeeded, 100);
+    
+    return {
+      isValid: hasEnoughHistory,
+      observationCardinality,
+      observationCardinalityNext,
+      recommendation: hasEnoughHistory 
+        ? "✅ Pool suitable for TWAP"
+        : `⚠️  Pool may have insufficient observation history (${observationCardinality} < ${minObservationsNeeded} recommended for ${windowSec}s window)`
+    };
+  } catch (err) {
+    return {
+      isValid: false,
+      observationCardinality: 0,
+      observationCardinalityNext: 0,
+      recommendation: `❌ Pool validation failed: ${err.message}`
+    };
+  }
+}
+
+/**
  * Format pool for output (with BigInt serialization fix)
  */
 function formatPoolConfig(symbol, pool, quoteSymbol) {
@@ -371,6 +405,10 @@ async function main() {
     console.log(
       `     Observation Cardinality: ${bestPool.observationCardinality}`
     );
+    
+    // Validate pool for TWAP suitability
+    const validation = await validatePoolForTwap(provider, bestPool.address);
+    console.log(`     ${validation.recommendation}`);
 
     results.push(formatPoolConfig(symbol, bestPool, bestPool.quoteSymbol));
   }
