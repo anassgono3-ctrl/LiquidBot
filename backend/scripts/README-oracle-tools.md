@@ -182,22 +182,73 @@ Compares TWAP prices against Chainlink for sanity checking.
 ### Basic Usage
 
 ```bash
-# Test configured TWAP pools
-node scripts/test-twap-sanity.mjs
+# Via environment variable (traditional method)
+TWAP_POOLS='[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3"}]' node scripts/test-twap-sanity.mjs
 
-# Test with custom window and threshold
-TWAP_WINDOW_SEC=600 TWAP_DELTA_PCT=0.02 node scripts/test-twap-sanity.mjs
+# Via CLI argument (recommended for Windows - avoids shell escaping issues)
+node scripts/test-twap-sanity.mjs --twap-pools '[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3"}]'
+
+# Via JSON file (easiest for multiple pools)
+node scripts/test-twap-sanity.mjs --twap-pools-file ./config/twap-pools.json
+
+# With custom window and delta thresholds
+node scripts/test-twap-sanity.mjs --twap-pools-file ./pools.json --window 600 --delta 0.02
 ```
+
+### CLI Arguments
+
+| Argument | Description | Default |
+|----------|-------------|---------|
+| `--twap-pools <json>` | JSON array of pool configurations | - |
+| `--twap-pools-file <path>` | Path to JSON file with pool configurations | - |
+| `--window <seconds>` | TWAP observation window in seconds | `300` |
+| `--delta <percentage>` | Max allowed delta as decimal | `0.012` (1.2%) |
+| `--help` | Show help message | - |
+
+**Priority**: CLI arguments take precedence over environment variables.
+1. `--twap-pools` (highest priority)
+2. `--twap-pools-file`
+3. `TWAP_POOLS` environment variable (lowest priority)
 
 ### Environment Variables
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `RPC_URL` | Base RPC endpoint | **Required** |
-| `TWAP_POOLS` | JSON array of pool configs | **Required** |
+| `TWAP_POOLS` | JSON array of pool configs | **Required** (if no CLI args) |
 | `TWAP_WINDOW_SEC` | TWAP observation window (seconds) | `300` |
 | `TWAP_DELTA_PCT` | Max allowed delta (decimal) | `0.012` (1.2%) |
 | `CHAINLINK_FEEDS` | Comma-separated "SYMBOL:ADDRESS" | `""` |
+
+### Pool Configuration Format
+
+**Direct JSON Array**:
+```json
+[
+  {
+    "symbol": "WETH",
+    "pool": "0xd0b53D9277642d899DF5C87A3966A349A798F224",
+    "dex": "uniswap_v3"
+  }
+]
+```
+
+**JSON File with Wrapper** (also supported):
+```json
+{
+  "pools": [
+    {
+      "symbol": "WETH",
+      "pool": "0xd0b53D9277642d899DF5C87A3966A349A798F224",
+      "dex": "uniswap_v3",
+      "fee": 500,
+      "quote": "USDC"
+    }
+  ]
+}
+```
+
+Both formats are supported when using `--twap-pools-file`. See `config/twap-pools.sample.json` for a complete example.
 
 ### Example Output
 
@@ -243,6 +294,11 @@ Failed: 0
 
 ### Troubleshooting
 
+**No configuration provided:**
+- Use one of the three input methods: CLI argument, JSON file, or environment variable
+- CLI arguments are recommended for Windows users to avoid shell escaping issues
+- Use `--help` to see all options and examples
+
 **TWAP computation fails:**
 - Verify pool has sufficient observation cardinality
 - Reduce `TWAP_WINDOW_SEC` if pool is newly created
@@ -258,6 +314,11 @@ Failed: 0
 - Check RPC connectivity
 - Verify feed is active on Base network
 
+**Windows shell issues with JSON:**
+- Use `--twap-pools-file` instead of inline JSON to avoid escaping problems
+- If using `--twap-pools`, ensure proper quoting (single quotes may not work in CMD)
+- PowerShell users: escape quotes properly or use a JSON file
+
 ## Common Workflows
 
 ### Initial Setup
@@ -266,13 +327,20 @@ Failed: 0
 # 1. Discover pools
 node scripts/discover-twap-pools.mjs
 
-# 2. Copy output to .env as TWAP_POOLS
+# 2a. Save output to a JSON file (recommended)
+# Copy the JSON output from step 1 to config/twap-pools.json
+
+# 2b. Or copy output to .env as TWAP_POOLS (traditional method)
+# TWAP_POOLS='[...]'
 
 # 3. Test Pyth connectivity
 PYTH_FEED_MAP_PATH=./config/pyth-feeds.json node scripts/test-pyth-hermes.mjs
 
-# 4. Validate TWAP sanity
-node scripts/test-twap-sanity.mjs
+# 4. Validate TWAP sanity using file (recommended)
+node scripts/test-twap-sanity.mjs --twap-pools-file ./config/twap-pools.json
+
+# 4b. Or validate using environment variable
+# node scripts/test-twap-sanity.mjs
 ```
 
 ### Adding New Asset
@@ -283,10 +351,10 @@ TWAP_TARGETS=NEW_ASSET node scripts/discover-twap-pools.mjs
 
 # 2. Add to PYTH_FEED_MAP_PATH if using Pyth
 
-# 3. Update TWAP_POOLS in .env
+# 3. Update your twap-pools.json file with the new pool
 
 # 4. Run sanity check
-node scripts/test-twap-sanity.mjs
+node scripts/test-twap-sanity.mjs --twap-pools-file ./config/twap-pools.json
 ```
 
 ### Periodic Validation
@@ -294,7 +362,25 @@ node scripts/test-twap-sanity.mjs
 ```bash
 # Run weekly or after major price movements
 node scripts/test-pyth-hermes.mjs
+node scripts/test-twap-sanity.mjs --twap-pools-file ./config/twap-pools.json
+```
+
+### Windows-Specific Workflows
+
+On Windows, JSON in command-line arguments can be problematic. Use file-based configuration:
+
+```powershell
+# PowerShell - use file-based config
+node scripts/test-twap-sanity.mjs --twap-pools-file .\config\twap-pools.json
+
+# Or set environment variable and use default loading
+$env:TWAP_POOLS = Get-Content .\config\twap-pools.json -Raw
 node scripts/test-twap-sanity.mjs
+```
+
+```cmd
+REM CMD - use file-based config
+node scripts/test-twap-sanity.mjs --twap-pools-file .\config\twap-pools.json
 ```
 
 ## See Also

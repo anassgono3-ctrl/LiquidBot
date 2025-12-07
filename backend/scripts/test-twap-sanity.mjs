@@ -10,13 +10,28 @@
  * - Report delta vs threshold and overall pass/fail
  *
  * Usage:
- *   node scripts/test-twap-sanity.mjs
- *   RPC_URL=https://mainnet.base.org TWAP_POOLS='[...]' node scripts/test-twap-sanity.mjs
- *   TWAP_WINDOW_SEC=600 TWAP_DELTA_PCT=0.02 node scripts/test-twap-sanity.mjs
+ *   # Via environment variable
+ *   TWAP_POOLS='[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3"}]' node scripts/test-twap-sanity.mjs
+ *
+ *   # Via CLI argument (recommended for Windows)
+ *   node scripts/test-twap-sanity.mjs --twap-pools '[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3"}]'
+ *
+ *   # Via JSON file (easiest for multiple pools)
+ *   node scripts/test-twap-sanity.mjs --twap-pools-file ./config/twap-pools.json
+ *
+ *   # Additional options
+ *   node scripts/test-twap-sanity.mjs --twap-pools-file ./config/twap-pools.json --window 600 --delta 0.02
+ *
+ * CLI Arguments:
+ *   --twap-pools <json>        JSON array of pool configurations
+ *   --twap-pools-file <path>   Path to JSON file with pool configurations
+ *   --window <seconds>         TWAP observation window in seconds (default: 300)
+ *   --delta <percentage>       Max allowed delta as decimal (default: 0.012 = 1.2%)
+ *   --help                     Show this help message
  *
  * Environment variables:
  *   - RPC_URL: Base RPC endpoint (required)
- *   - TWAP_POOLS: JSON array of pool configs (required)
+ *   - TWAP_POOLS: JSON array of pool configs (fallback if no CLI args)
  *   - TWAP_WINDOW_SEC: TWAP observation window in seconds (default: 300)
  *   - TWAP_DELTA_PCT: Max allowed delta percentage (default: 0.012 = 1.2%)
  *   - CHAINLINK_FEEDS: Comma-separated "SYMBOL:ADDRESS" pairs
@@ -24,8 +39,14 @@
 
 import { ethers } from "ethers";
 import dotenv from "dotenv";
+import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // Uniswap V3 Pool ABI (minimal for TWAP)
 const POOL_ABI = [
@@ -42,21 +63,237 @@ const CHAINLINK_ABI = [
 ];
 
 /**
+ * Show help message
+ */
+function showHelp() {
+  console.log(`
+TWAP Sanity Check - Oracle Validation Tool
+
+USAGE:
+  # Via environment variable
+  TWAP_POOLS='[...]' node scripts/test-twap-sanity.mjs
+
+  # Via CLI argument (recommended for Windows)
+  node scripts/test-twap-sanity.mjs --twap-pools '[...]'
+
+  # Via JSON file (easiest for multiple pools)
+  node scripts/test-twap-sanity.mjs --twap-pools-file ./config/twap-pools.json
+
+OPTIONS:
+  --twap-pools <json>        JSON array of pool configurations
+  --twap-pools-file <path>   Path to JSON file with pool configurations
+  --window <seconds>         TWAP observation window in seconds (default: 300)
+  --delta <percentage>       Max allowed delta as decimal (default: 0.012)
+  --help                     Show this help message
+
+ENVIRONMENT VARIABLES:
+  RPC_URL                    Base RPC endpoint (required)
+  TWAP_POOLS                 JSON array of pool configs (fallback if no CLI args)
+  TWAP_WINDOW_SEC            TWAP observation window in seconds
+  TWAP_DELTA_PCT             Max allowed delta percentage
+  CHAINLINK_FEEDS            Comma-separated "SYMBOL:ADDRESS" pairs
+
+EXAMPLES:
+  # Single pool via CLI
+  node scripts/test-twap-sanity.mjs --twap-pools '[{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3"}]'
+
+  # Multiple pools via file
+  node scripts/test-twap-sanity.mjs --twap-pools-file ./my-pools.json
+
+  # Custom window and delta
+  node scripts/test-twap-sanity.mjs --twap-pools-file ./pools.json --window 600 --delta 0.02
+
+POOL CONFIG FORMAT:
+  [
+    {
+      "symbol": "WETH",
+      "pool": "0xd0b53D9277642d899DF5C87A3966A349A798F224",
+      "dex": "uniswap_v3"
+    }
+  ]
+`);
+  process.exit(0);
+}
+
+/**
+ * Parse CLI arguments
+ */
+function parseArgs() {
+  const args = process.argv.slice(2);
+  const parsed = {
+    twapPools: null,
+    twapPoolsFile: null,
+    window: null,
+    delta: null,
+  };
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    
+    if (arg === '--help' || arg === '-h') {
+      showHelp();
+    } else if (arg === '--twap-pools') {
+      if (i + 1 >= args.length) {
+        console.error('Error: --twap-pools requires a JSON argument');
+        process.exit(1);
+      }
+      parsed.twapPools = args[++i];
+    } else if (arg === '--twap-pools-file') {
+      if (i + 1 >= args.length) {
+        console.error('Error: --twap-pools-file requires a file path argument');
+        process.exit(1);
+      }
+      parsed.twapPoolsFile = args[++i];
+    } else if (arg === '--window') {
+      if (i + 1 >= args.length) {
+        console.error('Error: --window requires a numeric argument (seconds)');
+        process.exit(1);
+      }
+      const windowArg = args[++i];
+      const windowValue = parseInt(windowArg, 10);
+      if (isNaN(windowValue) || windowValue <= 0) {
+        console.error(`Error: --window must be a positive number, got: ${windowArg}`);
+        process.exit(1);
+      }
+      parsed.window = windowValue;
+    } else if (arg === '--delta') {
+      if (i + 1 >= args.length) {
+        console.error('Error: --delta requires a numeric argument (decimal percentage)');
+        process.exit(1);
+      }
+      const deltaArg = args[++i];
+      const deltaValue = parseFloat(deltaArg);
+      if (isNaN(deltaValue) || deltaValue < 0 || deltaValue > 1) {
+        console.error(`Error: --delta must be a number between 0 and 1, got: ${deltaArg}`);
+        process.exit(1);
+      }
+      parsed.delta = deltaValue;
+    } else {
+      console.error(`Unknown argument: ${arg}`);
+      console.error('Use --help for usage information');
+      process.exit(1);
+    }
+  }
+
+  return parsed;
+}
+
+/**
+ * Load TWAP pools from JSON file
+ */
+function loadTwapPoolsFromFile(filePath) {
+  try {
+    const content = readFileSync(filePath, 'utf-8');
+    const data = JSON.parse(content);
+    
+    // Support both array format and object with "pools" key
+    if (Array.isArray(data)) {
+      return data;
+    } else if (data.pools && Array.isArray(data.pools)) {
+      return data.pools;
+    } else {
+      throw new Error('File must contain a JSON array or an object with a "pools" array');
+    }
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      throw new Error(`File not found: ${filePath}`);
+    }
+    throw new Error(`Failed to load pools from ${filePath}: ${err.message}`);
+  }
+}
+
+/**
  * Parse TWAP_POOLS from JSON string
  */
-function parseTwapPools(poolsEnv) {
-  if (!poolsEnv || !poolsEnv.trim()) {
+function parseTwapPools(poolsJson) {
+  if (!poolsJson || !poolsJson.trim()) {
     return [];
   }
   try {
-    const pools = JSON.parse(poolsEnv);
+    const pools = JSON.parse(poolsJson);
     if (!Array.isArray(pools)) {
       throw new Error("TWAP_POOLS must be an array");
     }
     return pools;
   } catch (err) {
-    throw new Error(`Failed to parse TWAP_POOLS: ${err.message}`);
+    throw new Error(`Failed to parse TWAP_POOLS JSON: ${err.message}`);
   }
+}
+
+/**
+ * Load TWAP pools with fallback priority:
+ * 1. CLI --twap-pools argument
+ * 2. CLI --twap-pools-file argument
+ * 3. TWAP_POOLS environment variable
+ */
+function loadTwapPools(cliArgs) {
+  const sources = [];
+  
+  // Priority 1: CLI --twap-pools
+  if (cliArgs.twapPools) {
+    sources.push({
+      name: 'CLI argument --twap-pools',
+      load: () => parseTwapPools(cliArgs.twapPools),
+    });
+  }
+  
+  // Priority 2: CLI --twap-pools-file
+  if (cliArgs.twapPoolsFile) {
+    sources.push({
+      name: `JSON file: ${cliArgs.twapPoolsFile}`,
+      load: () => loadTwapPoolsFromFile(cliArgs.twapPoolsFile),
+    });
+  }
+  
+  // Priority 3: TWAP_POOLS environment variable
+  if (process.env.TWAP_POOLS) {
+    sources.push({
+      name: 'Environment variable TWAP_POOLS',
+      load: () => parseTwapPools(process.env.TWAP_POOLS),
+    });
+  }
+  
+  // Try each source in priority order
+  const errors = [];
+  for (const source of sources) {
+    try {
+      const pools = source.load();
+      if (pools.length > 0) {
+        console.log(`✅ Loaded ${pools.length} pool(s) from: ${source.name}\n`);
+        return pools;
+      } else {
+        // Empty array is valid but not useful - treat as a soft failure
+        errors.push({ source: source.name, error: 'Configuration contains no pools (empty array)' });
+      }
+    } catch (err) {
+      errors.push({ source: source.name, error: err.message });
+    }
+  }
+  
+  // No valid source found
+  if (errors.length > 0) {
+    console.error('❌ Failed to load TWAP pool configuration:\n');
+    for (const { source, error } of errors) {
+      console.error(`  ${source}: ${error}`);
+    }
+    console.error('\nPlease provide pool configuration via one of:');
+    console.error('  1. --twap-pools \'[{"symbol":"WETH","pool":"0x...","dex":"uniswap_v3"}]\'');
+    console.error('  2. --twap-pools-file ./config/twap-pools.json');
+    console.error('  3. TWAP_POOLS environment variable');
+    console.error('\nUse --help for more information');
+    process.exit(1);
+  }
+  
+  // No configuration provided at all
+  console.error('❌ No TWAP pool configuration provided');
+  console.error('\nPlease provide pool configuration via one of:');
+  console.error('  1. --twap-pools \'[{"symbol":"WETH","pool":"0x...","dex":"uniswap_v3"}]\'');
+  console.error('  2. --twap-pools-file ./config/twap-pools.json');
+  console.error('  3. TWAP_POOLS environment variable');
+  console.error('\nExample configuration:');
+  console.error('  [{"symbol":"WETH","pool":"0xd0b53D9277642d899DF5C87A3966A349A798F224","dex":"uniswap_v3"}]');
+  console.error('\nUse --help for more information');
+  process.exit(1);
 }
 
 /**
@@ -169,21 +406,20 @@ function comparePrices(twapPrice, chainlinkPrice, maxDeltaPct) {
  * Main sanity check logic
  */
 async function main() {
+  // Parse CLI arguments
+  const cliArgs = parseArgs();
+  
+  // Load configuration
   const rpcUrl = process.env.RPC_URL;
   if (!rpcUrl) {
     console.error("Error: RPC_URL environment variable is required");
     process.exit(1);
   }
 
-  const poolsEnv = process.env.TWAP_POOLS;
-  if (!poolsEnv) {
-    console.error("Error: TWAP_POOLS environment variable is required");
-    console.error('Example: TWAP_POOLS=\'[{"symbol":"WETH","pool":"0x...","dex":"uniswap_v3"}]\'');
-    process.exit(1);
-  }
-
-  const windowSec = parseInt(process.env.TWAP_WINDOW_SEC || "300", 10);
-  const maxDeltaPct = parseFloat(process.env.TWAP_DELTA_PCT || "0.012");
+  const pools = loadTwapPools(cliArgs);
+  
+  const windowSec = cliArgs.window || parseInt(process.env.TWAP_WINDOW_SEC || "300", 10);
+  const maxDeltaPct = cliArgs.delta || parseFloat(process.env.TWAP_DELTA_PCT || "0.012");
   const chainlinkFeedsEnv = process.env.CHAINLINK_FEEDS || "";
 
   console.log("🔍 TWAP Sanity Check");
@@ -192,13 +428,7 @@ async function main() {
   console.log(`TWAP Window: ${windowSec}s`);
   console.log(`Max Delta: ${(maxDeltaPct * 100).toFixed(2)}%\n`);
 
-  const pools = parseTwapPools(poolsEnv);
   const chainlinkFeeds = parseChainlinkFeeds(chainlinkFeedsEnv);
-
-  if (pools.length === 0) {
-    console.log("❌ No pools configured in TWAP_POOLS");
-    process.exit(1);
-  }
 
   // Validate all pool configurations
   console.log("Validating pool configurations...\n");
