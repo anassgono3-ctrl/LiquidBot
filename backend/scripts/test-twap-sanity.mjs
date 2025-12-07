@@ -133,13 +133,39 @@ function parseArgs() {
     if (arg === '--help' || arg === '-h') {
       showHelp();
     } else if (arg === '--twap-pools') {
+      if (i + 1 >= args.length) {
+        console.error('Error: --twap-pools requires a JSON argument');
+        process.exit(1);
+      }
       parsed.twapPools = args[++i];
     } else if (arg === '--twap-pools-file') {
+      if (i + 1 >= args.length) {
+        console.error('Error: --twap-pools-file requires a file path argument');
+        process.exit(1);
+      }
       parsed.twapPoolsFile = args[++i];
     } else if (arg === '--window') {
-      parsed.window = parseInt(args[++i], 10);
+      if (i + 1 >= args.length) {
+        console.error('Error: --window requires a numeric argument (seconds)');
+        process.exit(1);
+      }
+      const windowValue = parseInt(args[++i], 10);
+      if (isNaN(windowValue) || windowValue <= 0) {
+        console.error(`Error: --window must be a positive number, got: ${args[i]}`);
+        process.exit(1);
+      }
+      parsed.window = windowValue;
     } else if (arg === '--delta') {
-      parsed.delta = parseFloat(args[++i]);
+      if (i + 1 >= args.length) {
+        console.error('Error: --delta requires a numeric argument (decimal percentage)');
+        process.exit(1);
+      }
+      const deltaValue = parseFloat(args[++i]);
+      if (isNaN(deltaValue) || deltaValue < 0 || deltaValue > 1) {
+        console.error(`Error: --delta must be a number between 0 and 1, got: ${args[i]}`);
+        process.exit(1);
+      }
+      parsed.delta = deltaValue;
     } else {
       console.error(`Unknown argument: ${arg}`);
       console.error('Use --help for usage information');
@@ -233,6 +259,9 @@ function loadTwapPools(cliArgs) {
       if (pools.length > 0) {
         console.log(`✅ Loaded ${pools.length} pool(s) from: ${source.name}\n`);
         return pools;
+      } else {
+        // Empty array is valid but not useful - treat as a soft failure
+        errors.push({ source: source.name, error: 'Configuration contains no pools (empty array)' });
       }
     } catch (err) {
       errors.push({ source: source.name, error: err.message });
