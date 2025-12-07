@@ -19,6 +19,9 @@ import { PriceService } from '../../src/services/PriceService.js';
 import { PythListener } from '../../src/services/PythListener.js';
 import { TwapSanity } from '../../src/services/TwapSanity.js';
 
+// Common test assets for validation
+const COMMON_TEST_ASSETS = ['WETH', 'WBTC', 'CBETH', 'USDC'];
+
 describe('Oracle Stack Integration', () => {
   describe('Service Initialization', () => {
     it('should initialize all oracle services without errors', () => {
@@ -137,7 +140,7 @@ describe('Oracle Stack Integration', () => {
       
       // Default assets from config
       const hasCommonAssets = assets.some(a => 
-        ['WETH', 'WBTC', 'CBETH', 'USDC'].includes(a.toUpperCase())
+        COMMON_TEST_ASSETS.includes(a.toUpperCase())
       );
       expect(hasCommonAssets).toBe(true);
     });

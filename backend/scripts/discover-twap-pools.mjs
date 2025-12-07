@@ -51,6 +51,10 @@ const DEFAULT_FEE_TIERS = [500, 3000, 10000]; // 0.05%, 0.3%, 1%
 const DEFAULT_QUOTE_TOKENS = ["USDC", "WETH"]; // Common quote tokens for pairing
 const DEFAULT_TARGETS = ["WETH", "cbETH", "cbBTC", "weETH"]; // Base-native assets
 
+// TWAP validation constants
+const BASE_AVG_BLOCK_TIME_SEC = 2; // Base network average block time
+const MIN_OBSERVATIONS_SAFE_DEFAULT = 100; // Conservative minimum for robust TWAP
+
 // ABIs
 const FACTORY_ABI = [
   "function getPool(address tokenA, address tokenB, uint24 fee) view returns (address pool)",
@@ -225,8 +229,8 @@ async function validatePoolForTwap(provider, poolAddress, windowSec = 300) {
     
     // Check if pool has sufficient observation history
     // Base has ~2 second block time, so 300s window needs ~150 observations
-    const minObservationsNeeded = Math.ceil(windowSec / 2);
-    const hasEnoughHistory = observationCardinality >= Math.min(minObservationsNeeded, 100);
+    const minObservationsNeeded = Math.ceil(windowSec / BASE_AVG_BLOCK_TIME_SEC);
+    const hasEnoughHistory = observationCardinality >= Math.min(minObservationsNeeded, MIN_OBSERVATIONS_SAFE_DEFAULT);
     
     return {
       isValid: hasEnoughHistory,
