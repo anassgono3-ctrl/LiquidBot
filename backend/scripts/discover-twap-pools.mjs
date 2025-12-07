@@ -434,8 +434,8 @@ async function main() {
     }
     
     console.log("\n✅ Ready-to-paste TWAP_POOLS configuration:\n");
-    // Use compact JSON without extra spaces for .env pasting
-    const twapPoolsCompact = JSON.stringify(results);
+    // Use custom serializer to handle any BigInt values safely
+    const twapPoolsCompact = safeStringify(results, 0);
     console.log(`TWAP_POOLS='${twapPoolsCompact}'`);
   }
 

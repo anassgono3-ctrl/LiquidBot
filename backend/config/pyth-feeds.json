@@ -1,0 +1,62 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Pyth Feed Map",
+  "description": "Mapping of asset symbols to Pyth Network feed IDs for Base network. Feed IDs are obtained from https://pyth.network/developers/price-feed-ids",
+  "feeds": {
+    "ETH": {
+      "feedId": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "description": "ETH/USD"
+    },
+    "WETH": {
+      "feedId": "0xff61491a931112ddf1bd8147cd1b641375f79f5825126d665480874634fd0ace",
+      "description": "ETH/USD (WETH uses same feed as ETH)"
+    },
+    "BTC": {
+      "feedId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "description": "BTC/USD"
+    },
+    "WBTC": {
+      "feedId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "description": "BTC/USD (WBTC uses same feed as BTC)"
+    },
+    "cbBTC": {
+      "feedId": "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
+      "description": "BTC/USD (cbBTC uses same feed as BTC)"
+    },
+    "USDC": {
+      "feedId": "0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
+      "description": "USDC/USD"
+    },
+    "USDbC": {
+      "feedId": "0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
+      "description": "USDC/USD (USDbC uses same feed as USDC)"
+    },
+    "cbETH": {
+      "feedId": "0x15ecddd26d49e1a8f1de9376ebebc03916ede873447c1255d2d5891b92ce5717",
+      "description": "cbETH/USD"
+    },
+    "weETH": {
+      "feedId": "0x359f00c7fd1c2b45046395a944c7e2de0b8cac2194484fbc209f83b7ecbf85b5",
+      "description": "weETH/USD"
+    },
+    "wstETH": {
+      "feedId": "0x6df640f3b8963d8f8358f791f352b8364513f6ab1cca5ed3f1f7b5448980e784",
+      "description": "wstETH/USD"
+    },
+    "DAI": {
+      "feedId": "0xb0948a5e5313200c632b51bb5ca32f6de0d36e9950a942d19751e833f70dabfd",
+      "description": "DAI/USD"
+    },
+    "AAVE": {
+      "feedId": "0x2b9ab1e972a281585084148ba1389800799bd4be63b957507db1349314e47445",
+      "description": "AAVE/USD"
+    }
+  },
+  "notes": [
+    "Feed IDs are 32-byte hex strings (66 characters including 0x prefix)",
+    "Always verify feed IDs at https://pyth.network/developers/price-feed-ids",
+    "These feed IDs are for Pyth Network's price feeds available on Base and other chains",
+    "Most feeds are direct USD pairs; ratio feeds like wstETH/ETH may require composition",
+    "Update this file with additional assets as needed for your deployment"
+  ]
+}
