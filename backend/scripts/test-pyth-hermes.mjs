@@ -25,10 +25,15 @@
 import https from "https";
 import http from "http";
 import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
 import dotenv from "dotenv";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * Load feed map from JSON file
@@ -108,9 +113,10 @@ async function testRestFeed(httpUrl, feedId, symbol, staleSecs) {
 
     const priceData = data.parsed[0];
     const price = priceData.price;
-    const publishTime = priceData.metadata?.publish_time || 0;
-    const conf = priceData.price?.conf || "N/A";
-    const expo = priceData.price?.expo || 0;
+    // Fix: publish_time is in price object, not metadata
+    const publishTime = price?.publish_time || 0;
+    const conf = price?.conf || "N/A";
+    const expo = price?.expo || 0;
 
     const now = Math.floor(Date.now() / 1000);
     const age = now - publishTime;
@@ -197,7 +203,9 @@ async function main() {
   const httpUrl =
     process.env.PYTH_HTTP_URL || "https://hermes.pyth.network";
   const assetsEnv = process.env.PYTH_ASSETS || "WETH,WBTC,cbETH,USDC";
-  const feedMapPath = process.env.PYTH_FEED_MAP_PATH || "";
+  // Default to config/pyth-feeds.json relative to backend directory
+  const defaultFeedMapPath = join(__dirname, "..", "config", "pyth-feeds.json");
+  const feedMapPath = process.env.PYTH_FEED_MAP_PATH || defaultFeedMapPath;
   const staleSecs = parseInt(process.env.PYTH_STALE_SECS || "10", 10);
   const sseDuration = parseInt(process.env.SSE_DURATION_SEC || "10", 10);
 
@@ -220,15 +228,24 @@ async function main() {
     CBBTC: "0xe62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43",
     USDC: "0xeaa020c61cc479712813461ce153894a96a6c00b21ed0cfc2798d1f9a9e9c94a",
     CBETH: "0x15ecddd26d49e1a8f1de9376ebebc03916ede873447c1255d2d5891b92ce5717",
+    WEETH: "0x9ee4e7c60b940440a261eb54b6d8149c23b580ed7da3139f7f08f4ea29dad395",
   };
 
-  // Resolve feed IDs
+  // Resolve feed IDs (case-insensitive lookup)
   const feedsToTest = [];
   for (const symbol of assets) {
     let feedId = null;
-    if (feedMap && feedMap[symbol]) {
-      feedId = feedMap[symbol].feedId;
-    } else if (defaultFeeds[symbol]) {
+    // Try feed map first (case-insensitive)
+    if (feedMap) {
+      const feedMapEntry = Object.keys(feedMap).find(
+        (key) => key.toUpperCase() === symbol
+      );
+      if (feedMapEntry) {
+        feedId = feedMap[feedMapEntry].feedId;
+      }
+    }
+    // Fall back to default feeds
+    if (!feedId && defaultFeeds[symbol]) {
       feedId = defaultFeeds[symbol];
     }
 

@@ -49,10 +49,40 @@ function parseTwapPools(poolsEnv) {
     return [];
   }
   try {
-    return JSON.parse(poolsEnv);
+    const pools = JSON.parse(poolsEnv);
+    if (!Array.isArray(pools)) {
+      throw new Error("TWAP_POOLS must be an array");
+    }
+    return pools;
   } catch (err) {
     throw new Error(`Failed to parse TWAP_POOLS: ${err.message}`);
   }
+}
+
+/**
+ * Validate pool configuration
+ */
+function validatePoolConfig(poolConfig) {
+  const { symbol, pool, dex } = poolConfig;
+  
+  if (!symbol || typeof symbol !== 'string') {
+    throw new Error(`Invalid pool config: missing or invalid symbol`);
+  }
+  
+  if (!pool || typeof pool !== 'string') {
+    throw new Error(`Invalid pool config for ${symbol}: missing or invalid pool address`);
+  }
+  
+  // Validate Ethereum address format (0x followed by 40 hex characters)
+  if (!/^0x[0-9a-fA-F]{40}$/.test(pool)) {
+    throw new Error(`Invalid pool config for ${symbol}: pool address "${pool}" is not a valid Ethereum address`);
+  }
+  
+  if (!dex || typeof dex !== 'string') {
+    throw new Error(`Invalid pool config for ${symbol}: missing or invalid dex`);
+  }
+  
+  return true;
 }
 
 /**
@@ -168,6 +198,17 @@ async function main() {
   if (pools.length === 0) {
     console.log("❌ No pools configured in TWAP_POOLS");
     process.exit(1);
+  }
+
+  // Validate all pool configurations
+  console.log("Validating pool configurations...\n");
+  for (const poolConfig of pools) {
+    try {
+      validatePoolConfig(poolConfig);
+    } catch (err) {
+      console.error(`❌ Validation failed: ${err.message}`);
+      process.exit(1);
+    }
   }
 
   console.log(`Testing ${pools.length} pool(s)...\n`);
