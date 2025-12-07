@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TWAP Pools Configuration",
+  "description": "Sample configuration for TWAP pool validation. Discovered pools should be validated for sufficient observation cardinality using discover-twap-pools.mjs",
+  "pools": [
+    {
+      "symbol": "WETH",
+      "pool": "0xd0b53D9277642d899DF5C87A3966A349A798F224",
+      "dex": "uniswap_v3",
+      "fee": 500,
+      "quote": "USDC",
+      "note": "WETH/USDC 0.05% pool on Base - validate cardinality before use"
+    },
+    {
+      "symbol": "cbETH",
+      "pool": "0x4C36388bE6F416A29C8d8Eee81C771cE6bE14B18",
+      "dex": "uniswap_v3",
+      "fee": 500,
+      "quote": "USDC",
+      "note": "cbETH/USDC 0.05% pool on Base - example only"
+    }
+  ],
+  "notes": [
+    "Pool addresses must be valid Ethereum addresses (0x followed by 40 hex characters)",
+    "Use scripts/discover-twap-pools.mjs to find pools with sufficient observation history",
+    "Minimum required fields: symbol, pool, dex",
+    "Optional fields: fee, quote, liquidity, note",
+    "The 'pools' array can also be provided directly as a JSON array (without the wrapper object)",
+    "Always verify pool addresses before using in production"
+  ]
+}
