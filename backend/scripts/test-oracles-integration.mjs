@@ -29,10 +29,15 @@
 import https from "https";
 import http from "http";
 import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import { ethers } from "ethers";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 // ============================================================================
 // Pyth Hermes Integration
@@ -328,8 +333,9 @@ async function main() {
 
   const pythHttpUrl = process.env.PYTH_HTTP_URL || "https://hermes.pyth.network";
   const pythAssetsEnv = process.env.PYTH_ASSETS || "WETH,WBTC,cbETH,USDC";
-  const feedMapPath = process.env.PYTH_FEED_MAP_PATH || 
-    "/home/runner/work/LiquidBot/LiquidBot/backend/config/pyth-feeds.sample.json";
+  // Default to config/pyth-feeds.json relative to backend directory
+  const defaultFeedMapPath = join(__dirname, "..", "config", "pyth-feeds.json");
+  const feedMapPath = process.env.PYTH_FEED_MAP_PATH || defaultFeedMapPath;
   const pythStaleSecs = parseInt(process.env.PYTH_STALE_SECS || "10", 10);
 
   console.log(`Pyth HTTP URL: ${pythHttpUrl}`);

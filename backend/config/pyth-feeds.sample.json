@@ -36,7 +36,7 @@
       "description": "cbETH/USD"
     },
     "weETH": {
-      "feedId": "0x359f00c7fd1c2b45046395a944c7e2de0b8cac2194484fbc209f83b7ecbf85b5",
+      "feedId": "0x9ee4e7c60b940440a261eb54b6d8149c23b580ed7da3139f7f08f4ea29dad395",
       "description": "weETH/USD"
     },
     "wstETH": {

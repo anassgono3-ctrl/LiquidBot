@@ -25,10 +25,15 @@
 import https from "https";
 import http from "http";
 import { readFileSync } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
 import dotenv from "dotenv";
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 /**
  * Load feed map from JSON file
@@ -198,9 +203,9 @@ async function main() {
   const httpUrl =
     process.env.PYTH_HTTP_URL || "https://hermes.pyth.network";
   const assetsEnv = process.env.PYTH_ASSETS || "WETH,WBTC,cbETH,USDC";
-  // Default to config/pyth-feeds.sample.json if no path specified
-  const feedMapPath = process.env.PYTH_FEED_MAP_PATH || 
-    "/home/runner/work/LiquidBot/LiquidBot/backend/config/pyth-feeds.sample.json";
+  // Default to config/pyth-feeds.json relative to backend directory
+  const defaultFeedMapPath = join(__dirname, "..", "config", "pyth-feeds.json");
+  const feedMapPath = process.env.PYTH_FEED_MAP_PATH || defaultFeedMapPath;
   const staleSecs = parseInt(process.env.PYTH_STALE_SECS || "10", 10);
   const sseDuration = parseInt(process.env.SSE_DURATION_SEC || "10", 10);
 
