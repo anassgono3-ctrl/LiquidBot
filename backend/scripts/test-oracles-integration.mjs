@@ -231,22 +231,49 @@ async function computeTwap(provider, poolAddress, windowSec) {
   const pool = new ethers.Contract(poolAddress, POOL_ABI, provider);
 
   try {
+    // Fetch slot0 to check observation cardinality
+    const slot0 = await pool.slot0();
+    const observationCardinality = Number(slot0.observationCardinality);
+    
+    // Warn if cardinality is too low for the requested window
+    // Each observation can be at most ~13 seconds apart (on Ethereum mainnet)
+    // Base network may have different block times, but 2 is absolute minimum
+    if (observationCardinality < 2) {
+      return { 
+        success: false, 
+        error: `Observation cardinality too low: ${observationCardinality} (minimum 2 required)` 
+      };
+    }
+    
+    // Fetch token addresses for reporting
+    const [token0Address, token1Address] = await Promise.all([
+      pool.token0(),
+      pool.token1()
+    ]);
+    
     // Query observations at [now, now - windowSec]
     const secondsAgos = [0, windowSec];
     const [tickCumulatives] = await pool.observe(secondsAgos);
 
-    const tickCumulativeStart = tickCumulatives[1];
-    const tickCumulativeEnd = tickCumulatives[0];
-    const timeDelta = BigInt(windowSec);
+    // BigInt-safe math: compute tick delta directly
+    const tickCum0 = tickCumulatives[0];  // most recent (t=now)
+    const tickCum1 = tickCumulatives[1];  // older (t=now-window)
+    const tickDelta = Number(tickCum0 - tickCum1);
+    const avgTick = tickDelta / windowSec;
 
-    // Average tick over window
-    const tickDelta = tickCumulativeEnd - tickCumulativeStart;
-    const avgTick = Number(tickDelta) / Number(timeDelta);
-
-    // Convert tick to price: price = 1.0001^tick
+    // Convert tick to price: price = 1.0001^avgTick
+    // This represents token1 per token0
+    // For WETH/USDC pools where token0=WETH and token1=USDC, this gives USDC per WETH
     const price = Math.pow(1.0001, avgTick);
 
-    return { success: true, price, avgTick };
+    return { 
+      success: true, 
+      price, 
+      avgTick, 
+      observationCardinality,
+      token0: token0Address,
+      token1: token1Address
+    };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -264,7 +291,8 @@ async function fetchChainlinkPrice(provider, feedAddress) {
       feed.latestRoundData(),
     ]);
 
-    const price = Number(latestRound.answer) / Math.pow(10, decimals);
+    // Use ethers.formatUnits to avoid BigInt conversion errors (ethers v6)
+    const price = parseFloat(ethers.formatUnits(latestRound.answer, decimals));
     const updatedAt = Number(latestRound.updatedAt);
     const age = Math.floor(Date.now() / 1000) - updatedAt;
 
@@ -297,6 +325,9 @@ async function testTwapPool(provider, poolConfig, windowSec, chainlinkFeeds, max
     symbol,
     twapPrice: twapResult.price,
     avgTick: twapResult.avgTick,
+    observationCardinality: twapResult.observationCardinality,
+    token0: twapResult.token0,
+    token1: twapResult.token1,
   };
 
   // Fetch Chainlink price if available
@@ -436,7 +467,11 @@ async function main() {
 
       if (result.success) {
         console.log(`  ✅ ${result.symbol}:`);
-        console.log(`     TWAP: $${result.twapPrice.toFixed(6)}`);
+        console.log(`     TWAP: $${result.twapPrice.toFixed(6)} (avg tick: ${result.avgTick.toFixed(2)})`);
+        console.log(`     Observation Cardinality: ${result.observationCardinality}`);
+        console.log(`     Token0: ${result.token0}`);
+        console.log(`     Token1: ${result.token1}`);
+        console.log(`     Note: Price is token1/token0 (for WETH/USDC: USDC per WETH ≈ USD price)`);
         if (result.chainlinkPrice) {
           const status = result.withinThreshold ? "✅ PASS" : "❌ FAIL";
           console.log(`     Chainlink: $${result.chainlinkPrice.toFixed(6)} (age: ${result.chainlinkAge}s)`);
