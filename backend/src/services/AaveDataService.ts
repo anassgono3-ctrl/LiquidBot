@@ -108,6 +108,8 @@ export class AaveDataService {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   constructor(provider?: ethers.AbstractProvider, aaveMetadata?: any, metadataCache?: AssetMetadataCache) {
     if (provider) {
+      // Note: AbstractProvider accepts both JsonRpcProvider and WebSocketProvider (which extends JsonRpcProvider)
+      // We store as JsonRpcProvider since all our contract operations require it
       this.provider = provider as ethers.JsonRpcProvider;
       this.initializeContracts();
       
@@ -159,6 +161,7 @@ export class AaveDataService {
       }
     } else {
       // HTTP provider only
+      // Safe assertion: if not WebSocketProvider, it must be JsonRpcProvider
       this.httpProvider = provider as ethers.JsonRpcProvider;
       this.wsHealthy = false;
     }

@@ -305,6 +305,7 @@ if (config.pythEnabled) {
   // Register callback to forward price updates to priceService and predictiveOrchestrator
   pythListener.onPriceUpdate((update) => {
     // Forward to PriceService if available
+    // Note: block parameter is set to 0 as Pyth updates don't include block numbers
     if (priceService && typeof priceService.onPriceUpdate === 'function') {
       priceService.onPriceUpdate(update.symbol, update.price, update.timestamp, 0);
     }
