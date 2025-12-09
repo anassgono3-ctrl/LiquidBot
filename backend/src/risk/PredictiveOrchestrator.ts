@@ -327,6 +327,23 @@ export class PredictiveOrchestrator {
     effectiveBufferBps: number,
     currentBlock: number
   ): Promise<void> {
+    // PREDICTIVE NEAR-BAND ONLY: Filter candidates to only process near-band users
+    // This reduces RPC load by skipping clearly safe users (e.g., HF ~1.17)
+    if (!this.isInNearLiquidationBand(candidate)) {
+      // Track filtered candidates
+      predictiveCandidatesFilteredTotal.inc({ 
+        filter: 'not_near_band'
+      });
+      
+      // Log skip reason concisely
+      console.log(
+        `[predictive-skip] user=${candidate.address.slice(0, 10)}... scenario=${candidate.scenario} ` +
+        `hfCurrent=${candidate.hfCurrent?.toFixed(4) ?? 'N/A'} hfProjected=${candidate.hfProjected.toFixed(4)} ` +
+        `reason=hf_not_near_band`
+      );
+      return;
+    }
+
     // Track ingestion metric
     predictiveIngestedTotal.inc({ scenario: candidate.scenario });
 
@@ -432,6 +449,46 @@ export class PredictiveOrchestrator {
       default:
         return 1.0;
     }
+  }
+
+  /**
+   * Check if a candidate is in the near liquidation band
+   * 
+   * Near-band definition:
+   * - Lower bound: EXECUTION_HF_THRESHOLD_BPS (0.98 by default) minus small buffer
+   * - Upper bound: ALWAYS_INCLUDE_HF_BELOW (1.10 by default) OR 1.0 + NEAR_THRESHOLD_BAND_BPS (1.003 by default)
+   * 
+   * This ensures predictive only processes users close to liquidation threshold,
+   * filtering out clearly safe users (e.g., HF ~1.17) to reduce RPC load.
+   */
+  private isInNearLiquidationBand(candidate: PredictiveCandidate): boolean {
+    const executionThreshold = config.executionHfThresholdBps / 10000; // 0.98 default
+    const nearBandBps = config.nearThresholdBandBps; // 30 bps default (0.30%)
+    const alwaysIncludeBelow = config.alwaysIncludeHfBelow; // 1.10 default
+    
+    // Upper bound: max of alwaysIncludeHfBelow or 1.0 + nearBandBps
+    const nearBandUpperBound = Math.max(
+      alwaysIncludeBelow,
+      1.0 + nearBandBps / 10000
+    );
+    
+    // Lower bound: execution threshold minus a small buffer (allow some room below execution)
+    // Use HF_PRED_CRITICAL if available, otherwise execution threshold minus 2%
+    const nearBandLowerBound = config.hfPredCritical || (executionThreshold - 0.02);
+    
+    // Check if projected HF is in near band
+    const projectedInBand = 
+      candidate.hfProjected >= nearBandLowerBound && 
+      candidate.hfProjected <= nearBandUpperBound;
+    
+    // Check if current HF is in near band (if available)
+    const currentInBand = candidate.hfCurrent !== undefined
+      ? candidate.hfCurrent >= nearBandLowerBound && candidate.hfCurrent <= nearBandUpperBound
+      : false;
+    
+    // Include if either current or projected HF is in near band
+    // This catches users moving into the band or already in it
+    return projectedInBand || currentInBand;
   }
 
   /**
