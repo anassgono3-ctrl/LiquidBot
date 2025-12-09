@@ -79,6 +79,9 @@ export interface UserSnapshotProvider {
  * PredictiveOrchestrator manages predictive candidate flow
  */
 export class PredictiveOrchestrator {
+  // Default near-band filtering threshold (30 bps around 1.0 = [0.997, 1.003])
+  private static readonly NEAR_BAND_BPS_DEFAULT = 30;
+  
   private readonly config: PredictiveOrchestratorConfig;
   private readonly engine: PredictiveEngine;
   private readonly listeners: PredictiveEventListener[] = [];
@@ -90,6 +93,9 @@ export class PredictiveOrchestrator {
   private fallbackTimer?: NodeJS.Timeout;
   private userProvider?: UserSnapshotProvider;
   private isShuttingDown = false;
+  
+  // Low-HF subset provider (for hotset-first alignment)
+  private lowHfProvider?: () => string[];
 
   constructor(configOverride?: Partial<PredictiveOrchestratorConfig>) {
     this.config = {
@@ -115,13 +121,14 @@ export class PredictiveOrchestrator {
 
     if (this.config.enabled) {
       console.log(
-        `[predictive-orchestrator] Initialized: ` +
+        `[predictive-orchestrator] Initialized with near-band default filtering (${PredictiveOrchestrator.NEAR_BAND_BPS_DEFAULT} bps): ` +
         `queue=${this.config.queueEnabled}, ` +
         `microVerify=${this.config.microVerifyEnabled}, ` +
         `fastpath=${this.config.fastpathEnabled}, ` +
         `dynamicBuffer=${this.config.dynamicBufferEnabled}, ` +
         `fallbackBlocks=${this.config.fallbackIntervalBlocks}, ` +
-        `fallbackMs=${this.config.fallbackIntervalMs}`
+        `fallbackMs=${this.config.fallbackIntervalMs}, ` +
+        `focusing on low-HF hotset`
       );
     }
   }
@@ -145,6 +152,15 @@ export class PredictiveOrchestrator {
    */
   public setUserProvider(provider: UserSnapshotProvider): void {
     this.userProvider = provider;
+  }
+
+  /**
+   * Set low-HF subset provider for hotset-first alignment
+   * This function should return addresses of users with low HF (e.g., HF < 1.02)
+   */
+  public setLowHfProvider(provider: () => string[]): void {
+    this.lowHfProvider = provider;
+    console.log('[predictive-orchestrator] Linked to low-HF hotset provider for focused evaluation');
   }
 
   /**
@@ -267,6 +283,7 @@ export class PredictiveOrchestrator {
 
   /**
    * Evaluate users and generate predictive candidates with reason tracking
+   * Filters users by low-HF hotset when available
    */
   public async evaluateWithReason(
     users: UserSnapshot[], 
@@ -286,8 +303,22 @@ export class PredictiveOrchestrator {
     this.lastEvaluationBlock = currentBlock;
     this.lastEvaluationTs = startTime;
 
+    // Filter users by low-HF hotset if provider is available
+    let filteredUsers = users;
+    if (this.lowHfProvider) {
+      const lowHfAddresses = new Set(this.lowHfProvider().map(addr => addr.toLowerCase()));
+      filteredUsers = users.filter(user => lowHfAddresses.has(user.address.toLowerCase()));
+      
+      if (filteredUsers.length < users.length) {
+        console.log(
+          `[predictive-orchestrator] Filtered to low-HF hotset: ${filteredUsers.length}/${users.length} users ` +
+          `(focusing on lowHf subset)`
+        );
+      }
+    }
+
     // Generate candidates from predictive engine
-    const candidates = await this.engine.evaluate(users, currentBlock);
+    const candidates = await this.engine.evaluate(filteredUsers, currentBlock);
 
     const durationMs = Date.now() - startTime;
     predictiveEvaluationDurationMs.observe(durationMs);
@@ -295,7 +326,7 @@ export class PredictiveOrchestrator {
     // Log evaluation run
     console.log(
       `[predictive-orchestrator] run block=${currentBlock} reason=${reason} ` +
-      `usersEvaluated=${users.length} candidates=${candidates.length} durationMs=${durationMs}`
+      `usersEvaluated=${filteredUsers.length} candidates=${candidates.length} durationMs=${durationMs}`
     );
 
     if (candidates.length === 0) {
@@ -321,12 +352,27 @@ export class PredictiveOrchestrator {
 
   /**
    * Process a single predictive candidate
+   * Applies near-band filtering by default to reduce RPC load
    */
   private async processCandidate(
     candidate: PredictiveCandidate,
     effectiveBufferBps: number,
     currentBlock: number
   ): Promise<void> {
+    // Apply near-band filtering: only process candidates whose current HF is within near-band around 1.0
+    // This reduces RPC load by focusing on accounts actually approaching liquidation
+    const nearBandBps = PredictiveOrchestrator.NEAR_BAND_BPS_DEFAULT;
+    const nearBandLower = 1.0 - nearBandBps / 10000;
+    const nearBandUpper = 1.0 + nearBandBps / 10000;
+    
+    if (candidate.hfCurrent !== undefined && candidate.hfCurrent !== null) {
+      // Skip candidates clearly outside near-band (too healthy)
+      if (candidate.hfCurrent > nearBandUpper) {
+        predictiveCandidatesFilteredTotal.inc({ filter: 'near_band' });
+        return;
+      }
+    }
+    
     // Track ingestion metric
     predictiveIngestedTotal.inc({ scenario: candidate.scenario });
 
@@ -347,9 +393,14 @@ export class PredictiveOrchestrator {
 
     // Determine actions based on configuration and thresholds
     const thresholdHf = 1.0 + effectiveBufferBps / 10000;
+    
+    // Micro-verify: cap to near-band users only (reduce volume)
+    // Skip accounts clearly above safe HF margin (> 1.05)
+    const safeMargin = 1.05;
     const shouldMicroVerify = 
       this.config.microVerifyEnabled && 
-      candidate.hfProjected < thresholdHf;
+      candidate.hfProjected < thresholdHf &&
+      (candidate.hfCurrent === undefined || candidate.hfCurrent === null || candidate.hfCurrent <= safeMargin);
     
     const prestageThreshold = config.prestageHfBps / 10000;
     const shouldPrestage = 
