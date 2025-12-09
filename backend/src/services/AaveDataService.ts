@@ -106,9 +106,11 @@ export class AaveDataService {
   private tokenRegistry: TokenMetadataRegistry | null = null;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  constructor(provider?: ethers.JsonRpcProvider, aaveMetadata?: any, metadataCache?: AssetMetadataCache) {
+  constructor(provider?: ethers.AbstractProvider, aaveMetadata?: any, metadataCache?: AssetMetadataCache) {
     if (provider) {
-      this.provider = provider;
+      // Note: AbstractProvider accepts both JsonRpcProvider and WebSocketProvider (which extends JsonRpcProvider)
+      // We store as JsonRpcProvider since all our contract operations require it
+      this.provider = provider as ethers.JsonRpcProvider;
       this.initializeContracts();
       
       // Setup dual providers if WebSocket is configured
@@ -121,7 +123,7 @@ export class AaveDataService {
   /**
    * Setup WebSocket and HTTP providers with health tracking
    */
-  private setupDualProviders(provider: ethers.JsonRpcProvider): void {
+  private setupDualProviders(provider: ethers.AbstractProvider): void {
     // Check if provider is WebSocket
     if (provider instanceof ethers.WebSocketProvider) {
       this.wsProvider = provider;
@@ -135,22 +137,20 @@ export class AaveDataService {
         console.log('[provider] ws_unhealthy; routing eth_call via http', error.message);
       });
       
-      // Start optimistically as healthy - will be marked unhealthy on errors
-      // The callWithFallback method will detect provider destroyed errors and fall back to HTTP
-      this.wsHealthy = true;
-      
-      // Wait for provider to be ready asynchronously
-      // Cast to any to access the ready Promise since TypeScript may not infer it correctly
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this.wsProvider as any).ready.then(() => {
-        this.wsHealthy = true;
-        // eslint-disable-next-line no-console
-        console.log('[provider] ws_ready; using WebSocket for eth_call operations');
-      }).catch((error: Error) => {
-        this.wsHealthy = false;
-        // eslint-disable-next-line no-console
-        console.log('[provider] ws_failed_to_connect; will route eth_call via http', error.message);
-      });
+      // Probe WebSocket readiness using getBlockNumber (ethers v6 compatible)
+      // Replace the removed .ready Promise with a lightweight readiness check
+      (async () => {
+        try {
+          await this.wsProvider!.getBlockNumber();
+          this.wsHealthy = true;
+          // eslint-disable-next-line no-console
+          console.log('[provider] ws_ready; using WebSocket for eth_call operations');
+        } catch (error) {
+          this.wsHealthy = false;
+          // eslint-disable-next-line no-console
+          console.log('[provider] ws_failed_to_connect; will route eth_call via http', error instanceof Error ? error.message : String(error));
+        }
+      })();
       
       // Create HTTP fallback provider if RPC_URL is configured
       const httpRpcUrl = process.env.RPC_URL;
@@ -161,7 +161,8 @@ export class AaveDataService {
       }
     } else {
       // HTTP provider only
-      this.httpProvider = provider;
+      // Safe assertion: if not WebSocketProvider, it must be JsonRpcProvider
+      this.httpProvider = provider as ethers.JsonRpcProvider;
       this.wsHealthy = false;
     }
   }

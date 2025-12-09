@@ -37,6 +37,7 @@ import { StartupDiagnosticsService } from "./services/StartupDiagnostics.js";
 import { PredictiveOrchestrator, type PredictiveScenarioEvent, type UserSnapshotProvider } from './risk/PredictiveOrchestrator.js';
 import type { UserSnapshot, ReserveData } from './risk/HFCalculator.js';
 import type { AaveDataService } from './services/AaveDataService.js';
+import { PythListener } from './services/PythListener.js';
 
 // Configure logger with optional file transport
 const loggerTransports: any[] = [new transports.Console()];
@@ -293,6 +294,29 @@ let predictiveOrchestrator: PredictiveOrchestrator | undefined;
 if (config.predictiveEnabled && config.useRealtimeHF) {
   predictiveOrchestrator = new PredictiveOrchestrator();
   logger.info('[predictive-orchestrator] Created (will wire after RealTimeHFService initialization)');
+}
+
+// Initialize Pyth listener (only when enabled via config)
+let pythListener: PythListener | undefined;
+
+if (config.pythEnabled) {
+  pythListener = new PythListener();
+  
+  // Register callback to forward price updates to priceService and predictiveOrchestrator
+  pythListener.onPriceUpdate((update) => {
+    // Forward to PriceService if available
+    // Note: block parameter is set to 0 as Pyth updates don't include block numbers
+    if (priceService && typeof priceService.onPriceUpdate === 'function') {
+      priceService.onPriceUpdate(update.symbol, update.price, update.timestamp, 0);
+    }
+    
+    // Forward to PredictiveOrchestrator if enabled
+    if (predictiveOrchestrator) {
+      predictiveOrchestrator.updatePrice(update.symbol, update.price, update.timestamp, 0);
+    }
+  });
+  
+  logger.info('[pyth-listener] Created and wired to PriceService and PredictiveOrchestrator');
 }
 
 // Initialize real-time HF service (only when enabled via config)
@@ -739,6 +763,16 @@ const shutdown = async (signal: string) => {
     }
   }
   
+  // Stop Pyth listener if running
+  if (pythListener) {
+    try {
+      await pythListener.stop();
+      logger.info('[pyth-listener] Stopped');
+    } catch (err) {
+      logger.error('[pyth-listener] Error stopping:', err);
+    }
+  }
+  
   wss.close(() => {
     logger.info("WebSocket server closed");
     process.exit(0);
@@ -829,6 +863,16 @@ httpServer.listen(port, async () => {
       logger.info('[realtime-hf] Service started successfully');
     } catch (err) {
       logger.error('[realtime-hf] Failed to start service:', err);
+    }
+  }
+  
+  // Start Pyth listener if enabled
+  if (pythListener) {
+    try {
+      await pythListener.start();
+      logger.info('[pyth-listener] Started');
+    } catch (err) {
+      logger.error('[pyth-listener] Failed to start:', err);
     }
   }
 });
