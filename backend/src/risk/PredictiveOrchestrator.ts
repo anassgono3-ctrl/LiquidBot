@@ -81,6 +81,18 @@ export interface UserSnapshotProvider {
 export class PredictiveOrchestrator {
   // Default near-band filtering threshold (30 bps around 1.0 = [0.997, 1.003])
   private static readonly NEAR_BAND_BPS_DEFAULT = 30;
+  // Low-HF threshold for hotset alignment (matching RealTimeHFService)
+  public static readonly LOW_HF_THRESHOLD = 1.02;
+  
+  /**
+   * Get low-HF addresses from a candidate manager
+   * Shared helper for consistent filtering logic
+   */
+  static getLowHfAddresses(candidateManager: { getAll(): Array<{ address: string; lastHF: number | null }> }): string[] {
+    return candidateManager.getAll()
+      .filter(c => c.lastHF !== null && c.lastHF < PredictiveOrchestrator.LOW_HF_THRESHOLD)
+      .map(c => c.address);
+  }
   
   private readonly config: PredictiveOrchestratorConfig;
   private readonly engine: PredictiveEngine;
@@ -362,7 +374,6 @@ export class PredictiveOrchestrator {
     // Apply near-band filtering: only process candidates whose current HF is within near-band around 1.0
     // This reduces RPC load by focusing on accounts actually approaching liquidation
     const nearBandBps = PredictiveOrchestrator.NEAR_BAND_BPS_DEFAULT;
-    const nearBandLower = 1.0 - nearBandBps / 10000;
     const nearBandUpper = 1.0 + nearBandBps / 10000;
     
     if (candidate.hfCurrent !== undefined && candidate.hfCurrent !== null) {
