@@ -514,6 +514,16 @@ if (config.useRealtimeHF) {
     // Start the fallback evaluation timer
     predictiveOrchestrator.startFallbackTimer();
     
+    // Wire up low-HF hotset provider to focus predictive on low-HF accounts
+    predictiveOrchestrator.setLowHfProvider(() => {
+      const manager = realtimeHFService!.getCandidateManager();
+      const allCandidates = manager.getAll();
+      // Return addresses of users with HF < 1.02 (matching RealTimeHFService lowHf threshold)
+      return allCandidates
+        .filter(c => c.lastHF !== null && c.lastHF < 1.02)
+        .map(c => c.address);
+    });
+    
     logger.info(
       `[predictive-orchestrator] Initialized with fallback intervals: ` +
       `blocks=${config.predictiveFallbackIntervalBlocks}, ms=${config.predictiveFallbackIntervalMs}`
