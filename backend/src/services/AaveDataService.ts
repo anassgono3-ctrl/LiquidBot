@@ -140,17 +140,33 @@ export class AaveDataService {
       this.wsHealthy = true;
       
       // Wait for provider to be ready asynchronously
-      // Cast to any to access the ready Promise since TypeScript may not infer it correctly
+      // Guard against undefined .ready property by checking if it exists and is promise-like
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (this.wsProvider as any).ready.then(() => {
-        this.wsHealthy = true;
+      const readyPromise = (this.wsProvider as any).ready;
+      if (readyPromise && typeof readyPromise.then === 'function') {
+        readyPromise.then(() => {
+          this.wsHealthy = true;
+          // eslint-disable-next-line no-console
+          console.log('[provider] ws_ready; using WebSocket for eth_call operations');
+        }).catch((error: Error) => {
+          this.wsHealthy = false;
+          // eslint-disable-next-line no-console
+          console.log('[provider] ws_failed_to_connect; will route eth_call via http', error.message);
+        });
+      } else {
+        // Fallback: use 'connect' event or attempt a simple call to detect readiness
         // eslint-disable-next-line no-console
-        console.log('[provider] ws_ready; using WebSocket for eth_call operations');
-      }).catch((error: Error) => {
-        this.wsHealthy = false;
-        // eslint-disable-next-line no-console
-        console.log('[provider] ws_failed_to_connect; will route eth_call via http', error.message);
-      });
+        console.log('[provider] .ready not available, using connect event fallback');
+        this.wsProvider.send('net_version', []).then(() => {
+          this.wsHealthy = true;
+          // eslint-disable-next-line no-console
+          console.log('[provider] ws_ready (via net_version); using WebSocket for eth_call operations');
+        }).catch((error: Error) => {
+          this.wsHealthy = false;
+          // eslint-disable-next-line no-console
+          console.log('[provider] ws_failed_to_connect (via net_version); will route eth_call via http', error.message);
+        });
+      }
       
       // Create HTTP fallback provider if RPC_URL is configured
       const httpRpcUrl = process.env.RPC_URL;

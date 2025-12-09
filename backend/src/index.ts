@@ -463,7 +463,7 @@ if (config.useRealtimeHF) {
         // Separate candidates into different slices for targeted evaluation
         // 1) Head-start: near-critical slice (HF < 1.02)
         const nearCritical = allCandidates
-          .filter(c => c.lastHF !== null && c.lastHF < 1.02)
+          .filter(c => c.lastHF !== null && c.lastHF < PredictiveOrchestrator.LOW_HF_THRESHOLD)
           .sort((a, b) => (a.lastHF ?? 1) - (b.lastHF ?? 1));
         
         // 2) Price-trigger targeted: candidates touched by recent price events
@@ -513,6 +513,12 @@ if (config.useRealtimeHF) {
     
     // Start the fallback evaluation timer
     predictiveOrchestrator.startFallbackTimer();
+    
+    // Wire up low-HF hotset provider to focus predictive on low-HF accounts
+    predictiveOrchestrator.setLowHfProvider(() => {
+      const manager = realtimeHFService!.getCandidateManager();
+      return PredictiveOrchestrator.getLowHfAddresses(manager);
+    });
     
     logger.info(
       `[predictive-orchestrator] Initialized with fallback intervals: ` +
