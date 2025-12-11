@@ -68,6 +68,7 @@ import { AaveDataService } from './AaveDataService.js';
 import { FastpathPublisher } from '../fastpath/FastpathPublisher.js';
 import { createRedisClient } from '../redis/RedisClientFactory.js';
 import { WatchSet } from '../watch/WatchSet.js';
+import { MicroVerifyCache } from './microVerify/MicroVerifyCache.js';
 
 // ABIs
 const MULTICALL3_ABI = [
@@ -149,6 +150,7 @@ export class RealTimeHFService extends EventEmitter {
   private discoveredReserves: DiscoveredReserve[] = [];
   private priceService?: PriceService;
   private microVerifier?: import('./MicroVerifier.js').MicroVerifier;
+  private microVerifyCache: MicroVerifyCache;
   private fastpathPublisher?: FastpathPublisher;
   private watchSet?: WatchSet;
   private predictiveOrchestrator?: import('../risk/PredictiveOrchestrator.js').PredictiveOrchestrator;
@@ -291,6 +293,9 @@ export class RealTimeHFService extends EventEmitter {
     this.candidateManager = new CandidateManager({ maxCandidates: config.candidateMax });
     this.subgraphService = options.subgraphService;
     this.skipWsConnection = options.skipWsConnection || false;
+    
+    // Initialize micro-verify cache
+    this.microVerifyCache = new MicroVerifyCache();
     
     // Initialize low HF tracker if enabled
     if (config.lowHfTrackerEnabled) {
@@ -630,11 +635,12 @@ export class RealTimeHFService extends EventEmitter {
     // Initialize MicroVerifier for fast-path verification
     if (config.microVerifyEnabled) {
       const { MicroVerifier } = await import('./MicroVerifier.js');
-      this.microVerifier = new MicroVerifier(this.aavePool);
+      this.microVerifier = new MicroVerifier(this.aavePool, this.microVerifyCache);
       // eslint-disable-next-line no-console
       console.log(
         `[realtime-hf] MicroVerifier enabled: maxPerBlock=${config.microVerifyMaxPerBlock} ` +
-        `intervalMs=${config.microVerifyIntervalMs} nearThresholdBandBps=${config.nearThresholdBandBps}`
+        `intervalMs=${config.microVerifyIntervalMs} nearThresholdBandBps=${config.nearThresholdBandBps} ` +
+        `cacheTtlMs=${config.microVerifyCacheTtlMs}`
       );
     }
 
@@ -968,6 +974,11 @@ export class RealTimeHFService extends EventEmitter {
     if (this.microVerifier) {
       this.microVerifier.onNewBlock(blockNumber);
     }
+    
+    // Periodic cache cleanup (every 10 blocks)
+    if (blockNumber % 10 === 0) {
+      this.microVerifyCache.cleanup();
+    }
 
     // Request head check via serialization mechanism
     this.requestHeadCheck(blockNumber);
@@ -1207,6 +1218,11 @@ export class RealTimeHFService extends EventEmitter {
         
         // Extract reserve (asset) for context
         const reserve = extractReserveFromAaveEvent(decoded);
+        
+        // Invalidate micro-verify cache for affected users
+        for (const user of users) {
+          this.microVerifyCache.invalidateUser(user);
+        }
         
         // Mark users and reserves as dirty for next head-check prioritization (Goal 2)
         for (const user of users) {

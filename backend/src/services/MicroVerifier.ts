@@ -11,6 +11,7 @@ import {
   microVerifyTotal,
   microVerifyLatency
 } from '../metrics/index.js';
+import { MicroVerifyCache, type CachedHFResult } from './microVerify/MicroVerifyCache.js';
 
 export interface MicroVerifyCandidate {
   user: string;
@@ -42,6 +43,7 @@ export class MicroVerifier {
   private enabled: boolean;
   private maxPerBlock: number;
   private intervalMs: number;
+  private cache?: MicroVerifyCache;
   
   // Per-block tracking
   private currentBlockNumber: number | null = null;
@@ -51,11 +53,12 @@ export class MicroVerifier {
   // De-duplication within block
   private verifiedUsersThisBlock = new Set<string>();
 
-  constructor(aavePool: Contract) {
+  constructor(aavePool: Contract, cache?: MicroVerifyCache) {
     this.aavePool = aavePool;
     this.enabled = config.microVerifyEnabled;
     this.maxPerBlock = config.microVerifyMaxPerBlock;
     this.intervalMs = config.microVerifyIntervalMs;
+    this.cache = cache;
   }
 
   /**
@@ -100,6 +103,28 @@ export class MicroVerifier {
   async verify(candidate: MicroVerifyCandidate): Promise<MicroVerifyResult | null> {
     const { user, trigger, hedge } = candidate;
     
+    // Check cache first if available
+    const blockTag = this.currentBlockNumber !== null ? this.currentBlockNumber : 'latest';
+    if (this.cache) {
+      const cached = this.cache.get(user, blockTag);
+      if (cached) {
+        // Cache hit - return cached result
+        microVerifyTotal.labels({ result: 'cache_hit', trigger }).inc();
+        return {
+          user: cached.user,
+          hf: cached.hf,
+          totalCollateralBase: cached.totalCollateralBase,
+          totalDebtBase: cached.totalDebtBase,
+          availableBorrowsBase: cached.availableBorrowsBase,
+          currentLiquidationThreshold: cached.currentLiquidationThreshold,
+          ltv: cached.ltv,
+          success: true,
+          trigger,
+          latencyMs: 0 // Instant from cache
+        };
+      }
+    }
+    
     // Check if verification is allowed
     if (!this.canVerify(user)) {
       // Increment cap metric
@@ -109,6 +134,33 @@ export class MicroVerifier {
       return null;
     }
     
+    // Use cache for in-flight deduplication if available
+    if (this.cache) {
+      return this.cache.getOrCreateInflight(user, blockTag, async () => {
+        return this.performVerification(user, trigger, hedge);
+      });
+    }
+    
+    // No cache - perform verification directly
+    return this.performVerification(user, trigger, hedge);
+  }
+
+  /**
+   * Internal method to perform actual verification
+   */
+  private async performVerification(
+    user: string,
+    trigger: string,
+    hedge?: boolean
+  ): Promise<MicroVerifyResult | null> {
+  /**
+   * Internal method to perform actual verification
+   */
+  private async performVerification(
+    user: string,
+    trigger: string,
+    hedge?: boolean
+  ): Promise<MicroVerifyResult | null> {
     // Determine if hedging should be used
     // Hedging disabled for single micro-verifies unless explicitly requested
     const shouldHedge = hedge !== undefined 
