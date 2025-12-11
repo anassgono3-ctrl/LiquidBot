@@ -137,7 +137,37 @@ export class MicroVerifier {
     // Use cache for in-flight deduplication if available
     if (this.cache) {
       return this.cache.getOrCreateInflight(user, blockTag, async () => {
-        return this.performVerification(user, trigger, hedge);
+        const result = await this.performVerification(user, trigger, hedge);
+        if (!result) return null;
+        
+        // Convert MicroVerifyResult to CachedHFResult format
+        return {
+          user: result.user,
+          blockTag,
+          hf: result.hf,
+          totalCollateralBase: result.totalCollateralBase,
+          totalDebtBase: result.totalDebtBase,
+          availableBorrowsBase: result.availableBorrowsBase,
+          currentLiquidationThreshold: result.currentLiquidationThreshold,
+          ltv: result.ltv,
+          timestamp: Date.now()
+        };
+      }).then(cached => {
+        if (!cached) return null;
+        
+        // Convert back to MicroVerifyResult
+        return {
+          user: cached.user,
+          hf: cached.hf,
+          totalCollateralBase: cached.totalCollateralBase,
+          totalDebtBase: cached.totalDebtBase,
+          availableBorrowsBase: cached.availableBorrowsBase,
+          currentLiquidationThreshold: cached.currentLiquidationThreshold,
+          ltv: cached.ltv,
+          success: true,
+          trigger,
+          latencyMs: 0  // From cache
+        };
       });
     }
     
@@ -145,14 +175,6 @@ export class MicroVerifier {
     return this.performVerification(user, trigger, hedge);
   }
 
-  /**
-   * Internal method to perform actual verification
-   */
-  private async performVerification(
-    user: string,
-    trigger: string,
-    hedge?: boolean
-  ): Promise<MicroVerifyResult | null> {
   /**
    * Internal method to perform actual verification
    */

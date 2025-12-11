@@ -12,11 +12,15 @@
 
 import { config } from '../config/index.js';
 
+// Simple user snapshot interface compatible with different sources
 export interface UserSnapshot {
-  user: string;
+  user?: string;          // For cache/event sources
+  address?: string;       // For risk calculator sources  
   hf: number;
   debtUsd?: number;
   projectedHf?: number;
+  block?: number;
+  reserves?: any[];
 }
 
 export interface NearBandFilterConfig {

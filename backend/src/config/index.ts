@@ -156,6 +156,7 @@ export const config = {
   // Reserve-targeted recheck configuration
   get reserveRecheckTopN() { return env.reserveRecheckTopN; },
   get reserveRecheckMaxBatch() { return env.reserveRecheckMaxBatch; },
+  get reserveRecheckNearBandOnly() { return env.reserveRecheckNearBandOnly; },
   
   // Pending-state verification
   get pendingVerifyEnabled() { return env.pendingVerifyEnabled; },
@@ -439,6 +440,8 @@ export const config = {
   get predictiveVolatilityBpsScaleMax() { return env.predictiveVolatilityBpsScaleMax; },
   get predictiveFallbackIntervalBlocks() { return env.predictiveFallbackIntervalBlocks; },
   get predictiveFallbackIntervalMs() { return env.predictiveFallbackIntervalMs; },
+  get predictiveFallbackEnabled() { return env.predictiveFallbackEnabled; },
+  get predictiveFallbackNearOnly() { return env.predictiveFallbackNearOnly; },
   get fastpathPredictiveEtaCapSec() { return env.fastpathPredictiveEtaCapSec; },
   get predictivePriorityHfWeight() { return env.predictivePriorityHfWeight; },
   get predictivePriorityEtaWeight() { return env.predictivePriorityEtaWeight; },
@@ -451,7 +454,9 @@ export const config = {
   get microVerifyEnabled() { return env.microVerifyEnabled; },
   get microVerifyMaxPerBlock() { return env.microVerifyMaxPerBlock; },
   get microVerifyIntervalMs() { return env.microVerifyIntervalMs; },
+  get microVerifyCacheTtlMs() { return env.microVerifyCacheTtlMs; },
   get nearThresholdBandBps() { return env.nearThresholdBandBps; },
+  get nearBandBps() { return env.nearBandBps; },
   get reserveFastSubsetMax() { return env.reserveFastSubsetMax; },
   get headCriticalBatchSize() { return env.headCriticalBatchSize; },
   

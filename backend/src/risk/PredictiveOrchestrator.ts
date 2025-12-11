@@ -17,8 +17,10 @@
 import { config } from '../config/index.js';
 import { PredictiveEngine } from './PredictiveEngine.js';
 import { PriceWindow } from './PriceWindow.js';
-import type { UserSnapshot } from './HFCalculator.js';
+import { HFCalculator, type UserSnapshot } from './HFCalculator.js';
 import type { PredictiveCandidate } from './models/PredictiveCandidate.js';
+import { FallbackOrchestrator } from '../predictive/FallbackOrchestrator.js';
+import { NearBandFilter } from '../predictive/NearBandFilter.js';
 import {
   predictiveIngestedTotal,
   predictiveQueueEntriesTotal,
@@ -83,6 +85,8 @@ export class PredictiveOrchestrator {
   private readonly engine: PredictiveEngine;
   private readonly listeners: PredictiveEventListener[] = [];
   private readonly priceWindows: Map<string, PriceWindow> = new Map();
+  private readonly fallbackOrchestrator: FallbackOrchestrator;
+  private readonly nearBandFilter: NearBandFilter;
   
   // Periodic fallback evaluation state
   private lastEvaluationBlock = 0;
@@ -112,6 +116,8 @@ export class PredictiveOrchestrator {
     };
 
     this.engine = new PredictiveEngine();
+    this.nearBandFilter = new NearBandFilter();
+    this.fallbackOrchestrator = new FallbackOrchestrator(undefined, this.nearBandFilter);
 
     if (this.config.enabled) {
       console.log(
@@ -213,7 +219,27 @@ export class PredictiveOrchestrator {
         return;
       }
 
-      await this.evaluateWithReason(users, currentBlock, 'fallback');
+      // Adapt UserSnapshot from risk calculator to NearBandFilter format
+      const adaptedUsers = users.map(u => ({
+        address: u.address,
+        user: u.address,
+        hf: HFCalculator.calculateHF(u),
+        debtUsd: u.reserves.reduce((sum, r) => sum + r.debtUsd, 0),
+        block: u.block,
+        reserves: u.reserves
+      }));
+
+      // Use FallbackOrchestrator to determine if we should evaluate and which users
+      const fallbackResult = this.fallbackOrchestrator.shouldEvaluate(adaptedUsers as any);
+      
+      if (fallbackResult.shouldEvaluate && fallbackResult.userSnapshots.length > 0) {
+        // Map back to original UserSnapshot format
+        const originalUsers = fallbackResult.userSnapshots
+          .map(adapted => users.find(u => u.address === (adapted.address || adapted.user)))
+          .filter((u): u is UserSnapshot => u !== undefined);
+        
+        await this.evaluateWithReason(originalUsers, currentBlock, 'fallback');
+      }
     } catch (err) {
       console.error(`[predictive-orchestrator] Fallback user fetch error:`, err);
     }
@@ -256,6 +282,32 @@ export class PredictiveOrchestrator {
       }
       window.add(price, timestamp, block);
     }
+  }
+
+  /**
+   * Update provider health status (for fallback orchestrator)
+   */
+  public setProviderHealth(isHealthy: boolean, reason?: string): void {
+    if (!this.config.enabled) {
+      return;
+    }
+
+    this.fallbackOrchestrator.setProviderHealth({ isHealthy, reason });
+  }
+
+  /**
+   * Record a price shock event (for fallback orchestrator)
+   */
+  public recordPriceShock(asset: string, dropBps: number): void {
+    if (!this.config.enabled) {
+      return;
+    }
+
+    this.fallbackOrchestrator.recordPriceShock({
+      asset,
+      dropBps,
+      timestamp: Date.now()
+    });
   }
 
   /**
