@@ -110,10 +110,10 @@ export class FallbackOrchestrator {
     if (!this.lastPriceShock) return false;
 
     // Consider shock recent if within last 60 seconds
+    const RECENT_PRICE_SHOCK_THRESHOLD_MS = 60000;
     const shockAgeMs = Date.now() - this.lastPriceShock.timestamp;
-    const recentThresholdMs = 60000;
 
-    if (shockAgeMs > recentThresholdMs) {
+    if (shockAgeMs > RECENT_PRICE_SHOCK_THRESHOLD_MS) {
       return false;
     }
 

@@ -45,6 +45,9 @@ export class MicroVerifyCache {
   private readonly ttlMs: number;
   private readonly enabled: boolean;
   
+  // Configuration constants
+  private static readonly INFLIGHT_STALE_THRESHOLD_MS = 10000;
+  
   // Metrics
   private hits = 0;
   private misses = 0;
@@ -209,10 +212,9 @@ export class MicroVerifyCache {
       }
     }
 
-    // Remove stale in-flight requests (older than 10 seconds)
-    const inflightStaleMs = 10000;
+    // Remove stale in-flight requests
     for (const [key, inflight] of this.inflightRequests.entries()) {
-      if (now - inflight.timestamp > inflightStaleMs) {
+      if (now - inflight.timestamp > MicroVerifyCache.INFLIGHT_STALE_THRESHOLD_MS) {
         this.inflightRequests.delete(key);
         cleaned++;
       }

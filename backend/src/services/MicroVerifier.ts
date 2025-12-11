@@ -120,7 +120,7 @@ export class MicroVerifier {
           ltv: cached.ltv,
           success: true,
           trigger,
-          latencyMs: 0 // Instant from cache
+          latencyMs: 0  // Cache access is instant; latencyMs distinguishes cached vs RPC calls
         };
       }
     }
