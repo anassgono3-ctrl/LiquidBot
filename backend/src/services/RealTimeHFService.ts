@@ -3961,6 +3961,27 @@ export class RealTimeHFService extends EventEmitter {
   ): Promise<void> {
     const normalized = normalizeAddress(userAddress);
     
+    // PREDICTIVE NEAR-BAND ONLY: Skip reserve fetch for users outside near band
+    // This prevents unnecessary RPC calls for clearly safe users
+    const executionThreshold = config.executionHfThresholdBps / 10000; // 0.98 default
+    const nearBandBps = config.nearThresholdBandBps; // 30 bps default
+    const alwaysIncludeBelow = config.alwaysIncludeHfBelow; // 1.10 default
+    
+    const nearBandUpperBound = Math.max(
+      alwaysIncludeBelow,
+      1.0 + nearBandBps / 10000
+    );
+    const nearBandLowerBound = config.hfPredCritical || (executionThreshold - 0.02);
+    
+    // Short-circuit if projected HF is outside near band
+    if (projectedHf > nearBandUpperBound || projectedHf < nearBandLowerBound) {
+      console.log(
+        `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
+        `projHf=${projectedHf.toFixed(4)} (skipped: hf_not_near_band, bounds=[${nearBandLowerBound.toFixed(4)}, ${nearBandUpperBound.toFixed(4)}])`
+      );
+      return;
+    }
+    
     // Check if AaveDataService is available
     if (!this.aaveDataService || !this.aaveDataService.isInitialized()) {
       // eslint-disable-next-line no-console
