@@ -157,6 +157,7 @@ export const config = {
   get reserveRecheckTopN() { return env.reserveRecheckTopN; },
   get reserveRecheckMaxBatch() { return env.reserveRecheckMaxBatch; },
   get reserveRecheckNearBandOnly() { return env.reserveRecheckNearBandOnly; },
+  get reserveMinIndexDeltaBps() { return env.reserveMinIndexDeltaBps; },
   
   // Pending-state verification
   get pendingVerifyEnabled() { return env.pendingVerifyEnabled; },
@@ -435,6 +436,8 @@ export const config = {
   get predictiveQueueEnabled() { return env.predictiveQueueEnabled; },
   get predictiveMicroVerifyEnabled() { return env.predictiveMicroVerifyEnabled; },
   get predictiveFastpathEnabled() { return env.predictiveFastpathEnabled; },
+  get predictiveNearOnly() { return env.predictiveNearOnly; },
+  get predictiveNearBandBps() { return env.predictiveNearBandBps; },
   get predictiveDynamicBufferEnabled() { return env.predictiveDynamicBufferEnabled; },
   get predictiveVolatilityBpsScaleMin() { return env.predictiveVolatilityBpsScaleMin; },
   get predictiveVolatilityBpsScaleMax() { return env.predictiveVolatilityBpsScaleMax; },

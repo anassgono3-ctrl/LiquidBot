@@ -227,6 +227,14 @@ export class HotSetTracker {
   /**
    * Get statistics
    */
+  /**
+   * Get count of low HF users (hot set)
+   * Used by predictive orchestrator for dynamic candidate cap
+   */
+  getLowHfCount(): number {
+    return this.hotSet.size;
+  }
+
   getStats(): {
     hotSize: number;
     warmSize: number;

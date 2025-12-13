@@ -479,6 +479,29 @@ export const microVerifyTimeoutsTotal = new Counter({
   registers: [metricsRegistry]
 });
 
+// Micro-verify cache metrics (RPC optimization)
+export const microVerifyCacheHitsTotal = new Counter({
+  name: 'liquidbot_micro_verify_cache_hits_total',
+  help: 'Total micro-verify cache hits (avoided redundant HF reads)',
+  labelNames: ['blockTag'],
+  registers: [metricsRegistry]
+});
+
+export const microVerifyCacheMissesTotal = new Counter({
+  name: 'liquidbot_micro_verify_cache_misses_total',
+  help: 'Total micro-verify cache misses',
+  labelNames: ['blockTag'],
+  registers: [metricsRegistry]
+});
+
+// Reserve recheck optimization metrics
+export const reserveRecheckSkippedSmallDeltaTotal = new Counter({
+  name: 'liquidbot_reserve_recheck_skipped_small_delta_total',
+  help: 'Reserve rechecks skipped due to index delta below RESERVE_MIN_INDEX_DELTA_BPS',
+  labelNames: ['asset', 'indexType'],
+  registers: [metricsRegistry]
+});
+
 // Subset metrics
 export const subsetIntersectionSize = new Histogram({
   name: 'liquidbot_subset_intersection_size',
