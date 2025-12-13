@@ -146,7 +146,14 @@ export class ReserveIndexTracker {
    * Aave indices are typically ~1e27, so delta bps will be well within safe range
    */
   private calculateBpsDelta(oldIndex: bigint, newIndex: bigint): number {
-    if (oldIndex === 0n) return 0;
+    // Handle zero old index (shouldn't happen in Aave but handle gracefully)
+    if (oldIndex === 0n) {
+      console.warn('[reserve-index] Old index is zero - this may indicate a data issue');
+      // If new index is also zero, no change
+      if (newIndex === 0n) return 0;
+      // If new index is non-zero, treat as infinite change - force recheck
+      return Number.MAX_SAFE_INTEGER;
+    }
     
     // Calculate delta in basis points using BigInt arithmetic for precision
     // deltaBps = ((newIndex - oldIndex) * 10000) / oldIndex

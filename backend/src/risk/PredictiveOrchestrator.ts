@@ -627,6 +627,8 @@ export class PredictiveOrchestrator {
    * - Scale factor (default 4x) provides buffer for predictive scenarios
    * - Minimum floor (100) ensures some evaluation even with empty hotset
    * - Respects environment config cap as hard upper bound
+   * 
+   * Note: Uses global config import (not this.config) to access PREDICTIVE_MAX_USERS_PER_TICK
    */
   private calculateDynamicMaxUsers(): number {
     const envCap = config.predictiveMaxUsersPerTick;
