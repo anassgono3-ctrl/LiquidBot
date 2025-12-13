@@ -465,8 +465,10 @@ export const rawEnvSchema = z.object({
   // Head critical batch size for near-threshold segment
   HEAD_CRITICAL_BATCH_SIZE: z.string().optional(),
   // Micro-verify cache TTL in milliseconds (default: 2000)
+  // MICRO_VERIFY_HF_CACHE_TTL_MS is the preferred name (matches metric naming)
+  // MICRO_VERIFY_CACHE_TTL_MS is kept for backward compatibility
   MICRO_VERIFY_CACHE_TTL_MS: z.string().optional(),
-  MICRO_VERIFY_HF_CACHE_TTL_MS: z.string().optional(), // Alias for consistency
+  MICRO_VERIFY_HF_CACHE_TTL_MS: z.string().optional(),
   // Near-band basis points for HF filtering (default: 30 = 0.30%)
   NEAR_BAND_BPS: z.string().optional(),
   

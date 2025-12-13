@@ -140,18 +140,19 @@ export class ReserveIndexTracker {
   /**
    * Calculate basis point delta between two index values
    * Formula: ((newIndex - oldIndex) / oldIndex) * 10000
+   * 
+   * Uses BigInt arithmetic for precision, converts only final result to number
    */
   private calculateBpsDelta(oldIndex: bigint, newIndex: bigint): number {
     if (oldIndex === 0n) return 0;
     
-    // Calculate delta in basis points: (newIndex - oldIndex) / oldIndex * 10000
-    // Use floating point for accuracy in small deltas
-    const oldIndexFloat = Number(oldIndex);
-    const newIndexFloat = Number(newIndex);
+    // Calculate delta in basis points using BigInt arithmetic for precision
+    // deltaBps = ((newIndex - oldIndex) * 10000) / oldIndex
+    const deltaBigInt = ((newIndex - oldIndex) * 10000n) / oldIndex;
     
-    const deltaBps = ((newIndexFloat - oldIndexFloat) / oldIndexFloat) * 10000;
-    
-    return Math.abs(deltaBps);
+    // Convert to number only for the final result (bps is typically small)
+    // This preserves precision since bps deltas are usually < 1000 (10%)
+    return Math.abs(Number(deltaBigInt));
   }
 
   /**

@@ -554,7 +554,8 @@ export class PredictiveOrchestrator {
     const nearBandUpperBound = 1.0 + nearBandBps / 10000;
     
     // Lower bound: HF_PRED_CRITICAL or execution threshold minus buffer
-    const nearBandLowerBound = hfPredCritical || (executionThreshold - 0.02);
+    const nearBandLowerBound = hfPredCritical ?? (executionThreshold - 0.02);
+    const effectiveHfPredCritical = hfPredCritical ?? 1.0008;
     
     // Check if current HF is in near band
     if (candidate.hfCurrent !== undefined && candidate.hfCurrent <= nearBandUpperBound) {
@@ -562,7 +563,7 @@ export class PredictiveOrchestrator {
     }
     
     // Check if projected HF crosses critical threshold
-    if (candidate.hfProjected <= hfPredCritical) {
+    if (candidate.hfProjected <= effectiveHfPredCritical) {
       return true;
     }
     

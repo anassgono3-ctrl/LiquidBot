@@ -1326,9 +1326,18 @@ export class RealTimeHFService extends EventEmitter {
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
             const startReserveEvent = Date.now();
             
-            // Extract index values from event args
-            const liquidityIndex = decoded.args.liquidityIndex as bigint;
-            const variableBorrowIndex = decoded.args.variableBorrowIndex as bigint;
+            // Extract index values from event args with validation
+            const liquidityIndex = decoded.args.liquidityIndex;
+            const variableBorrowIndex = decoded.args.variableBorrowIndex;
+            
+            // Validate indices are bigint before processing
+            if (typeof liquidityIndex !== 'bigint' || typeof variableBorrowIndex !== 'bigint') {
+              console.warn(
+                `[reserve-index] Invalid index types for reserve=${reserve}: ` +
+                `liquidityIndex=${typeof liquidityIndex}, variableBorrowIndex=${typeof variableBorrowIndex}`
+              );
+              return; // Skip invalid events
+            }
             
             // Get asset symbol for logging
             const assetSymbol = this.getAssetSymbolForReserve(reserve) || 'unknown';
