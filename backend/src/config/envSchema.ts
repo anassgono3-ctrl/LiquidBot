@@ -113,6 +113,7 @@ export const rawEnvSchema = z.object({
   RESERVE_RECHECK_TOP_N: z.string().optional(),
   RESERVE_RECHECK_MAX_BATCH: z.string().optional(),
   RESERVE_RECHECK_TOP_N_BY_ASSET: z.string().optional(),
+  RESERVE_RECHECK_NEAR_BAND_ONLY: z.string().optional(),
   
   // Pending-state verification
   PENDING_VERIFY_ENABLED: z.string().optional(),
@@ -433,6 +434,9 @@ export const rawEnvSchema = z.object({
   // Predictive fallback evaluation intervals
   PREDICTIVE_FALLBACK_INTERVAL_BLOCKS: z.string().optional(),
   PREDICTIVE_FALLBACK_INTERVAL_MS: z.string().optional(),
+  // Predictive fallback feature flags
+  PREDICTIVE_FALLBACK_ENABLED: z.string().optional(),
+  PREDICTIVE_FALLBACK_NEAR_ONLY: z.string().optional(),
   // Fast-path predictive ETA cap
   FASTPATH_PREDICTIVE_ETA_CAP_SEC: z.string().optional(),
   // Predictive priority score weights
@@ -456,6 +460,10 @@ export const rawEnvSchema = z.object({
   RESERVE_FAST_SUBSET_MAX: z.string().optional(),
   // Head critical batch size for near-threshold segment
   HEAD_CRITICAL_BATCH_SIZE: z.string().optional(),
+  // Micro-verify cache TTL in milliseconds (default: 2000)
+  MICRO_VERIFY_CACHE_TTL_MS: z.string().optional(),
+  // Near-band basis points for HF filtering (default: 30 = 0.30%)
+  NEAR_BAND_BPS: z.string().optional(),
   
   // ==== TIER 0 + TIER 1 PERFORMANCE UPGRADES ====
   // Tier 0: Fast Subset Before Large Sweeps
@@ -693,6 +701,7 @@ export const env = (() => {
     reserveRecheckTopN: Number(parsed.RESERVE_RECHECK_TOP_N || 800),
     reserveRecheckMaxBatch: Number(parsed.RESERVE_RECHECK_MAX_BATCH || 1200),
     reserveRecheckTopNByAsset: parsed.RESERVE_RECHECK_TOP_N_BY_ASSET,
+    reserveRecheckNearBandOnly: (parsed.RESERVE_RECHECK_NEAR_BAND_ONLY || 'true').toLowerCase() === 'true',
     
     // Pending-state verification
     pendingVerifyEnabled: (parsed.PENDING_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
@@ -1009,6 +1018,8 @@ export const env = (() => {
     predictiveVolatilityBpsScaleMax: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MAX || 100), // 1.00%
     predictiveFallbackIntervalBlocks: Number(parsed.PREDICTIVE_FALLBACK_INTERVAL_BLOCKS || 20),
     predictiveFallbackIntervalMs: Number(parsed.PREDICTIVE_FALLBACK_INTERVAL_MS || 30000), // 30 seconds
+    predictiveFallbackEnabled: (parsed.PREDICTIVE_FALLBACK_ENABLED || 'true').toLowerCase() === 'true',
+    predictiveFallbackNearOnly: (parsed.PREDICTIVE_FALLBACK_NEAR_ONLY || 'true').toLowerCase() === 'true',
     fastpathPredictiveEtaCapSec: Number(parsed.FASTPATH_PREDICTIVE_ETA_CAP_SEC || 45), // 45 seconds
     predictivePriorityHfWeight: Number(parsed.PREDICTIVE_PRIORITY_HF_WEIGHT || 1.0),
     predictivePriorityEtaWeight: Number(parsed.PREDICTIVE_PRIORITY_ETA_WEIGHT || 1.0),
@@ -1021,7 +1032,9 @@ export const env = (() => {
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
     microVerifyMaxPerBlock: Number(parsed.MICRO_VERIFY_MAX_PER_BLOCK || 25),
     microVerifyIntervalMs: Number(parsed.MICRO_VERIFY_INTERVAL_MS || 150),
+    microVerifyCacheTtlMs: Number(parsed.MICRO_VERIFY_CACHE_TTL_MS || 2000), // 2 seconds
     nearThresholdBandBps: Number(parsed.NEAR_THRESHOLD_BAND_BPS || 30), // 0.30%
+    nearBandBps: Number(parsed.NEAR_BAND_BPS || 30), // 0.30%
     reserveFastSubsetMax: Number(parsed.RESERVE_FAST_SUBSET_MAX || 64),
     headCriticalBatchSize: Number(parsed.HEAD_CRITICAL_BATCH_SIZE || 120),
     
