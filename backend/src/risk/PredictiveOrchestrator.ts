@@ -78,6 +78,13 @@ export interface UserSnapshotProvider {
 }
 
 /**
+ * Hotset provider interface for dynamic cap calculation
+ */
+export interface HotsetProvider {
+  getLowHfCount(): number;
+}
+
+/**
  * PredictiveOrchestrator manages predictive candidate flow
  */
 export class PredictiveOrchestrator {
@@ -93,6 +100,7 @@ export class PredictiveOrchestrator {
   private lastEvaluationTs = 0;
   private fallbackTimer?: NodeJS.Timeout;
   private userProvider?: UserSnapshotProvider;
+  private hotsetProvider?: HotsetProvider;
   private isShuttingDown = false;
 
   constructor(configOverride?: Partial<PredictiveOrchestratorConfig>) {
@@ -151,6 +159,13 @@ export class PredictiveOrchestrator {
    */
   public setUserProvider(provider: UserSnapshotProvider): void {
     this.userProvider = provider;
+  }
+
+  /**
+   * Set hotset provider for dynamic cap calculation
+   */
+  public setHotsetProvider(provider: HotsetProvider): void {
+    this.hotsetProvider = provider;
   }
 
   /**
@@ -338,8 +353,20 @@ export class PredictiveOrchestrator {
     this.lastEvaluationBlock = currentBlock;
     this.lastEvaluationTs = startTime;
 
+    // Apply dynamic cap based on hotset lowHf count
+    // Prevents predictive from evaluating far more users than are in near-liquidation band
+    const dynamicMaxUsers = this.calculateDynamicMaxUsers();
+    const usersToEvaluate = users.slice(0, dynamicMaxUsers);
+    
+    if (usersToEvaluate.length < users.length) {
+      console.log(
+        `[predictive-cap] Limiting evaluation from ${users.length} to ${usersToEvaluate.length} users ` +
+        `(dynamicCap=${dynamicMaxUsers}, reason=${reason})`
+      );
+    }
+
     // Generate candidates from predictive engine
-    const candidates = await this.engine.evaluate(users, currentBlock);
+    const candidates = await this.engine.evaluate(usersToEvaluate, currentBlock);
 
     const durationMs = Date.now() - startTime;
     predictiveEvaluationDurationMs.observe(durationMs);
@@ -587,6 +614,39 @@ export class PredictiveOrchestrator {
     const scaledBuffer = baseBuffer + (maxBuffer - minBuffer) * volatilityFactor;
 
     return Math.max(minBuffer, Math.min(maxBuffer, scaledBuffer));
+  }
+
+  /**
+   * Calculate dynamic maximum users cap based on hotset lowHf count
+   * 
+   * Formula: min(PREDICTIVE_MAX_USERS_PER_TICK, max(lowHfCount * scale, minFloor))
+   * 
+   * Rationale:
+   * - If hotset has 50 lowHf users, no need to evaluate 800 candidates
+   * - Scale factor (default 4x) provides buffer for predictive scenarios
+   * - Minimum floor (100) ensures some evaluation even with empty hotset
+   * - Respects environment config cap as hard upper bound
+   */
+  private calculateDynamicMaxUsers(): number {
+    const envCap = config.predictiveMaxUsersPerTick;
+    
+    // If no hotset provider, use full env cap
+    if (!this.hotsetProvider) {
+      return envCap;
+    }
+    
+    // Get current lowHf count from hotset
+    const lowHfCount = this.hotsetProvider.getLowHfCount();
+    
+    // Scale factor: evaluate 4x the lowHf count to capture predictive scenarios
+    const scaleFactor = 4;
+    const minFloor = 100; // Minimum evaluation size
+    
+    // Dynamic cap: lowHfCount * scale, with floor
+    const dynamicCap = Math.max(lowHfCount * scaleFactor, minFloor);
+    
+    // Return min of dynamic cap and env cap (hard upper bound)
+    return Math.min(dynamicCap, envCap);
   }
 
   /**
