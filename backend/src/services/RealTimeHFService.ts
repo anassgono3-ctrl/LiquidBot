@@ -1336,7 +1336,7 @@ export class RealTimeHFService extends EventEmitter {
                 `[reserve-index] Invalid index types for reserve=${reserve}: ` +
                 `liquidityIndex=${typeof liquidityIndex}, variableBorrowIndex=${typeof variableBorrowIndex}`
               );
-              return; // Skip invalid events
+              continue; // Skip to next event in batch
             }
             
             // Get asset symbol for logging

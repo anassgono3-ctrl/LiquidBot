@@ -142,6 +142,8 @@ export class ReserveIndexTracker {
    * Formula: ((newIndex - oldIndex) / oldIndex) * 10000
    * 
    * Uses BigInt arithmetic for precision, converts only final result to number
+   * Max safe BigInt for Number conversion: 2^53-1 (~9e15)
+   * Aave indices are typically ~1e27, so delta bps will be well within safe range
    */
   private calculateBpsDelta(oldIndex: bigint, newIndex: bigint): number {
     if (oldIndex === 0n) return 0;
@@ -149,6 +151,16 @@ export class ReserveIndexTracker {
     // Calculate delta in basis points using BigInt arithmetic for precision
     // deltaBps = ((newIndex - oldIndex) * 10000) / oldIndex
     const deltaBigInt = ((newIndex - oldIndex) * 10000n) / oldIndex;
+    
+    // Sanity check: bps deltas should be small (< 10000 = 100%)
+    // If delta exceeds this, likely indicates data corruption or extreme market event
+    const MAX_SAFE_DELTA_BPS = 100000n; // 1000% - extreme upper bound
+    if (deltaBigInt > MAX_SAFE_DELTA_BPS || deltaBigInt < -MAX_SAFE_DELTA_BPS) {
+      console.warn(
+        `[reserve-index] Extreme delta detected: ${deltaBigInt}bps. Capping to max safe value.`
+      );
+      return deltaBigInt > 0n ? Number(MAX_SAFE_DELTA_BPS) : -Number(MAX_SAFE_DELTA_BPS);
+    }
     
     // Convert to number only for the final result (bps is typically small)
     // This preserves precision since bps deltas are usually < 1000 (10%)

@@ -1042,7 +1042,8 @@ export const env = (() => {
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
     microVerifyMaxPerBlock: Number(parsed.MICRO_VERIFY_MAX_PER_BLOCK || 25),
     microVerifyIntervalMs: Number(parsed.MICRO_VERIFY_INTERVAL_MS || 150),
-    microVerifyCacheTtlMs: Number(parsed.MICRO_VERIFY_CACHE_TTL_MS || parsed.MICRO_VERIFY_HF_CACHE_TTL_MS || 1200), // 1.2 seconds
+    // MICRO_VERIFY_HF_CACHE_TTL_MS takes precedence (as documented), fallback to MICRO_VERIFY_CACHE_TTL_MS
+    microVerifyCacheTtlMs: Number(parsed.MICRO_VERIFY_HF_CACHE_TTL_MS || parsed.MICRO_VERIFY_CACHE_TTL_MS || 1200), // 1.2 seconds
     nearThresholdBandBps: Number(parsed.NEAR_THRESHOLD_BAND_BPS || 30), // 0.30%
     nearBandBps: Number(parsed.NEAR_BAND_BPS || 30), // 0.30%
     reserveFastSubsetMax: Number(parsed.RESERVE_FAST_SUBSET_MAX || 64),
