@@ -55,6 +55,7 @@ import type { SubgraphService } from './SubgraphService.js';
 import { OnChainBackfillService } from './OnChainBackfillService.js';
 import { SubgraphSeeder } from './SubgraphSeeder.js';
 import { BorrowersIndexService } from './BorrowersIndexService.js';
+import { ReserveIndexTracker } from './ReserveIndexTracker.js';
 import { LowHFTracker } from './LowHFTracker.js';
 import { LiquidationAuditService } from './liquidationAudit.js';
 import { NotificationService } from './NotificationService.js';
@@ -139,6 +140,7 @@ export class RealTimeHFService extends EventEmitter {
   private subgraphSeeder?: SubgraphSeeder;
   private backfillService?: OnChainBackfillService;
   private borrowersIndex?: BorrowersIndexService;
+  private reserveIndexTracker?: ReserveIndexTracker;
   private lowHfTracker?: LowHFTracker;
   private liquidationAuditService?: LiquidationAuditService;
   private hotSetTracker?: HotSetTracker;
@@ -297,6 +299,9 @@ export class RealTimeHFService extends EventEmitter {
     // Initialize micro-verify cache
     this.microVerifyCache = new MicroVerifyCache();
     
+    // Initialize reserve index tracker for delta-based recheck optimization
+    this.reserveIndexTracker = new ReserveIndexTracker();
+    
     // Initialize low HF tracker if enabled
     if (config.lowHfTrackerEnabled) {
       this.lowHfTracker = new LowHFTracker();
@@ -423,6 +428,20 @@ export class RealTimeHFService extends EventEmitter {
     if (upper === 'ETH') return 'WETH';
     if (upper === 'BTC') return 'WBTC';
     return upper;
+  }
+
+  /**
+   * Get asset symbol for a reserve address
+   */
+  private getAssetSymbolForReserve(reserve: string): string | null {
+    if (!this.aaveDataService) return null;
+    
+    // Look up reserve in discovered reserves
+    const discoveredReserve = this.discoveredReserves.find(
+      r => r.asset.toLowerCase() === reserve.toLowerCase()
+    );
+    
+    return discoveredReserve?.symbol || null;
   }
 
   /**
@@ -1306,6 +1325,52 @@ export class RealTimeHFService extends EventEmitter {
           // ReserveDataUpdated, FlashLoan, etc. - may affect multiple users
           if (decoded.name === 'ReserveDataUpdated' && reserve) {
             const startReserveEvent = Date.now();
+            
+            // Extract index values from event args
+            const liquidityIndex = decoded.args.liquidityIndex as bigint;
+            const variableBorrowIndex = decoded.args.variableBorrowIndex as bigint;
+            
+            // Get asset symbol for logging
+            const assetSymbol = this.getAssetSymbolForReserve(reserve) || 'unknown';
+            
+            // Calculate index delta and determine if recheck is needed
+            let shouldRecheck = true;
+            if (this.reserveIndexTracker) {
+              const delta = this.reserveIndexTracker.calculateDelta(
+                reserve,
+                liquidityIndex,
+                variableBorrowIndex,
+                assetSymbol
+              );
+              
+              shouldRecheck = delta.shouldRecheck;
+              
+              // Update tracked indices for next comparison
+              this.reserveIndexTracker.updateIndices(
+                reserve,
+                liquidityIndex,
+                variableBorrowIndex,
+                blockNumber
+              );
+              
+              // Log delta info
+              console.log(
+                `[reserve-index-delta] reserve=${reserve.slice(0, 10)} asset=${assetSymbol} ` +
+                `liquidityDelta=${delta.liquidityIndexDeltaBps.toFixed(2)}bps ` +
+                `variableBorrowDelta=${delta.variableBorrowIndexDeltaBps.toFixed(2)}bps ` +
+                `maxDelta=${delta.maxDeltaBps.toFixed(2)}bps ` +
+                `shouldRecheck=${shouldRecheck} reason=${delta.reason}`
+              );
+            }
+            
+            // Skip recheck if delta is below threshold
+            if (!shouldRecheck) {
+              console.log(
+                `[reserve-skip] Skipping recheck for reserve=${reserve.slice(0, 10)} asset=${assetSymbol} ` +
+                `(index delta below RESERVE_MIN_INDEX_DELTA_BPS=${config.reserveMinIndexDeltaBps}bps)`
+              );
+              return; // Skip the entire reserve recheck
+            }
             
             // 1) Fetch impacted borrowers for this reserve via BorrowersIndexService
             let reserveBorrowers: string[] = [];
