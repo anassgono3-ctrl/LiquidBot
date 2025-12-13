@@ -12,6 +12,7 @@
  */
 
 import { config } from '../../config/index.js';
+import { microVerifyCacheHitsTotal, microVerifyCacheMissesTotal } from '../../metrics/index.js';
 
 export interface CachedHFResult {
   user: string;
@@ -88,16 +89,19 @@ export class MicroVerifyCache {
 
     if (!entry) {
       this.misses++;
+      microVerifyCacheMissesTotal.inc({ blockTag: String(blockTag) });
       return null;
     }
 
     if (!this.isValid(entry)) {
       this.cache.delete(key);
       this.misses++;
+      microVerifyCacheMissesTotal.inc({ blockTag: String(blockTag) });
       return null;
     }
 
     this.hits++;
+    microVerifyCacheHitsTotal.inc({ blockTag: String(blockTag) });
     console.log(
       `[micro-cache] hit user=${user} blockTag=${blockTag} ttlMs=${entry.expiresAt - Date.now()}`
     );

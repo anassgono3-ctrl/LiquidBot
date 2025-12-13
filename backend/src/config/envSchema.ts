@@ -114,6 +114,7 @@ export const rawEnvSchema = z.object({
   RESERVE_RECHECK_MAX_BATCH: z.string().optional(),
   RESERVE_RECHECK_TOP_N_BY_ASSET: z.string().optional(),
   RESERVE_RECHECK_NEAR_BAND_ONLY: z.string().optional(),
+  RESERVE_MIN_INDEX_DELTA_BPS: z.string().optional(),
   
   // Pending-state verification
   PENDING_VERIFY_ENABLED: z.string().optional(),
@@ -427,6 +428,9 @@ export const rawEnvSchema = z.object({
   PREDICTIVE_QUEUE_ENABLED: z.string().optional(),
   PREDICTIVE_MICRO_VERIFY_ENABLED: z.string().optional(),
   PREDICTIVE_FASTPATH_ENABLED: z.string().optional(),
+  // Predictive near-band filtering (RPC optimization)
+  PREDICTIVE_NEAR_ONLY: z.string().optional(),
+  PREDICTIVE_NEAR_BAND_BPS: z.string().optional(),
   // Dynamic buffer scaling based on volatility
   PREDICTIVE_DYNAMIC_BUFFER_ENABLED: z.string().optional(),
   PREDICTIVE_VOLATILITY_BPS_SCALE_MIN: z.string().optional(),
@@ -462,6 +466,7 @@ export const rawEnvSchema = z.object({
   HEAD_CRITICAL_BATCH_SIZE: z.string().optional(),
   // Micro-verify cache TTL in milliseconds (default: 2000)
   MICRO_VERIFY_CACHE_TTL_MS: z.string().optional(),
+  MICRO_VERIFY_HF_CACHE_TTL_MS: z.string().optional(), // Alias for consistency
   // Near-band basis points for HF filtering (default: 30 = 0.30%)
   NEAR_BAND_BPS: z.string().optional(),
   
@@ -702,6 +707,7 @@ export const env = (() => {
     reserveRecheckMaxBatch: Number(parsed.RESERVE_RECHECK_MAX_BATCH || 1200),
     reserveRecheckTopNByAsset: parsed.RESERVE_RECHECK_TOP_N_BY_ASSET,
     reserveRecheckNearBandOnly: (parsed.RESERVE_RECHECK_NEAR_BAND_ONLY || 'true').toLowerCase() === 'true',
+    reserveMinIndexDeltaBps: Number(parsed.RESERVE_MIN_INDEX_DELTA_BPS || 2), // 0.02%
     
     // Pending-state verification
     pendingVerifyEnabled: (parsed.PENDING_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
@@ -1013,6 +1019,8 @@ export const env = (() => {
     predictiveQueueEnabled: (parsed.PREDICTIVE_QUEUE_ENABLED || 'true').toLowerCase() === 'true',
     predictiveMicroVerifyEnabled: (parsed.PREDICTIVE_MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
     predictiveFastpathEnabled: (parsed.PREDICTIVE_FASTPATH_ENABLED || 'false').toLowerCase() === 'true',
+    predictiveNearOnly: (parsed.PREDICTIVE_NEAR_ONLY || 'true').toLowerCase() === 'true',
+    predictiveNearBandBps: Number(parsed.PREDICTIVE_NEAR_BAND_BPS || 30), // 0.30%
     predictiveDynamicBufferEnabled: (parsed.PREDICTIVE_DYNAMIC_BUFFER_ENABLED || 'false').toLowerCase() === 'true',
     predictiveVolatilityBpsScaleMin: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MIN || 20), // 0.20%
     predictiveVolatilityBpsScaleMax: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MAX || 100), // 1.00%
@@ -1032,7 +1040,7 @@ export const env = (() => {
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
     microVerifyMaxPerBlock: Number(parsed.MICRO_VERIFY_MAX_PER_BLOCK || 25),
     microVerifyIntervalMs: Number(parsed.MICRO_VERIFY_INTERVAL_MS || 150),
-    microVerifyCacheTtlMs: Number(parsed.MICRO_VERIFY_CACHE_TTL_MS || 2000), // 2 seconds
+    microVerifyCacheTtlMs: Number(parsed.MICRO_VERIFY_CACHE_TTL_MS || parsed.MICRO_VERIFY_HF_CACHE_TTL_MS || 1200), // 1.2 seconds
     nearThresholdBandBps: Number(parsed.NEAR_THRESHOLD_BAND_BPS || 30), // 0.30%
     nearBandBps: Number(parsed.NEAR_BAND_BPS || 30), // 0.30%
     reserveFastSubsetMax: Number(parsed.RESERVE_FAST_SUBSET_MAX || 64),

@@ -381,7 +381,8 @@ export class PredictiveOrchestrator {
   ): Promise<void> {
     // PREDICTIVE NEAR-BAND ONLY: Filter candidates to only process near-band users
     // This reduces RPC load by skipping clearly safe users (e.g., HF ~1.17)
-    if (!this.isInNearLiquidationBand(candidate)) {
+    // Only enforce if PREDICTIVE_NEAR_ONLY is enabled (default: true)
+    if (config.predictiveNearOnly && !this.isInNearLiquidationBand(candidate)) {
       // Track filtered candidates
       predictiveCandidatesFilteredTotal.inc({ 
         filter: 'not_near_band'
@@ -507,40 +508,44 @@ export class PredictiveOrchestrator {
    * Check if a candidate is in the near liquidation band
    * 
    * Near-band definition:
-   * - Lower bound: EXECUTION_HF_THRESHOLD_BPS (0.98 by default) minus small buffer
-   * - Upper bound: ALWAYS_INCLUDE_HF_BELOW (1.10 by default) OR 1.0 + NEAR_THRESHOLD_BAND_BPS (1.003 by default)
+   * - Lower bound: HF_PRED_CRITICAL (1.0008 default) OR EXECUTION_HF_THRESHOLD_BPS - 2%
+   * - Upper bound: 1.0 + PREDICTIVE_NEAR_BAND_BPS (default 30 bps = 1.003)
    * 
    * This ensures predictive only processes users close to liquidation threshold,
    * filtering out clearly safe users (e.g., HF ~1.17) to reduce RPC load.
+   * 
+   * Users are included if:
+   * - hfCurrent <= 1.0 + PREDICTIVE_NEAR_BAND_BPS, OR
+   * - hfProjected <= HF_PRED_CRITICAL
    */
   private isInNearLiquidationBand(candidate: PredictiveCandidate): boolean {
     const executionThreshold = config.executionHfThresholdBps / 10000; // 0.98 default
-    const nearBandBps = config.nearThresholdBandBps; // 30 bps default (0.30%)
-    const alwaysIncludeBelow = config.alwaysIncludeHfBelow; // 1.10 default
+    const nearBandBps = config.predictiveNearBandBps; // 30 bps default (0.30%)
+    const hfPredCritical = config.hfPredCritical; // 1.0008 default
     
-    // Upper bound: max of alwaysIncludeHfBelow or 1.0 + nearBandBps
-    const nearBandUpperBound = Math.max(
-      alwaysIncludeBelow,
-      1.0 + nearBandBps / 10000
-    );
+    // Upper bound for current HF: 1.0 + PREDICTIVE_NEAR_BAND_BPS
+    const nearBandUpperBound = 1.0 + nearBandBps / 10000;
     
-    // Lower bound: execution threshold minus a small buffer (allow some room below execution)
-    // Use HF_PRED_CRITICAL if available, otherwise execution threshold minus 2%
-    const nearBandLowerBound = config.hfPredCritical || (executionThreshold - 0.02);
+    // Lower bound: HF_PRED_CRITICAL or execution threshold minus buffer
+    const nearBandLowerBound = hfPredCritical || (executionThreshold - 0.02);
     
-    // Check if projected HF is in near band
-    const projectedInBand = 
-      candidate.hfProjected >= nearBandLowerBound && 
-      candidate.hfProjected <= nearBandUpperBound;
+    // Check if current HF is in near band
+    if (candidate.hfCurrent !== undefined && candidate.hfCurrent <= nearBandUpperBound) {
+      return true;
+    }
     
-    // Check if current HF is in near band (if available)
-    const currentInBand = candidate.hfCurrent !== undefined
-      ? candidate.hfCurrent >= nearBandLowerBound && candidate.hfCurrent <= nearBandUpperBound
-      : false;
+    // Check if projected HF crosses critical threshold
+    if (candidate.hfProjected <= hfPredCritical) {
+      return true;
+    }
     
-    // Include if either current or projected HF is in near band
-    // This catches users moving into the band or already in it
-    return projectedInBand || currentInBand;
+    // Include if projected HF is in near band (lower bound check)
+    if (candidate.hfProjected >= nearBandLowerBound && candidate.hfProjected <= nearBandUpperBound) {
+      return true;
+    }
+    
+    // Otherwise, user is too far from liquidation
+    return false;
   }
 
   /**
