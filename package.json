@@ -17,6 +17,9 @@
     "contracts:verify": "cd contracts && npm run verify:executor",
     "contracts:deploy": "cd contracts && npm run deploy:executor",
     "test": "cd backend && npm test",
-    "test:all": "npm run contracts:test && npm run test"
+    "test:all": "npm run contracts:test && npm run test",
+    "discover:twap": "node -r dotenv/config scripts/discover-twap-pools.mjs",
+    "check:pyth": "node -r dotenv/config scripts/check-pyth.mjs",
+    "check:oracles": "node -r dotenv/config scripts/check-oracles.mjs"
   }
 }
