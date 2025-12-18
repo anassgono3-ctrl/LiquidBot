@@ -44,7 +44,9 @@ import {
   subsetIntersectionSize,
   reserveEventToMicroVerifyMs,
   realtimePriceEmergencyScansTotal,
-  emergencyScanLatency
+  emergencyScanLatency,
+  scansSuppressedByLock,
+  scansSuppressedByDeltaGate
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
 import { normalizeAddress } from '../utils/Address.js';
@@ -57,6 +59,7 @@ import { SubgraphSeeder } from './SubgraphSeeder.js';
 import { BorrowersIndexService } from './BorrowersIndexService.js';
 import { ReserveIndexTracker } from './ReserveIndexTracker.js';
 import { LowHFTracker } from './LowHFTracker.js';
+import { ScanConcurrencyController } from './ScanConcurrencyController.js';
 import { LiquidationAuditService } from './liquidationAudit.js';
 import { NotificationService } from './NotificationService.js';
 import { PriceService } from './PriceService.js';
@@ -271,6 +274,9 @@ export class RealTimeHFService extends EventEmitter {
   private preSimQueue: Map<string, PreSimQueueEntry> = new Map();
   private readonly PRE_SIM_HISTORY_WINDOW = 4; // N=4 observations for delta tracking
   
+  // Scan concurrency control to prevent duplicate runs
+  private scanConcurrencyController: ScanConcurrencyController;
+  
   // Near-threshold tracking for micro-verification
   private nearThresholdUsers = new Map<string, {
     hf: number;
@@ -298,6 +304,9 @@ export class RealTimeHFService extends EventEmitter {
     
     // Initialize micro-verify cache
     this.microVerifyCache = new MicroVerifyCache();
+    
+    // Initialize scan concurrency controller to prevent duplicate runs
+    this.scanConcurrencyController = new ScanConcurrencyController();
     
     // Initialize reserve index tracker for delta-based recheck optimization
     this.reserveIndexTracker = new ReserveIndexTracker();
@@ -1374,6 +1383,7 @@ export class RealTimeHFService extends EventEmitter {
             
             // Skip recheck if delta is below threshold
             if (!shouldRecheck) {
+              scansSuppressedByDeltaGate.inc({ asset: assetSymbol });
               console.log(
                 `[reserve-skip] Skipping recheck for reserve=${reserve.slice(0, 10)} asset=${assetSymbol} ` +
                 `(index delta below RESERVE_MIN_INDEX_DELTA_BPS=${config.reserveMinIndexDeltaBps}bps)`
@@ -3193,6 +3203,20 @@ export class RealTimeHFService extends EventEmitter {
       return { timeouts: 0, avgLatency: 0, candidates: 0 };
     }
 
+    // Try to acquire lock for this scan to prevent duplicate concurrent runs
+    const blockNumber = (typeof blockTag === 'number' ? blockTag : undefined) || this.currentBlockNumber || 0;
+    const lockAcquired = this.scanConcurrencyController.tryAcquireLock(triggerType, blockNumber);
+    
+    if (!lockAcquired) {
+      // Another scan of the same type is already in-flight for this block
+      scansSuppressedByLock.inc({ trigger_type: triggerType });
+      // eslint-disable-next-line no-console
+      console.log(
+        `[scan-suppress] type=${triggerType} block=${blockNumber} reason=in_flight addresses=${addresses.length}`
+      );
+      return { timeouts: 0, avgLatency: 0, candidates: 0 };
+    }
+
     // Reset batch metrics for this run
     this.currentBatchMetrics = {
       timeouts: 0,
@@ -3398,6 +3422,9 @@ export class RealTimeHFService extends EventEmitter {
       // Do not crash the service - continue runtime
       // The error is already logged above
       return { timeouts: 0, avgLatency: 0, candidates: addresses.length };
+    } finally {
+      // Always release the lock when done (success or error)
+      this.scanConcurrencyController.releaseLock(triggerType, blockNumber);
     }
   }
 

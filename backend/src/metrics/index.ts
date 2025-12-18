@@ -299,6 +299,28 @@ export const wsReconnectsTotal = new Counter({
   registers: [metricsRegistry]
 });
 
+// Scan suppression and RPC optimization metrics
+export const scansSuppressedByLock = new Counter({
+  name: 'liquidbot_scans_suppressed_by_lock_total',
+  help: 'Total number of scans suppressed due to in-flight lock (prevents duplicate concurrent scans)',
+  labelNames: ['trigger_type'],
+  registers: [metricsRegistry]
+});
+
+export const scansSuppressedByDeltaGate = new Counter({
+  name: 'liquidbot_scans_suppressed_by_delta_gate_total',
+  help: 'Total number of reserve scans suppressed due to index delta below threshold',
+  labelNames: ['asset'],
+  registers: [metricsRegistry]
+});
+
+export const predictiveEnqueuesSkippedByBand = new Counter({
+  name: 'liquidbot_predictive_enqueues_skipped_by_band_total',
+  help: 'Total number of predictive enqueues skipped due to near-band filtering',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
 export const chunkLatency = new Histogram({
   name: 'liquidbot_chunk_latency_seconds',
   help: 'Latency of multicall chunk execution in seconds',

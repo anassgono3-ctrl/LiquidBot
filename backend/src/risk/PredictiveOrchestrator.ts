@@ -32,7 +32,8 @@ import {
   predictiveCandidatesGeneratedTotal,
   predictiveCandidatesFilteredTotal,
   predictiveEtaDistributionSec,
-  predictiveEvaluationDurationMs
+  predictiveEvaluationDurationMs,
+  predictiveEnqueuesSkippedByBand
 } from '../metrics/index.js';
 
 export interface PredictiveOrchestratorConfig {
@@ -410,10 +411,11 @@ export class PredictiveOrchestrator {
     // This reduces RPC load by skipping clearly safe users (e.g., HF ~1.17)
     // Only enforce if PREDICTIVE_NEAR_ONLY is enabled (default: true)
     if (config.predictiveNearOnly && !this.isInNearLiquidationBand(candidate)) {
-      // Track filtered candidates
+      // Track filtered candidates with both metrics
       predictiveCandidatesFilteredTotal.inc({ 
         filter: 'not_near_band'
       });
+      predictiveEnqueuesSkippedByBand.inc({ scenario: candidate.scenario });
       
       // Log skip reason concisely
       console.log(
