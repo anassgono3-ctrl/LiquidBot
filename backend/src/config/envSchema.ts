@@ -106,6 +106,14 @@ export const rawEnvSchema = z.object({
   PRICE_TRIGGER_BPS_BY_ASSET: z.string().optional(),
   PRICE_TRIGGER_DEBOUNCE_BY_ASSET: z.string().optional(),
   
+  // Price trigger stablecoin filtering
+  PRICE_TRIGGER_SKIP_STABLES: z.string().optional(),
+  
+  // Price trigger near-band gating
+  PRICE_TRIGGER_NEAR_BAND_ONLY: z.string().optional(),
+  PRICE_TRIGGER_NEAR_BAND_BPS: z.string().optional(),
+  PRICE_TRIGGER_RESERVE_TOP_N: z.string().optional(),
+  
   // Auto-discovery of Chainlink feeds and debt tokens
   AUTO_DISCOVER_FEEDS: z.string().optional(),
   
@@ -690,16 +698,24 @@ export const env = (() => {
 
     // Price-triggered emergency scans
     priceTriggerEnabled: (parsed.PRICE_TRIGGER_ENABLED || 'false').toLowerCase() === 'true',
-    priceTriggerDropBps: Number(parsed.PRICE_TRIGGER_DROP_BPS || 30),
-    priceTriggerMaxScan: Number(parsed.PRICE_TRIGGER_MAX_SCAN || 500),
-    priceTriggerAssets: parsed.PRICE_TRIGGER_ASSETS,
+    priceTriggerDropBps: Number(parsed.PRICE_TRIGGER_DROP_BPS || 12),
+    priceTriggerMaxScan: Number(parsed.PRICE_TRIGGER_MAX_SCAN || 250),
+    priceTriggerAssets: parsed.PRICE_TRIGGER_ASSETS || 'WETH',
     priceTriggerDebounceSec: Number(parsed.PRICE_TRIGGER_DEBOUNCE_SEC || 60),
     priceTriggerCumulative: (parsed.PRICE_TRIGGER_CUMULATIVE || 'false').toLowerCase() === 'true',
     priceTriggerPollSec: Number(parsed.PRICE_TRIGGER_POLL_SEC || 15),
     
     // Per-asset price trigger configuration
-    priceTriggerBpsByAsset: parsed.PRICE_TRIGGER_BPS_BY_ASSET,
-    priceTriggerDebounceByAsset: parsed.PRICE_TRIGGER_DEBOUNCE_BY_ASSET,
+    priceTriggerBpsByAsset: parsed.PRICE_TRIGGER_BPS_BY_ASSET || 'WETH:12',
+    priceTriggerDebounceByAsset: parsed.PRICE_TRIGGER_DEBOUNCE_BY_ASSET || 'WETH:5',
+    
+    // Price trigger stablecoin filtering
+    priceTriggerSkipStables: (parsed.PRICE_TRIGGER_SKIP_STABLES || 'true').toLowerCase() === 'true',
+    
+    // Price trigger near-band gating
+    priceTriggerNearBandOnly: (parsed.PRICE_TRIGGER_NEAR_BAND_ONLY || 'true').toLowerCase() === 'true',
+    priceTriggerNearBandBps: Number(parsed.PRICE_TRIGGER_NEAR_BAND_BPS || 30),
+    priceTriggerReserveTopN: Number(parsed.PRICE_TRIGGER_RESERVE_TOP_N || 400),
     
     // Auto-discovery of Chainlink feeds and debt tokens
     autoDiscoverFeeds: (parsed.AUTO_DISCOVER_FEEDS || 'true').toLowerCase() === 'true',
