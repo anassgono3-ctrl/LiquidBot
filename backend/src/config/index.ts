@@ -152,11 +152,15 @@ export const config = {
   
   // Price trigger stablecoin filtering
   get priceTriggerSkipStables() { return env.priceTriggerSkipStables; },
+  get priceTriggerStablecoinList() { return env.priceTriggerStablecoinList; },
   
   // Price trigger near-band gating
   get priceTriggerNearBandOnly() { return env.priceTriggerNearBandOnly; },
   get priceTriggerNearBandBps() { return env.priceTriggerNearBandBps; },
   get priceTriggerReserveTopN() { return env.priceTriggerReserveTopN; },
+  get priceTriggerJitterMinMs() { return env.priceTriggerJitterMinMs; },
+  get priceTriggerJitterMaxMs() { return env.priceTriggerJitterMaxMs; },
+  get priceTriggerNearBandLowerBound() { return env.priceTriggerNearBandLowerBound; },
   
   // Auto-discovery of Chainlink feeds and debt tokens
   get autoDiscoverFeeds() { return env.autoDiscoverFeeds; },

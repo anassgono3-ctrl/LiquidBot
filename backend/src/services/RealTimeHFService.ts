@@ -407,7 +407,7 @@ export class RealTimeHFService extends EventEmitter {
         .map((s: string) => this.normalizeAssetSymbol(s));
       
       // Build effective asset set, excluding stablecoins if skip_stables is enabled
-      const stablecoins = new Set(['USDC', 'USDBC', 'EURC', 'GHO']);
+      const stablecoins = new Set(config.priceTriggerStablecoinList);
       const effectiveAssets = config.priceTriggerSkipStables
         ? configuredAssets.filter(asset => !stablecoins.has(asset))
         : configuredAssets;
@@ -1744,7 +1744,7 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
-      // Goal A: Debounce/jitter window to coalesce rapid same-block updates (40-60ms)
+      // Goal A: Debounce/jitter window to coalesce rapid same-block updates
       // Clear any existing timer for this symbol
       const existingTimer = this.priceTriggerDebounceTimers.get(symbol);
       if (existingTimer) {
@@ -1752,7 +1752,8 @@ export class RealTimeHFService extends EventEmitter {
       }
       
       // Add jitter to prevent synchronous execution across multiple symbols
-      const jitterMs = 40 + Math.random() * 20; // 40-60ms
+      const jitterRange = config.priceTriggerJitterMaxMs - config.priceTriggerJitterMinMs;
+      const jitterMs = config.priceTriggerJitterMinMs + Math.random() * jitterRange;
       
       // Schedule emergency scan with debounce
       const timer = setTimeout(() => {
@@ -1844,7 +1845,8 @@ export class RealTimeHFService extends EventEmitter {
               const executionThreshold = config.executionHfThresholdBps / 10000; // e.g., 0.98
               const nearBandBps = config.priceTriggerNearBandBps; // e.g., 30 = 0.30%
               const nearBandUpper = executionThreshold + (nearBandBps / 10000);
-              const nearBandLower = Math.max(0.5, executionThreshold - 0.02); // Lower bound safety guard
+              // Lower bound safety guard: prevent scanning deeply underwater positions
+              const nearBandLower = Math.max(config.priceTriggerNearBandLowerBound, executionThreshold - 0.02);
               
               // Get all candidates with known HF
               const allCandidates = this.candidateManager.getAll()

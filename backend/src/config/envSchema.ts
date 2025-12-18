@@ -108,11 +108,15 @@ export const rawEnvSchema = z.object({
   
   // Price trigger stablecoin filtering
   PRICE_TRIGGER_SKIP_STABLES: z.string().optional(),
+  PRICE_TRIGGER_STABLECOIN_LIST: z.string().optional(),
   
   // Price trigger near-band gating
   PRICE_TRIGGER_NEAR_BAND_ONLY: z.string().optional(),
   PRICE_TRIGGER_NEAR_BAND_BPS: z.string().optional(),
   PRICE_TRIGGER_RESERVE_TOP_N: z.string().optional(),
+  PRICE_TRIGGER_JITTER_MIN_MS: z.string().optional(),
+  PRICE_TRIGGER_JITTER_MAX_MS: z.string().optional(),
+  PRICE_TRIGGER_NEAR_BAND_LOWER_BOUND: z.string().optional(),
   
   // Auto-discovery of Chainlink feeds and debt tokens
   AUTO_DISCOVER_FEEDS: z.string().optional(),
@@ -711,11 +715,18 @@ export const env = (() => {
     
     // Price trigger stablecoin filtering
     priceTriggerSkipStables: (parsed.PRICE_TRIGGER_SKIP_STABLES || 'true').toLowerCase() === 'true',
+    priceTriggerStablecoinList: (parsed.PRICE_TRIGGER_STABLECOIN_LIST || 'USDC,USDBC,EURC,GHO')
+      .split(',')
+      .map((s: string) => s.trim().toUpperCase())
+      .filter((s: string) => s.length > 0),
     
     // Price trigger near-band gating
     priceTriggerNearBandOnly: (parsed.PRICE_TRIGGER_NEAR_BAND_ONLY || 'true').toLowerCase() === 'true',
     priceTriggerNearBandBps: Number(parsed.PRICE_TRIGGER_NEAR_BAND_BPS || 30),
     priceTriggerReserveTopN: Number(parsed.PRICE_TRIGGER_RESERVE_TOP_N || 400),
+    priceTriggerJitterMinMs: Number(parsed.PRICE_TRIGGER_JITTER_MIN_MS || 40),
+    priceTriggerJitterMaxMs: Number(parsed.PRICE_TRIGGER_JITTER_MAX_MS || 60),
+    priceTriggerNearBandLowerBound: Number(parsed.PRICE_TRIGGER_NEAR_BAND_LOWER_BOUND || 0.5),
     
     // Auto-discovery of Chainlink feeds and debt tokens
     autoDiscoverFeeds: (parsed.AUTO_DISCOVER_FEEDS || 'true').toLowerCase() === 'true',
