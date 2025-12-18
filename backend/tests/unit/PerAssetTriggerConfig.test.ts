@@ -15,7 +15,7 @@ describe('PerAssetTriggerConfig', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
       vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('WETH:8,WBTC:10,USDC:20');
-      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('');
 
       const cfg = new PerAssetTriggerConfig();
 
@@ -27,7 +27,7 @@ describe('PerAssetTriggerConfig', () => {
     it('should parse per-asset debounce seconds correctly', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
-      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('');
       vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('WETH:3,WBTC:3,USDC:5');
 
       const cfg = new PerAssetTriggerConfig();
@@ -40,8 +40,8 @@ describe('PerAssetTriggerConfig', () => {
     it('should handle empty/undefined config strings', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
-      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue(undefined);
-      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('');
+      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('');
 
       const cfg = new PerAssetTriggerConfig();
 
@@ -56,7 +56,7 @@ describe('PerAssetTriggerConfig', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
       vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('WETH:8,INVALID,USDC:invalid,BTC:15');
-      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('');
 
       const cfg = new PerAssetTriggerConfig();
 
@@ -80,7 +80,7 @@ describe('PerAssetTriggerConfig', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
       vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('WETH:8');
-      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('');
 
       const cfg = new PerAssetTriggerConfig();
 
@@ -91,7 +91,7 @@ describe('PerAssetTriggerConfig', () => {
     it('should return global debounce for unconfigured assets', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
-      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('');
       vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('WETH:3');
 
       const cfg = new PerAssetTriggerConfig();
@@ -106,7 +106,7 @@ describe('PerAssetTriggerConfig', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
       vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('weth:8,WBTC:10');
-      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('');
 
       const cfg = new PerAssetTriggerConfig();
 
@@ -136,8 +136,8 @@ describe('PerAssetTriggerConfig', () => {
     it('should return global defaults for unconfigured asset', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
-      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue(undefined);
-      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('');
+      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('');
 
       const cfg = new PerAssetTriggerConfig();
 
@@ -166,8 +166,8 @@ describe('PerAssetTriggerConfig', () => {
     it('should return empty array when no custom settings', () => {
       vi.spyOn(config, 'priceTriggerDropBps', 'get').mockReturnValue(30);
       vi.spyOn(config, 'priceTriggerDebounceSec', 'get').mockReturnValue(60);
-      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue(undefined);
-      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue(undefined);
+      vi.spyOn(config, 'priceTriggerBpsByAsset', 'get').mockReturnValue('');
+      vi.spyOn(config, 'priceTriggerDebounceByAsset', 'get').mockReturnValue('');
 
       const cfg = new PerAssetTriggerConfig();
 

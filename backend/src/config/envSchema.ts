@@ -706,8 +706,8 @@ export const env = (() => {
     priceTriggerPollSec: Number(parsed.PRICE_TRIGGER_POLL_SEC || 15),
     
     // Per-asset price trigger configuration
-    priceTriggerBpsByAsset: parsed.PRICE_TRIGGER_BPS_BY_ASSET || 'WETH:12',
-    priceTriggerDebounceByAsset: parsed.PRICE_TRIGGER_DEBOUNCE_BY_ASSET || 'WETH:5',
+    priceTriggerBpsByAsset: parsed.PRICE_TRIGGER_BPS_BY_ASSET ?? 'WETH:12',
+    priceTriggerDebounceByAsset: parsed.PRICE_TRIGGER_DEBOUNCE_BY_ASSET ?? 'WETH:5',
     
     // Price trigger stablecoin filtering
     priceTriggerSkipStables: (parsed.PRICE_TRIGGER_SKIP_STABLES || 'true').toLowerCase() === 'true',

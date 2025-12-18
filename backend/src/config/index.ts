@@ -150,6 +150,14 @@ export const config = {
   get priceTriggerBpsByAsset() { return env.priceTriggerBpsByAsset; },
   get priceTriggerDebounceByAsset() { return env.priceTriggerDebounceByAsset; },
   
+  // Price trigger stablecoin filtering
+  get priceTriggerSkipStables() { return env.priceTriggerSkipStables; },
+  
+  // Price trigger near-band gating
+  get priceTriggerNearBandOnly() { return env.priceTriggerNearBandOnly; },
+  get priceTriggerNearBandBps() { return env.priceTriggerNearBandBps; },
+  get priceTriggerReserveTopN() { return env.priceTriggerReserveTopN; },
+  
   // Auto-discovery of Chainlink feeds and debt tokens
   get autoDiscoverFeeds() { return env.autoDiscoverFeeds; },
   
