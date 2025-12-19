@@ -3417,13 +3417,14 @@ export class RealTimeHFService extends EventEmitter {
             this.metrics.healthChecksPerformed++;
             realtimeHealthChecksPerformed.inc();
             
-            // Track for low HF recording
+            // Track for low HF recording (convert 'reserve' trigger to 'event' for lowHfTracker)
             if (this.lowHfTracker && healthFactor < config.alwaysIncludeHfBelow) {
+              const lowHfTriggerType = (triggerType === 'reserve' ? 'event' : triggerType) as 'event' | 'head' | 'price';
               this.lowHfTracker.record(
                 userAddress,
                 healthFactor,
                 blockNumber,
-                triggerType,
+                lowHfTriggerType,
                 totalCollateralUsd,
                 totalDebtUsd
                 // Note: reserves data not available without additional RPC calls
@@ -3474,7 +3475,9 @@ export class RealTimeHFService extends EventEmitter {
             await this.maybeSprinterMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd);
             
             // Track near-threshold users and schedule micro-verification if appropriate
-            await this.maybeScheduleMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd, triggerType);
+            // Convert 'reserve' trigger to 'event' for maybeScheduleMicroVerify
+            const microVerifyTriggerType = (triggerType === 'reserve' ? 'event' : triggerType) as 'event' | 'head' | 'price';
+            await this.maybeScheduleMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd, microVerifyTriggerType);
 
             // Check if we should emit based on edge-triggering and hysteresis
             const emitDecision = this.shouldEmit(userAddress, healthFactor, blockNumber);
@@ -3522,7 +3525,9 @@ export class RealTimeHFService extends EventEmitter {
               }
 
               this.metrics.triggersProcessed++;
-              realtimeTriggersProcessed.inc({ trigger_type: triggerType });
+              // Convert 'reserve' trigger to 'event' for metrics compatibility
+              const metricTriggerType = (triggerType === 'reserve' ? 'event' : triggerType) as 'event' | 'head' | 'price';
+              realtimeTriggersProcessed.inc({ trigger_type: metricTriggerType });
               liquidatableEdgeTriggersTotal.inc({ reason: emitDecision.reason || 'unknown' });
             }
           } catch (err) {

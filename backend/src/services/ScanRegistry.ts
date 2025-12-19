@@ -81,7 +81,7 @@ export class ScanRegistry {
    * Generate a strong deduplication key from scan parameters
    */
   private generateKey(scanKey: ScanKey): string {
-    const parts = [scanKey.triggerType];
+    const parts: string[] = [scanKey.triggerType];
     
     if (scanKey.symbolOrReserve) {
       // Normalize to lowercase and take first 10 chars for reserve addresses
