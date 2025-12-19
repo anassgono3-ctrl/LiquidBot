@@ -77,6 +77,9 @@ export class ScanRegistry {
     this.startCleanup();
   }
   
+  // Reserve address prefix length for dedup keys (0x + 10 hex chars)
+  private readonly RESERVE_ADDRESS_PREFIX_LENGTH = 12;
+  
   /**
    * Generate a strong deduplication key from scan parameters
    */
@@ -84,10 +87,10 @@ export class ScanRegistry {
     const parts: string[] = [scanKey.triggerType];
     
     if (scanKey.symbolOrReserve) {
-      // Normalize to lowercase and take first 10 chars for reserve addresses
+      // Normalize to lowercase and take first 12 chars for reserve addresses (0x + 10 hex)
       const identifier = scanKey.symbolOrReserve.toLowerCase();
       const normalized = identifier.startsWith('0x') 
-        ? identifier.slice(0, 12) 
+        ? identifier.slice(0, this.RESERVE_ADDRESS_PREFIX_LENGTH) 
         : identifier;
       parts.push(normalized);
     }

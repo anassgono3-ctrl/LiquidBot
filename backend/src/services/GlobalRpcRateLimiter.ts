@@ -112,8 +112,9 @@ export class GlobalRpcRateLimiter {
         return true;
       }
       
-      // Exponential backoff (10ms -> 20ms -> 40ms -> 80ms -> 100ms cap)
-      waitMs = Math.min(waitMs * 2, 100);
+      // Exponential backoff (10ms -> 20ms -> 40ms -> 80ms -> MAX_BACKOFF_MS cap)
+      const MAX_BACKOFF_MS = 100;
+      waitMs = Math.min(waitMs * 2, MAX_BACKOFF_MS);
     }
     
     // Timeout exceeded - drop request
