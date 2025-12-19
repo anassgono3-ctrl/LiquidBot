@@ -259,6 +259,11 @@ export class RealTimeHFService extends EventEmitter {
   private priceMonitorAssets: Set<string> | null = null; // null = monitor all
   private lastPriceTriggerTime: Map<string, number> = new Map(); // symbol -> timestamp in ms
   
+  // Per-symbol per-block deduplication for price triggers (Goal A)
+  private lastProcessedBlockBySymbol: Map<string, number> = new Map(); // symbol -> last processed block
+  private inFlightPriceTriggerBySymbol: Map<string, boolean> = new Map(); // symbol -> in-flight flag
+  private priceTriggerDebounceTimers: Map<string, NodeJS.Timeout> = new Map(); // symbol -> debounce timer
+  
   // Per-asset state for polling fallback
   private priceAssetState: Map<string, {
     lastAnswer: bigint | null;
@@ -393,15 +398,31 @@ export class RealTimeHFService extends EventEmitter {
     // Initialize adaptive event concurrency
     this.currentMaxEventBatches = config.maxParallelEventBatches;
     
-    // Initialize price monitoring asset filter if configured
+    // Initialize price monitoring asset filter if configured (Goal B)
     if (config.priceTriggerEnabled && config.priceTriggerAssets) {
-      this.priceMonitorAssets = new Set(
-        config.priceTriggerAssets
-          .split(',')
-          .map((s: string) => s.trim().toUpperCase())
-          .filter((s: string) => s.length > 0)
-          .map((s: string) => this.normalizeAssetSymbol(s))
-      );
+      const configuredAssets = config.priceTriggerAssets
+        .split(',')
+        .map((s: string) => s.trim().toUpperCase())
+        .filter((s: string) => s.length > 0)
+        .map((s: string) => this.normalizeAssetSymbol(s));
+      
+      // Build effective asset set, excluding stablecoins if skip_stables is enabled
+      const stablecoins = new Set(config.priceTriggerStablecoinList);
+      const effectiveAssets = config.priceTriggerSkipStables
+        ? configuredAssets.filter(asset => !stablecoins.has(asset))
+        : configuredAssets;
+      
+      this.priceMonitorAssets = new Set(effectiveAssets);
+      
+      // Log effective asset set
+      if (config.priceTriggerSkipStables && effectiveAssets.length < configuredAssets.length) {
+        const skipped = configuredAssets.filter(asset => !effectiveAssets.includes(asset));
+        // eslint-disable-next-line no-console
+        console.log(
+          `[price-trigger] Stablecoins skipped: ${skipped.join(',')} ` +
+          `(PRICE_TRIGGER_SKIP_STABLES=true)`
+        );
+      }
     }
     
     // Initialize WatchSet for watched fast-path
@@ -581,6 +602,12 @@ export class RealTimeHFService extends EventEmitter {
     }
     this.eventBatchQueue.clear();
     this.eventBatchesPerBlock.clear();
+    
+    // Clear price trigger debounce timers
+    for (const [, timer] of this.priceTriggerDebounceTimers) {
+      clearTimeout(timer);
+    }
+    this.priceTriggerDebounceTimers.clear();
 
     // Remove all event listeners
     if (this.provider) {
@@ -805,15 +832,9 @@ export class RealTimeHFService extends EventEmitter {
         feeds = this.parseChainlinkFeeds(config.chainlinkFeeds);
       }
       
-      // Setup Chainlink price feed listeners if we have any feeds
+      // Setup Chainlink price feed listeners if we have any feeds (Goal A: NewTransmission only)
       if (Object.keys(feeds).length > 0) {
-        // Get AnswerUpdated topic from event registry
-        const answerUpdatedTopic = Array.from(eventRegistry.getAllTopics()).find(topic => {
-          const entry = eventRegistry.get(topic);
-          return entry && entry.name === 'AnswerUpdated';
-        });
-        
-        // Get NewTransmission topic (OCR2)
+        // Get NewTransmission topic (OCR2) - ONLY event we subscribe to, to prevent duplicate scans
         const iface = new Interface(CHAINLINK_AGG_ABI);
         const newTransmissionTopic = iface.getEvent('NewTransmission')?.topicHash || '';
         
@@ -821,7 +842,7 @@ export class RealTimeHFService extends EventEmitter {
         // eslint-disable-next-line no-console
         console.log(
           `[price-trigger] Setting up listeners for ${feedAddresses.length} feed(s): ` +
-          `${Object.keys(feeds).join(',')} (events: AnswerUpdated + NewTransmission)`
+          `${Object.keys(feeds).join(',')} (events: NewTransmission only - AnswerUpdated disabled to prevent duplicates)`
         );
         
         for (const [token, feedAddress] of Object.entries(feeds)) {
@@ -837,28 +858,8 @@ export class RealTimeHFService extends EventEmitter {
           });
           
           try {
-            // Subscribe to AnswerUpdated (legacy Chainlink event)
-            const answerUpdatedFilter = {
-              address: feedAddress,
-              topics: [
-                answerUpdatedTopic || iface.getEvent('AnswerUpdated')?.topicHash || ''
-              ]
-            };
-            
-            this.provider.on(answerUpdatedFilter, (log: EventLog) => {
-              if (this.isShuttingDown) return;
-              try {
-                this.handleLog(log).catch(err => {
-                  // eslint-disable-next-line no-console
-                  console.error(`[realtime-hf] Error handling AnswerUpdated for ${token}:`, err);
-                });
-              } catch (err) {
-                // eslint-disable-next-line no-console
-                console.error(`[realtime-hf] Error in AnswerUpdated listener for ${token}:`, err);
-              }
-            });
-            
-            // Subscribe to NewTransmission (OCR2 Chainlink event)
+            // Subscribe to NewTransmission ONLY (OCR2 Chainlink event)
+            // AnswerUpdated subscription removed to prevent duplicate price-trigger scans (Goal A)
             const newTransmissionFilter = {
               address: feedAddress,
               topics: [newTransmissionTopic]
@@ -878,7 +879,7 @@ export class RealTimeHFService extends EventEmitter {
             });
             
             // eslint-disable-next-line no-console
-            console.log(`[realtime-hf] Subscribed to Chainlink feed for ${token} (AnswerUpdated + NewTransmission)`);
+            console.log(`[realtime-hf] Subscribed to Chainlink feed for ${token} (NewTransmission only)`);
           } catch (err) {
             // eslint-disable-next-line no-console
             console.warn(`[realtime-hf] Failed to subscribe to Chainlink feed for ${token}:`, err);
@@ -1743,8 +1744,27 @@ export class RealTimeHFService extends EventEmitter {
         return;
       }
       
-      // Execute emergency scan
-      await this.executeEmergencyScan(symbol, affectedUsers, dropBps, blockNumber);
+      // Goal A: Debounce/jitter window to coalesce rapid same-block updates
+      // Clear any existing timer for this symbol
+      const existingTimer = this.priceTriggerDebounceTimers.get(symbol);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+      }
+      
+      // Add jitter to prevent synchronous execution across multiple symbols
+      const jitterRange = config.priceTriggerJitterMaxMs - config.priceTriggerJitterMinMs;
+      const jitterMs = config.priceTriggerJitterMinMs + Math.random() * jitterRange;
+      
+      // Schedule emergency scan with debounce
+      const timer = setTimeout(() => {
+        this.priceTriggerDebounceTimers.delete(symbol);
+        this.executeEmergencyScan(symbol, affectedUsers, dropBps, blockNumber).catch(err => {
+          // eslint-disable-next-line no-console
+          console.error(`[price-trigger] Error in debounced emergency scan for ${symbol}:`, err);
+        });
+      }, jitterMs);
+      
+      this.priceTriggerDebounceTimers.set(symbol, timer);
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[price-trigger] Error processing price update:', err);
@@ -1764,6 +1784,43 @@ export class RealTimeHFService extends EventEmitter {
     try {
       const startReserveEvent = Date.now();
       
+      // Goal A: Per-symbol per-block deduplication
+      const lastProcessedBlock = this.lastProcessedBlockBySymbol.get(symbol);
+      const dedupHit = lastProcessedBlock === blockNumber;
+      
+      if (dedupHit) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[price-trigger] scan suppressed: symbol=${symbol} block=${blockNumber} ` +
+          `reason=already_processed_this_block dedup=hit`
+        );
+        return;
+      }
+      
+      // Goal A: In-flight suppression - prevent concurrent scans for same symbol
+      const inFlight = this.inFlightPriceTriggerBySymbol.get(symbol);
+      if (inFlight) {
+        // eslint-disable-next-line no-console
+        console.log(
+          `[price-trigger] scan suppressed: symbol=${symbol} block=${blockNumber} ` +
+          `reason=in_flight inflight_skip=true`
+        );
+        return;
+      }
+      
+      // Mark as in-flight
+      this.inFlightPriceTriggerBySymbol.set(symbol, true);
+      
+      // Log scan scheduled
+      // eslint-disable-next-line no-console
+      console.log(
+        `[price-trigger] scan scheduled: symbol=${symbol} block=${blockNumber} ` +
+        `reason=NewTransmission dedup=miss inflight_skip=false drop=${dropBps.toFixed(2)}bps`
+      );
+      
+      // Update last processed block for this symbol
+      this.lastProcessedBlockBySymbol.set(symbol, blockNumber);
+      
       // Increment metric
       realtimePriceEmergencyScansTotal.inc({ asset: symbol });
       
@@ -1776,27 +1833,52 @@ export class RealTimeHFService extends EventEmitter {
         
         if (reserve) {
           try {
+            // Goal C: Near-band gating with BorrowersIndexService integration
             // 1) Fetch impacted borrowers for this reserve via BorrowersIndexService
             const allBorrowers = await this.borrowersIndex.getBorrowers(reserve.asset);
-            const reserveBorrowers = allBorrowers.slice(0, config.reserveRecheckMaxBatch || 100);
+            const topN = Math.min(allBorrowers.length, config.priceTriggerReserveTopN);
+            const reserveBorrowers = allBorrowers.slice(0, topN);
             
-            // 2) Intersect with near-critical cache (users with HF < 1.02)
-            const nearCritical = this.candidateManager.getAll()
-              .filter(c => c.lastHF !== null && c.lastHF < 1.02)
-              .map(c => c.address.toLowerCase());
-            const nearCriticalSet = new Set(nearCritical);
-            const targetedSubset = reserveBorrowers.filter(addr => nearCriticalSet.has(addr.toLowerCase()));
+            // 2) If near-band gating is enabled, filter to users in critical HF window
+            let nearBandFiltered: string[] = [];
+            if (config.priceTriggerNearBandOnly) {
+              const executionThreshold = config.executionHfThresholdBps / 10000; // e.g., 0.98
+              const nearBandBps = config.priceTriggerNearBandBps; // e.g., 30 = 0.30%
+              const nearBandUpper = executionThreshold + (nearBandBps / 10000);
+              // Lower bound safety guard: prevent scanning deeply underwater positions
+              const nearBandLower = Math.max(config.priceTriggerNearBandLowerBound, executionThreshold - 0.02);
+              
+              // Get all candidates with known HF
+              const allCandidates = this.candidateManager.getAll()
+                .filter(c => c.lastHF !== null && c.lastHF >= nearBandLower && c.lastHF <= nearBandUpper);
+              
+              const nearBandSet = new Set(allCandidates.map(c => c.address.toLowerCase()));
+              nearBandFiltered = reserveBorrowers.filter(addr => nearBandSet.has(addr.toLowerCase()));
+            } else {
+              // Near-band gating disabled, use all reserveBorrowers
+              nearBandFiltered = reserveBorrowers;
+            }
+            
+            // 3) Cap at MAX_SCAN
+            const targetedSubset = nearBandFiltered.slice(0, config.priceTriggerMaxScan);
             
             // Record metrics for targeted subset
             subsetIntersectionSize.observe({ trigger: 'price' }, targetedSubset.length);
             
-            // 3) Run mini-multicall subset BEFORE broad sweep (if we have a targeted subset)
+            // Log near-band filtering results
+            // eslint-disable-next-line no-console
+            console.log(
+              `[price-trigger] scan filtering: symbol=${symbol} block=${blockNumber} ` +
+              `rawIndexCount=${allBorrowers.length} topN=${reserveBorrowers.length} ` +
+              `nearBandCount=${nearBandFiltered.length} scannedCount=${targetedSubset.length}`
+            );
+            
+            // 4) Run mini-multicall subset BEFORE broad sweep (if we have a targeted subset)
             if (targetedSubset.length > 0) {
               // eslint-disable-next-line no-console
               console.log(
                 `[price-trigger-targeted] PriceShock ${symbol} drop=${dropBps.toFixed(2)}bps ` +
-                `borrowers=${reserveBorrowers.length} nearCritical=${nearCritical.length} ` +
-                `intersection=${targetedSubset.length} block=${blockNumber}`
+                `candidates=${targetedSubset.length} block=${blockNumber}`
               );
               
               // Run mini-multicall for targeted subset immediately
@@ -1819,19 +1901,26 @@ export class RealTimeHFService extends EventEmitter {
       }
       
       // Perform emergency scan with latency tracking on candidate set (broad sweep)
-      const startTime = Date.now();
-      await this.batchCheckCandidatesWithPending(affectedUsers, 'price', blockNumber);
-      const latencyMs = Date.now() - startTime;
-      emergencyScanLatency.observe(latencyMs);
-      
-      // eslint-disable-next-line no-console
-      console.log(
-        `[price-trigger] Emergency scan complete: asset=${symbol} ` +
-        `candidates=${affectedUsers.length} latency=${latencyMs}ms trigger=price`
-      );
+      // Note: This is a fallback that runs if BorrowersIndexService is not available
+      if (!this.borrowersIndex && affectedUsers.length > 0) {
+        const startTime = Date.now();
+        const capped = affectedUsers.slice(0, config.priceTriggerMaxScan);
+        await this.batchCheckCandidatesWithPending(capped, 'price', blockNumber);
+        const latencyMs = Date.now() - startTime;
+        emergencyScanLatency.observe(latencyMs);
+        
+        // eslint-disable-next-line no-console
+        console.log(
+          `[price-trigger] Emergency scan complete: asset=${symbol} ` +
+          `candidates=${capped.length} latency=${latencyMs}ms trigger=price`
+        );
+      }
     } catch (err) {
       // eslint-disable-next-line no-console
       console.error('[price-trigger] Error handling price trigger:', err);
+    } finally {
+      // Goal A: Clear in-flight flag for this symbol
+      this.inFlightPriceTriggerBySymbol.set(symbol, false);
     }
   }
 
