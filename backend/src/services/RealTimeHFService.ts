@@ -894,6 +894,7 @@ export class RealTimeHFService extends EventEmitter {
             lastAnswer: null,
             lastUpdatedAt: null,
             lastTriggerTs: 0,
+            lastScanTs: 0,
             baselineAnswer: null
           });
           
@@ -1866,12 +1867,12 @@ export class RealTimeHFService extends EventEmitter {
       
       // Goal: PRICE_TRIGGER_MIN_INTERVAL_SEC enforcement
       // Check if enough time has passed since last scan for this asset
-      const feedAddress = this.discoveredReserves.find(
+      const feedAddressForInterval = this.discoveredReserves.find(
         r => r.symbol.toUpperCase() === symbol.toUpperCase()
-      )?.chainlinkFeed;
+      )?.chainlinkAggregator;
       
-      if (feedAddress) {
-        const state = this.priceAssetState.get(feedAddress);
+      if (feedAddressForInterval) {
+        const state = this.priceAssetState.get(feedAddressForInterval);
         if (state && state.lastScanTs > 0) {
           const now = Date.now();
           const elapsedSec = (now - state.lastScanTs) / 1000;
@@ -1969,12 +1970,12 @@ export class RealTimeHFService extends EventEmitter {
               reserveEventToMicroVerifyMs.observe({ reserve: reserve.asset.substring(0, 10) }, latencyMs);
               
               // Update lastScanTs for min interval enforcement (when targeted scan executes)
-              const feedAddress = this.discoveredReserves.find(
+              const feedAddressForUpdate1 = this.discoveredReserves.find(
                 r => r.symbol.toUpperCase() === symbol.toUpperCase()
-              )?.chainlinkFeed;
+              )?.chainlinkAggregator;
               
-              if (feedAddress) {
-                const state = this.priceAssetState.get(feedAddress);
+              if (feedAddressForUpdate1) {
+                const state = this.priceAssetState.get(feedAddressForUpdate1);
                 if (state) {
                   state.lastScanTs = Date.now();
                 }
@@ -2009,12 +2010,12 @@ export class RealTimeHFService extends EventEmitter {
       }
       
       // Update lastScanTs for min interval enforcement
-      const feedAddress = this.discoveredReserves.find(
+      const feedAddressForUpdate2 = this.discoveredReserves.find(
         r => r.symbol.toUpperCase() === symbol.toUpperCase()
-      )?.chainlinkFeed;
+      )?.chainlinkAggregator;
       
-      if (feedAddress) {
-        const state = this.priceAssetState.get(feedAddress);
+      if (feedAddressForUpdate2) {
+        const state = this.priceAssetState.get(feedAddressForUpdate2);
         if (state) {
           state.lastScanTs = Date.now();
         }
@@ -3115,6 +3116,26 @@ export class RealTimeHFService extends EventEmitter {
 
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const startTime = Date.now();
+      
+      // Acquire in-flight slot if global rate limiting is enabled for price triggers
+      const shouldLimitInFlight = config.priceTriggerGlobalRateLimit;
+      let inFlightAcquired = false;
+      
+      if (shouldLimitInFlight) {
+        inFlightAcquired = await this.globalRpcRateLimiter.acquireInFlight(5000);
+        if (!inFlightAcquired) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `${logPrefix} Chunk ${chunkNum} failed to acquire in-flight slot (max=${config.ethCallMaxInFlight})`
+          );
+          // Skip this chunk and continue with next attempt
+          if (attempt < maxAttempts - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 1000));
+            continue;
+          }
+          return null;
+        }
+      }
 
       try {
         let results: Array<{ success: boolean; returnData: string }>;
@@ -3179,10 +3200,22 @@ export class RealTimeHFService extends EventEmitter {
         this.lastProgressAt = Date.now();
 
         this.clearRateLimitTracking();
+        
+        // Release in-flight slot on success
+        if (shouldLimitInFlight && inFlightAcquired) {
+          this.globalRpcRateLimiter.releaseInFlight();
+        }
+        
         // eslint-disable-next-line no-console
         console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete (${chunk.length} calls, ${durationSec.toFixed(2)}s, provider=${usedProvider})`);
         return results;
       } catch (err) {
+        // Release in-flight slot on error
+        if (shouldLimitInFlight && inFlightAcquired) {
+          this.globalRpcRateLimiter.releaseInFlight();
+          inFlightAcquired = false; // Mark as released
+        }
+        
         const isTimeout = err instanceof Error && err.message.includes('timeout');
 
         if (isTimeout) {
@@ -3221,6 +3254,13 @@ export class RealTimeHFService extends EventEmitter {
             this.lastProgressAt = Date.now();
 
             this.clearRateLimitTracking();
+            
+            // Release in-flight slot on success (secondary fallback path)
+            if (shouldLimitInFlight && inFlightAcquired) {
+              this.globalRpcRateLimiter.releaseInFlight();
+              inFlightAcquired = false; // Mark as released
+            }
+            
             // eslint-disable-next-line no-console
             console.log(`${logPrefix} Chunk ${chunkNum}/${totalChunks} complete via secondary (${chunk.length} calls, ${secondaryDurationSec.toFixed(2)}s)`);
             return results;
@@ -3251,6 +3291,11 @@ export class RealTimeHFService extends EventEmitter {
         } else {
           // eslint-disable-next-line no-console
           console.error(`${logPrefix} Chunk ${chunkNum} failed:`, err);
+        }
+        
+        // Release in-flight slot if still held
+        if (shouldLimitInFlight && inFlightAcquired) {
+          this.globalRpcRateLimiter.releaseInFlight();
         }
 
         return null;
