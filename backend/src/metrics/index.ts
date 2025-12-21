@@ -314,6 +314,32 @@ export const scansSuppressedByDeltaGate = new Counter({
   registers: [metricsRegistry]
 });
 
+export const scansSuppressedByRegistry = new Counter({
+  name: 'liquidbot_scans_suppressed_by_registry_total',
+  help: 'Total number of scans suppressed by ScanRegistry (in_flight or recently_completed)',
+  labelNames: ['trigger_type', 'reason'],
+  registers: [metricsRegistry]
+});
+
+export const rpcRateLimitWaitsTotal = new Counter({
+  name: 'liquidbot_rpc_rate_limit_waits_total',
+  help: 'Total number of RPC calls that had to wait for rate limiter tokens',
+  registers: [metricsRegistry]
+});
+
+export const rpcRateLimitDropsTotal = new Counter({
+  name: 'liquidbot_rpc_rate_limit_drops_total',
+  help: 'Total number of RPC calls dropped by rate limiter',
+  labelNames: ['reason'],
+  registers: [metricsRegistry]
+});
+
+export const rpcRateLimitTokensAvailable = new Gauge({
+  name: 'liquidbot_rpc_rate_limit_tokens_available',
+  help: 'Current number of tokens available in RPC rate limiter',
+  registers: [metricsRegistry]
+});
+
 export const predictiveEnqueuesSkippedByBand = new Counter({
   name: 'liquidbot_predictive_enqueues_skipped_by_band_total',
   help: 'Total number of predictive enqueues skipped due to near-band filtering',

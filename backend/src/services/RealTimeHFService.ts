@@ -59,7 +59,8 @@ import { SubgraphSeeder } from './SubgraphSeeder.js';
 import { BorrowersIndexService } from './BorrowersIndexService.js';
 import { ReserveIndexTracker } from './ReserveIndexTracker.js';
 import { LowHFTracker } from './LowHFTracker.js';
-import { ScanConcurrencyController } from './ScanConcurrencyController.js';
+import { ScanRegistry } from './ScanRegistry.js';
+import { GlobalRpcRateLimiter } from './GlobalRpcRateLimiter.js';
 import { LiquidationAuditService } from './liquidationAudit.js';
 import { NotificationService } from './NotificationService.js';
 import { PriceService } from './PriceService.js';
@@ -279,8 +280,14 @@ export class RealTimeHFService extends EventEmitter {
   private preSimQueue: Map<string, PreSimQueueEntry> = new Map();
   private readonly PRE_SIM_HISTORY_WINDOW = 4; // N=4 observations for delta tracking
   
-  // Scan concurrency control to prevent duplicate runs
-  private scanConcurrencyController: ScanConcurrencyController;
+  // Predictive prestage deduplication cache (user -> Set<scenario>)
+  private prestageCache: Map<string, Set<string>> = new Map();
+  private prestageCacheLastClearBlock = 0;
+  private readonly PRESTAGE_CACHE_CLEAR_INTERVAL_BLOCKS = 2; // Clear every 2 blocks
+  
+  // Scan deduplication and rate limiting
+  private scanRegistry: ScanRegistry;
+  private globalRpcRateLimiter: GlobalRpcRateLimiter;
   
   // Near-threshold tracking for micro-verification
   private nearThresholdUsers = new Map<string, {
@@ -310,8 +317,11 @@ export class RealTimeHFService extends EventEmitter {
     // Initialize micro-verify cache
     this.microVerifyCache = new MicroVerifyCache();
     
-    // Initialize scan concurrency controller to prevent duplicate runs
-    this.scanConcurrencyController = new ScanConcurrencyController();
+    // Initialize scan registry for deduplication (replaces ScanConcurrencyController)
+    this.scanRegistry = new ScanRegistry();
+    
+    // Initialize global RPC rate limiter
+    this.globalRpcRateLimiter = new GlobalRpcRateLimiter();
     
     // Initialize reserve index tracker for delta-based recheck optimization
     this.reserveIndexTracker = new ReserveIndexTracker();
@@ -1170,6 +1180,21 @@ export class RealTimeHFService extends EventEmitter {
       this.currentBlockNumber = blockNumber;
       this.lastPriceCheckBlock = null;
       this.lastReserveCheckBlock = null;
+      
+      // Clear prestage cache every N blocks to prevent memory buildup
+      const blocksSinceLastClear = blockNumber - this.prestageCacheLastClearBlock;
+      if (blocksSinceLastClear >= this.PRESTAGE_CACHE_CLEAR_INTERVAL_BLOCKS) {
+        const cacheSize = this.prestageCache.size;
+        this.prestageCache.clear();
+        this.prestageCacheLastClearBlock = blockNumber;
+        
+        if (cacheSize > 0) {
+          console.log(
+            `[predictive-prestage] cache cleared: entries=${cacheSize} ` +
+            `block=${blockNumber} interval=${this.PRESTAGE_CACHE_CLEAR_INTERVAL_BLOCKS}`
+          );
+        }
+      }
     }
 
     // Perform batch check on all candidates with blockTag
@@ -1440,8 +1465,8 @@ export class RealTimeHFService extends EventEmitter {
                 `intersection=${targetedSubset.length} block=${blockNumber}`
               );
               
-              // Run mini-multicall for targeted subset immediately
-              await this.batchCheckCandidatesWithPending(targetedSubset, 'price', blockNumber);
+              // Run mini-multicall for targeted subset immediately (with reserve for dedup)
+              await this.batchCheckCandidatesWithPending(targetedSubset, 'reserve', blockNumber, reserve);
               
               // Record latency from reserve event to first micro-verify
               const latencyMs = Date.now() - startReserveEvent;
@@ -1881,8 +1906,8 @@ export class RealTimeHFService extends EventEmitter {
                 `candidates=${targetedSubset.length} block=${blockNumber}`
               );
               
-              // Run mini-multicall for targeted subset immediately
-              await this.batchCheckCandidatesWithPending(targetedSubset, 'price', blockNumber);
+              // Run mini-multicall for targeted subset immediately (with symbol for stronger dedup)
+              await this.batchCheckCandidatesWithPending(targetedSubset, 'price', blockNumber, symbol);
               
               // Record latency from price event to first micro-verify
               const latencyMs = Date.now() - startReserveEvent;
@@ -1905,7 +1930,7 @@ export class RealTimeHFService extends EventEmitter {
       if (!this.borrowersIndex && affectedUsers.length > 0) {
         const startTime = Date.now();
         const capped = affectedUsers.slice(0, config.priceTriggerMaxScan);
-        await this.batchCheckCandidatesWithPending(capped, 'price', blockNumber);
+        await this.batchCheckCandidatesWithPending(capped, 'price', blockNumber, symbol);
         const latencyMs = Date.now() - startTime;
         emergencyScanLatency.observe(latencyMs);
         
@@ -2609,7 +2634,8 @@ export class RealTimeHFService extends EventEmitter {
   private async batchCheckCandidatesWithPending(
     addresses: string[],
     triggerType: 'event' | 'head' | 'price' | 'reserve',
-    blockTag?: number
+    blockTag?: number,
+    symbolOrReserve?: string
   ): Promise<void> {
     // Determine if we should use pending verification
     const usePending = config.pendingVerifyEnabled && 
@@ -2625,8 +2651,8 @@ export class RealTimeHFService extends EventEmitter {
     }
     
     try {
-      // Use existing batch check with effective block tag
-      await this.batchCheckCandidates(addresses, triggerType as 'event' | 'head' | 'price', effectiveBlockTag);
+      // Use existing batch check with effective block tag and symbol/reserve
+      await this.batchCheckCandidates(addresses, triggerType, effectiveBlockTag, symbolOrReserve);
     } catch (err) {
       // Check if error is related to pending block not supported
       const errStr = String(err).toLowerCase();
@@ -2638,7 +2664,7 @@ export class RealTimeHFService extends EventEmitter {
         pendingVerifyErrorsTotal.inc();
         
         // Retry with latest (undefined means latest)
-        await this.batchCheckCandidates(addresses, triggerType as 'event' | 'head' | 'price', blockTag);
+        await this.batchCheckCandidates(addresses, triggerType, blockTag, symbolOrReserve);
       } else {
         throw err;
       }
@@ -2729,11 +2755,11 @@ export class RealTimeHFService extends EventEmitter {
           // eslint-disable-next-line no-console
           console.log(`[fast-lane] [reserve-recheck] reserve=${reserve} borrowers=${selected.length}/${borrowers.length} block=${blockNumber}`);
           
-          // Check with pending blockTag for immediate liquidation detection
-          await this.batchCheckCandidatesWithPending(selected, 'reserve', blockNumber);
+          // Check with pending blockTag for immediate liquidation detection (with reserve for dedup)
+          await this.batchCheckCandidatesWithPending(selected, 'reserve', blockNumber, reserve);
         }
       } else if (users.length > 0) {
-        // Direct user check
+        // Direct user check (without reserve since this is user-specific event)
         await this.batchCheckCandidatesWithPending(users, 'event', blockNumber);
       } else {
         // Fallback: check low-HF candidates
@@ -3285,23 +3311,54 @@ export class RealTimeHFService extends EventEmitter {
 
   /**
    * Batch check multiple candidates using Multicall3
+   * @param addresses - User addresses to check
+   * @param triggerType - Type of trigger (event/head/price/reserve)
+   * @param blockTag - Block number or 'pending'
+   * @param symbolOrReserve - Optional asset symbol (WETH, USDC) or reserve address for stronger deduplication
    * @returns Metrics about the batch run
    */
-  private async batchCheckCandidates(addresses: string[], triggerType: 'event' | 'head' | 'price', blockTag?: number | 'pending'): Promise<{ timeouts: number; avgLatency: number; candidates: number }> {
+  private async batchCheckCandidates(
+    addresses: string[], 
+    triggerType: 'event' | 'head' | 'price' | 'reserve', 
+    blockTag?: number | 'pending',
+    symbolOrReserve?: string
+  ): Promise<{ timeouts: number; avgLatency: number; candidates: number }> {
     if (!this.multicall3 || !this.provider || addresses.length === 0) {
       return { timeouts: 0, avgLatency: 0, candidates: 0 };
     }
 
     // Try to acquire lock for this scan to prevent duplicate concurrent runs
     const blockNumber = (typeof blockTag === 'number' ? blockTag : undefined) || this.currentBlockNumber || 0;
-    const lockAcquired = this.scanConcurrencyController.tryAcquireLock(triggerType, blockNumber);
+    
+    // Use ScanRegistry with stronger deduplication key (includes symbol/reserve)
+    const scanKey = {
+      triggerType: triggerType as 'price' | 'reserve' | 'head' | 'event',
+      symbolOrReserve,
+      blockTag: blockNumber
+    };
+    
+    const lockAcquired = this.scanRegistry.acquire(scanKey);
     
     if (!lockAcquired) {
-      // Another scan of the same type is already in-flight for this block
-      scansSuppressedByLock.inc({ trigger_type: triggerType });
-      // eslint-disable-next-line no-console
+      // Another scan of the same type is already in-flight or recently completed
+      // (metric already tracked by ScanRegistry)
+      scansSuppressedByLock.inc({ trigger_type: triggerType }); // Keep legacy metric for compatibility
+      return { timeouts: 0, avgLatency: 0, candidates: 0 };
+    }
+    
+    // Apply global RPC rate limiting (with timeout to prevent blocking)
+    const callCost = Math.ceil(addresses.length / config.multicallBatchSize);
+    const rateLimitAcquired = await this.globalRpcRateLimiter.acquire({ 
+      cost: callCost, 
+      timeoutMs: 5000 // 5s timeout
+    });
+    
+    if (!rateLimitAcquired) {
+      // Rate limit exceeded - release scan lock and return
+      this.scanRegistry.release(scanKey);
       console.log(
-        `[scan-suppress] type=${triggerType} block=${blockNumber} reason=in_flight addresses=${addresses.length}`
+        `[rpc-rate-limit] Scan dropped: trigger=${triggerType} ` +
+        `symbol=${symbolOrReserve || 'none'} block=${blockNumber} cost=${callCost}`
       );
       return { timeouts: 0, avgLatency: 0, candidates: 0 };
     }
@@ -3360,13 +3417,14 @@ export class RealTimeHFService extends EventEmitter {
             this.metrics.healthChecksPerformed++;
             realtimeHealthChecksPerformed.inc();
             
-            // Track for low HF recording
+            // Track for low HF recording (convert 'reserve' trigger to 'event' for lowHfTracker)
             if (this.lowHfTracker && healthFactor < config.alwaysIncludeHfBelow) {
+              const lowHfTriggerType = (triggerType === 'reserve' ? 'event' : triggerType) as 'event' | 'head' | 'price';
               this.lowHfTracker.record(
                 userAddress,
                 healthFactor,
                 blockNumber,
-                triggerType,
+                lowHfTriggerType,
                 totalCollateralUsd,
                 totalDebtUsd
                 // Note: reserves data not available without additional RPC calls
@@ -3417,7 +3475,9 @@ export class RealTimeHFService extends EventEmitter {
             await this.maybeSprinterMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd);
             
             // Track near-threshold users and schedule micro-verification if appropriate
-            await this.maybeScheduleMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd, triggerType);
+            // Convert 'reserve' trigger to 'event' for maybeScheduleMicroVerify
+            const microVerifyTriggerType = (triggerType === 'reserve' ? 'event' : triggerType) as 'event' | 'head' | 'price';
+            await this.maybeScheduleMicroVerify(userAddress, healthFactor, blockNumber, totalDebtUsd, microVerifyTriggerType);
 
             // Check if we should emit based on edge-triggering and hysteresis
             const emitDecision = this.shouldEmit(userAddress, healthFactor, blockNumber);
@@ -3465,7 +3525,9 @@ export class RealTimeHFService extends EventEmitter {
               }
 
               this.metrics.triggersProcessed++;
-              realtimeTriggersProcessed.inc({ trigger_type: triggerType });
+              // Convert 'reserve' trigger to 'event' for metrics compatibility
+              const metricTriggerType = (triggerType === 'reserve' ? 'event' : triggerType) as 'event' | 'head' | 'price';
+              realtimeTriggersProcessed.inc({ trigger_type: metricTriggerType });
               liquidatableEdgeTriggersTotal.inc({ reason: emitDecision.reason || 'unknown' });
             }
           } catch (err) {
@@ -3513,7 +3575,12 @@ export class RealTimeHFService extends EventEmitter {
       return { timeouts: 0, avgLatency: 0, candidates: addresses.length };
     } finally {
       // Always release the lock when done (success or error)
-      this.scanConcurrencyController.releaseLock(triggerType, blockNumber);
+      const scanKey = {
+        triggerType: triggerType as 'price' | 'reserve' | 'head' | 'event',
+        symbolOrReserve,
+        blockTag: blockNumber
+      };
+      this.scanRegistry.release(scanKey);
     }
   }
 
@@ -4041,6 +4108,26 @@ export class RealTimeHFService extends EventEmitter {
 
       // Prestage if SPRINTER_ENABLED and hfProjected <= PRESTAGE_HF_BPS/10000
       if (config.sprinterEnabled && candidate.hfProjected <= config.prestageHfBps / 10000) {
+        // Check if (user, scenario) already prestaged in current cycle
+        const prestageKey = normalized.toLowerCase();
+        const scenarios = this.prestageCache.get(prestageKey);
+        
+        if (scenarios?.has(candidate.scenario)) {
+          // Already prestaged this (user, scenario) in current cycle - skip
+          console.log(
+            `[predictive-prestage] skipped: user=${normalized.slice(0, 10)}... ` +
+            `scenario=${candidate.scenario} reason=already_prestaged_this_cycle`
+          );
+          return;
+        }
+        
+        // Mark as prestaged in cache
+        if (!scenarios) {
+          this.prestageCache.set(prestageKey, new Set([candidate.scenario]));
+        } else {
+          scenarios.add(candidate.scenario);
+        }
+        
         // Call sprinterEngine.prestageFromPredictive with real debt/collateral data
         // Fire-and-forget to avoid blocking ingestion
         this.prestageFromPredictiveCandidateWithRealData(

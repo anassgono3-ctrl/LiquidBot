@@ -171,6 +171,10 @@ export const config = {
   get reserveRecheckNearBandOnly() { return env.reserveRecheckNearBandOnly; },
   get reserveMinIndexDeltaBps() { return env.reserveMinIndexDeltaBps; },
   
+  // Global RPC rate limiting
+  get globalRpcRateLimit() { return env.globalRpcRateLimit; },
+  get globalRpcBurstCapacity() { return env.globalRpcBurstCapacity; },
+  
   // Pending-state verification
   get pendingVerifyEnabled() { return env.pendingVerifyEnabled; },
   

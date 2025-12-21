@@ -128,6 +128,10 @@ export const rawEnvSchema = z.object({
   RESERVE_RECHECK_NEAR_BAND_ONLY: z.string().optional(),
   RESERVE_MIN_INDEX_DELTA_BPS: z.string().optional(),
   
+  // Global RPC rate limiting
+  GLOBAL_RPC_RATE_LIMIT: z.string().optional(),
+  GLOBAL_RPC_BURST_CAPACITY: z.string().optional(),
+  
   // Pending-state verification
   PENDING_VERIFY_ENABLED: z.string().optional(),
   
@@ -737,6 +741,10 @@ export const env = (() => {
     reserveRecheckTopNByAsset: parsed.RESERVE_RECHECK_TOP_N_BY_ASSET,
     reserveRecheckNearBandOnly: (parsed.RESERVE_RECHECK_NEAR_BAND_ONLY || 'true').toLowerCase() === 'true',
     reserveMinIndexDeltaBps: Number(parsed.RESERVE_MIN_INDEX_DELTA_BPS || 2), // 0.02%
+    
+    // Global RPC rate limiting
+    globalRpcRateLimit: Number(parsed.GLOBAL_RPC_RATE_LIMIT || 50), // 50 calls/sec
+    globalRpcBurstCapacity: Number(parsed.GLOBAL_RPC_BURST_CAPACITY || 100), // 100 tokens
     
     // Pending-state verification
     pendingVerifyEnabled: (parsed.PENDING_VERIFY_ENABLED || 'true').toLowerCase() === 'true',
