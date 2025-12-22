@@ -1195,6 +1195,46 @@ export const predictiveQueueEntriesTotal = new Counter({
   registers: [metricsRegistry]
 });
 
+// Queue management metrics
+export const predictiveQueueDroppedDupeTotal = new Counter({
+  name: 'liquidbot_predictive_queue_dropped_dupe_total',
+  help: 'Total predictive candidates dropped due to duplicate detection',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+export const predictiveQueueDroppedCooldownTotal = new Counter({
+  name: 'liquidbot_predictive_queue_dropped_cooldown_total',
+  help: 'Total predictive candidates dropped due to cooldown period',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+export const predictiveQueueDroppedEtaGateTotal = new Counter({
+  name: 'liquidbot_predictive_queue_dropped_eta_gate_total',
+  help: 'Total predictive candidates dropped due to ETA gate enforcement',
+  labelNames: ['scenario'],
+  registers: [metricsRegistry]
+});
+
+export const predictiveQueueSizeGauge = new Gauge({
+  name: 'liquidbot_predictive_queue_size',
+  help: 'Current number of entries in predictive queue',
+  registers: [metricsRegistry]
+});
+
+export const predictiveQueueNearBandGauge = new Gauge({
+  name: 'liquidbot_predictive_queue_near_band_count',
+  help: 'Current number of near-band entries in predictive queue',
+  registers: [metricsRegistry]
+});
+
+export const predictiveVerifyBatchSizeGauge = new Gauge({
+  name: 'liquidbot_predictive_verify_batch_size',
+  help: 'Size of predictive verification batch per cycle',
+  registers: [metricsRegistry]
+});
+
 // Micro-verification scheduling from predictive scenarios
 export const predictiveMicroVerifyScheduledTotal = new Counter({
   name: 'liquidbot_predictive_micro_verify_scheduled_total',

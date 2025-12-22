@@ -1226,8 +1226,11 @@ export class RealTimeHFService extends EventEmitter {
         // Query pending block
         const pendingBlock = await this.provider.send('eth_getBlockByNumber', ['pending', false]);
         if (pendingBlock && pendingBlock.number) {
-          // Trigger selective checks on low HF candidates when pending block changes
-          await this.checkLowHFCandidates('price');
+          // Only trigger price checks if PRICE_TRIGGER_ENABLED
+          // Flashblocks can still be used for other purposes but not price sweeps
+          if (config.priceTriggerEnabled) {
+            await this.checkLowHFCandidates('price');
+          }
         }
       } catch (err) {
         // Silently ignore errors in pending block queries (expected for some providers)
@@ -1539,6 +1542,11 @@ export class RealTimeHFService extends EventEmitter {
       } else {
         // eslint-disable-next-line no-console
         console.log('[realtime-hf] Chainlink price update detected');
+      }
+      
+      // Only perform price-triggered rechecks if PRICE_TRIGGER_ENABLED
+      if (!config.priceTriggerEnabled) {
+        return;
       }
       
       // Per-block gating: prevent multiple price-triggered rechecks in same block (Goal 5)
@@ -4256,17 +4264,18 @@ export class RealTimeHFService extends EventEmitter {
     
     // PREDICTIVE NEAR-BAND ONLY: Skip reserve fetch for users outside near band
     // This prevents unnecessary RPC calls for clearly safe users
+    // Define near-band bounds using config values
     const executionThreshold = config.executionHfThresholdBps / 10000; // 0.98 default
     const nearBandBps = config.nearThresholdBandBps; // 30 bps default
-    const alwaysIncludeBelow = config.alwaysIncludeHfBelow; // 1.10 default
+    const hfPredCritical = config.hfPredCritical; // 1.0008 default
     
-    const nearBandUpperBound = Math.max(
-      alwaysIncludeBelow,
-      1.0 + nearBandBps / 10000
-    );
-    const nearBandLowerBound = config.hfPredCritical || (executionThreshold - 0.02);
+    // Upper bound: use HF_PRED_CRITICAL + PREDICTIVE_HF_BUFFER_BPS for consistency
+    const predictiveBuffer = config.predictiveHfBufferBps / 10000; // 0.40% default
+    const nearBandUpperBound = hfPredCritical + predictiveBuffer; // 1.0008 + 0.0040 = 1.0048
+    const nearBandLowerBound = hfPredCritical - 0.02; // Safety lower bound
     
     // Short-circuit if projected HF is outside near band
+    // Apply strict gating: only prestage if hfProjected is in [nearBandLowerBound, nearBandUpperBound]
     if (projectedHf > nearBandUpperBound || projectedHf < nearBandLowerBound) {
       console.log(
         `[predictive-prestage] user=${normalized.slice(0, 10)}... scenario=${scenario} ` +
