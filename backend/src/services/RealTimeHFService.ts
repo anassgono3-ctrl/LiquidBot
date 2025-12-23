@@ -4112,7 +4112,7 @@ export class RealTimeHFService extends EventEmitter {
     // GATE 4: Queue size management with priority eviction
     // If queue would exceed PREDICTIVE_QUEUE_SAFETY_MAX, evict lowest priority entries
     const currentQueueSize = this.preSimQueue.size;
-    const availableSlots = config.predictiveQueueSafetyMax - currentQueueSize;
+    const availableSlots = Math.max(0, config.predictiveQueueSafetyMax - currentQueueSize);
     
     if (candidatesToQueue.length > availableSlots) {
       // Calculate priority for all candidates (lower hfProj + lower ETA = higher priority)
@@ -4142,16 +4142,14 @@ export class RealTimeHFService extends EventEmitter {
     }
     
     // Queue the candidates that passed all gates
+    // Track near-band count for gauge
+    let nearBandCount = 0;
+    
     for (const candidate of candidatesToQueue) {
       const normalized = normalizeAddress(candidate.address);
       
-      // Calculate priority score: (1/etaSec) * (hfCurrent - hfProjected) * log(totalDebtUsd + 1)
-      const hfCurrent = candidate.hfCurrent ?? 1.0;
-      const hfDelta = Math.max(0, hfCurrent - candidate.hfProjected);
-      const etaFactor = candidate.etaSec > 0 ? 1 / candidate.etaSec : 1;
-      const debtFactor = Math.log10(Math.max(candidate.totalDebtUsd, 1) + 1);
-      
-      const priority = hfDelta * etaFactor * debtFactor;
+      // Calculate priority score using simple formula consistent with eviction logic
+      const priority = candidate.hfProjected + (candidate.etaSec / 100);
       
       // Add to pre-sim queue with predictive_scenario reason
       this.preSimQueue.set(normalized, {
@@ -4167,12 +4165,11 @@ export class RealTimeHFService extends EventEmitter {
         this.userLastHfSnapshot.set(normalized, candidate.hfCurrent);
       }
       
-      // Update metrics
-      predictiveQueueSizeGauge.set(this.preSimQueue.size);
+      // Count near-band users (don't increment gauge in loop)
       const isNearBand = candidate.hfProjected >= config.hfPredCritical && 
                         candidate.hfProjected <= (config.hfPredCritical + config.predictiveHfBufferBps / 10000);
       if (isNearBand) {
-        predictiveQueueNearBandGauge.inc();
+        nearBandCount++;
       }
       
       // Log ingested candidate
@@ -4263,6 +4260,10 @@ export class RealTimeHFService extends EventEmitter {
         });
       }
     }
+    
+    // Update queue metrics after all candidates processed
+    predictiveQueueSizeGauge.set(this.preSimQueue.size);
+    predictiveQueueNearBandGauge.set(nearBandCount);
   }
 
   /**
