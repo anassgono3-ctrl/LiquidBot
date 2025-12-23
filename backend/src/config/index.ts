@@ -468,6 +468,19 @@ export const config = {
   get predictivePriorityScenarioWeightBaseline() { return env.predictivePriorityScenarioWeightBaseline; },
   get predictivePriorityScenarioWeightAdverse() { return env.predictivePriorityScenarioWeightAdverse; },
   get predictivePriorityScenarioWeightExtreme() { return env.predictivePriorityScenarioWeightExtreme; },
+  // Predictive signal gating
+  get predictiveSignalMode() { return env.predictiveSignalMode; },
+  get predictiveMinDebtUsd() { return env.predictiveMinDebtUsd; },
+  get pythDeltaPct() { return env.pythDeltaPct; },
+  // Predictive queue budgets and safety limits
+  get predictiveQueueBudgetCallsPerBlock() { return env.predictiveQueueBudgetCallsPerBlock; },
+  get predictiveQueueMaxCandidatesPerBlock() { return env.predictiveQueueMaxCandidatesPerBlock; },
+  get predictiveEvalCooldownSec() { return env.predictiveEvalCooldownSec; },
+  get predictiveQueueSafetyMax() { return env.predictiveQueueSafetyMax; },
+  get predictiveAssets() { return env.predictiveAssets; },
+  // Predictive per-user debounce
+  get perUserBlockDebounce() { return env.perUserBlockDebounce; },
+  get userCooldownSec() { return env.userCooldownSec; },
   
   // Micro-Verification Fast Path
   get microVerifyEnabled() { return env.microVerifyEnabled; },

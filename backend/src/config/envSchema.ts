@@ -466,6 +466,19 @@ export const rawEnvSchema = z.object({
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE: z.string().optional(),
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE: z.string().optional(),
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME: z.string().optional(),
+  // Predictive signal gating
+  PREDICTIVE_SIGNAL_MODE: z.string().optional(),
+  PREDICTIVE_MIN_DEBT_USD: z.string().optional(),
+  PYTH_DELTA_PCT: z.string().optional(),
+  // Predictive queue budgets and safety limits
+  PREDICTIVE_QUEUE_BUDGET_CALLS_PER_BLOCK: z.string().optional(),
+  PREDICTIVE_QUEUE_MAX_CANDIDATES_PER_BLOCK: z.string().optional(),
+  PREDICTIVE_EVAL_COOLDOWN_SEC: z.string().optional(),
+  PREDICTIVE_QUEUE_SAFETY_MAX: z.string().optional(),
+  PREDICTIVE_ASSETS: z.string().optional(),
+  // Predictive per-user debounce
+  PER_USER_BLOCK_DEBOUNCE: z.string().optional(),
+  USER_COOLDOWN_SEC: z.string().optional(),
   
   // ==== MICRO-VERIFICATION FAST PATH ====
   // Enable micro-verification for immediate single-user HF checks
@@ -1072,6 +1085,22 @@ export const env = (() => {
     predictivePriorityScenarioWeightBaseline: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE || 1.0),
     predictivePriorityScenarioWeightAdverse: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE || 1.15),
     predictivePriorityScenarioWeightExtreme: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME || 1.3),
+    // Predictive signal gating
+    predictiveSignalMode: parsed.PREDICTIVE_SIGNAL_MODE || 'pyth_twap_or_chainlink',
+    predictiveMinDebtUsd: Number(parsed.PREDICTIVE_MIN_DEBT_USD || parsed.MIN_DEBT_USD || 1),
+    pythDeltaPct: Number(parsed.PYTH_DELTA_PCT || 0.5), // 0.5% Pyth delta threshold
+    // Predictive queue budgets and safety limits
+    predictiveQueueBudgetCallsPerBlock: Number(parsed.PREDICTIVE_QUEUE_BUDGET_CALLS_PER_BLOCK || 200),
+    predictiveQueueMaxCandidatesPerBlock: Number(parsed.PREDICTIVE_QUEUE_MAX_CANDIDATES_PER_BLOCK || 60),
+    predictiveEvalCooldownSec: Number(parsed.PREDICTIVE_EVAL_COOLDOWN_SEC || 60), // 60s cooldown
+    predictiveQueueSafetyMax: Number(parsed.PREDICTIVE_QUEUE_SAFETY_MAX || 500),
+    predictiveAssets: (parsed.PREDICTIVE_ASSETS || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(s => s.length > 0),
+    // Predictive per-user debounce
+    perUserBlockDebounce: Number(parsed.PER_USER_BLOCK_DEBOUNCE || 3),
+    userCooldownSec: Number(parsed.USER_COOLDOWN_SEC || 120),
     
     // ==== MICRO-VERIFICATION FAST PATH ====
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',

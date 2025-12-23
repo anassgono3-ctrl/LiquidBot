@@ -1318,6 +1318,62 @@ export const predictiveEtaDistributionSec = new Histogram({
   registers: [metricsRegistry]
 });
 
+// ==== NEW PREDICTIVE RPC OPTIMIZATION METRICS ====
+
+// Call budget tracking
+export const predictiveCallBudgetUsed = new Gauge({
+  name: 'liquidbot_predictive_call_budget_used',
+  help: 'Number of RPC calls used by predictive this block',
+  registers: [metricsRegistry]
+});
+
+// Candidates enqueued tracking
+export const predictiveCandidatesEnqueued = new Counter({
+  name: 'liquidbot_predictive_candidates_enqueued_total',
+  help: 'Total predictive candidates enqueued',
+  labelNames: ['asset', 'source'],
+  registers: [metricsRegistry]
+});
+
+// Near-band skip tracking
+export const predictiveSkippedNotNearBand = new Counter({
+  name: 'liquidbot_predictive_skipped_not_near_band_total',
+  help: 'Total predictive skips due to not being in near-band',
+  labelNames: ['reason'],
+  registers: [metricsRegistry]
+});
+
+// Deduplication skip tracking
+export const predictiveDedupSkips = new Counter({
+  name: 'liquidbot_predictive_dedup_skips_total',
+  help: 'Total predictive skips due to deduplication',
+  labelNames: ['reason'],
+  registers: [metricsRegistry]
+});
+
+// Signal gate activations
+export const predictiveSignalGateActivations = new Counter({
+  name: 'liquidbot_predictive_signal_gate_activations_total',
+  help: 'Predictive activations gated by signal validation',
+  labelNames: ['source', 'result'],
+  registers: [metricsRegistry]
+});
+
+// Micro-verify batch size
+export const predictiveMicroVerifyBatchSize = new Histogram({
+  name: 'liquidbot_predictive_micro_verify_batch_size',
+  help: 'Size of micro-verify batches',
+  buckets: [1, 5, 10, 25, 50, 100],
+  registers: [metricsRegistry]
+});
+
+// Queue size gauge
+export const predictiveQueueSize = new Gauge({
+  name: 'liquidbot_predictive_queue_size',
+  help: 'Current size of predictive evaluation queue',
+  registers: [metricsRegistry]
+});
+
 // Evaluation duration histogram
 export const predictiveEvaluationDurationMs = new Histogram({
   name: 'liquidbot_predictive_evaluation_duration_ms',
