@@ -46,7 +46,11 @@ import {
   realtimePriceEmergencyScansTotal,
   emergencyScanLatency,
   scansSuppressedByLock,
-  scansSuppressedByDeltaGate
+  scansSuppressedByDeltaGate,
+  predictiveQueueDroppedDupeTotal,
+  predictiveQueueDroppedCooldownTotal,
+  predictiveQueueSizeGauge,
+  predictiveQueueNearBandGauge
 } from '../metrics/index.js';
 import { isZero } from '../utils/bigint.js';
 import { normalizeAddress } from '../utils/Address.js';
@@ -278,6 +282,11 @@ export class RealTimeHFService extends EventEmitter {
   
   // Pre-simulation queue for hot users
   private preSimQueue: Map<string, PreSimQueueEntry> = new Map();
+  
+  // Predictive queue cooldown and deduplication tracking
+  private userLastQueuedTimestamp: Map<string, number> = new Map(); // user -> last queued timestamp (ms)
+  private recentlyVerified: Map<string, { block: number; timestamp: number }> = new Map(); // user -> last verification
+  private userLastHfSnapshot: Map<string, number> = new Map(); // user -> last known HF for INDEX_JUMP_BPS_TRIGGER check
   private readonly PRE_SIM_HISTORY_WINDOW = 4; // N=4 observations for delta tracking
   
   // Predictive prestage deduplication cache (user -> Set<scenario>)
@@ -3537,6 +3546,12 @@ export class RealTimeHFService extends EventEmitter {
               const metricTriggerType = (triggerType === 'reserve' ? 'event' : triggerType) as 'event' | 'head' | 'price';
               realtimeTriggersProcessed.inc({ trigger_type: metricTriggerType });
               liquidatableEdgeTriggersTotal.inc({ reason: emitDecision.reason || 'unknown' });
+              
+              // Update recentlyVerified tracking for cooldown/deduplication
+              this.recentlyVerified.set(userAddress, {
+                block: blockNumber,
+                timestamp: Date.now()
+              });
             }
           } catch (err) {
             // eslint-disable-next-line no-console
@@ -4036,17 +4051,99 @@ export class RealTimeHFService extends EventEmitter {
       totalDebtUsd: number;
     }>
   ): void {
+    const now = Date.now();
+    const currentBlock = this.currentBlockNumber || 0;
+    
     // Track ingested candidates to prevent duplicates in same tick
     const seenThisTick = new Set<string>();
     
+    // Collect candidates that pass all gates
+    const candidatesToQueue: typeof candidates = [];
+    
     for (const candidate of candidates) {
       const key = `${candidate.address.toLowerCase()}_${candidate.scenario}`;
+      const normalized = normalizeAddress(candidate.address);
       
       // Deduplicate per tick
       if (seenThisTick.has(key)) {
         continue;
       }
       seenThisTick.add(key);
+      
+      // GATE 1: Cooldown check - Skip if user was queued recently
+      const lastQueuedTs = this.userLastQueuedTimestamp.get(normalized);
+      if (lastQueuedTs && (now - lastQueuedTs) < config.userCooldownSec * 1000) {
+        predictiveQueueDroppedCooldownTotal.inc({ scenario: candidate.scenario });
+        console.log(
+          `[predictive-queue] dropped user=${normalized.slice(0, 10)}... ` +
+          `scenario=${candidate.scenario} reason=cooldown remainingSec=${Math.ceil((config.userCooldownSec * 1000 - (now - lastQueuedTs)) / 1000)}`
+        );
+        continue;
+      }
+      
+      // GATE 2: Recently verified check - Skip if verified in last N blocks
+      const lastVerified = this.recentlyVerified.get(normalized);
+      if (lastVerified && currentBlock > 0 && (currentBlock - lastVerified.block) < config.perUserBlockDebounce) {
+        predictiveQueueDroppedDupeTotal.inc({ scenario: candidate.scenario });
+        console.log(
+          `[predictive-queue] dropped user=${normalized.slice(0, 10)}... ` +
+          `scenario=${candidate.scenario} reason=recently_verified blocksAgo=${currentBlock - lastVerified.block}`
+        );
+        continue;
+      }
+      
+      // GATE 3: HF delta check - Skip if HF hasn't changed significantly since last snapshot
+      const lastHfSnapshot = this.userLastHfSnapshot.get(normalized);
+      if (lastHfSnapshot !== undefined && candidate.hfCurrent !== undefined) {
+        const hfDeltaBps = Math.abs((candidate.hfCurrent - lastHfSnapshot) * 10000);
+        if (hfDeltaBps < config.indexJumpBpsTrigger) {
+          console.log(
+            `[predictive-queue] dropped user=${normalized.slice(0, 10)}... ` +
+            `scenario=${candidate.scenario} reason=insufficient_hf_delta deltaBps=${hfDeltaBps.toFixed(2)}`
+          );
+          continue;
+        }
+      }
+      
+      // All gates passed - add to queue candidates
+      candidatesToQueue.push(candidate);
+    }
+    
+    // GATE 4: Queue size management with priority eviction
+    // If queue would exceed PREDICTIVE_QUEUE_SAFETY_MAX, evict lowest priority entries
+    const currentQueueSize = this.preSimQueue.size;
+    const availableSlots = config.predictiveQueueSafetyMax - currentQueueSize;
+    
+    if (candidatesToQueue.length > availableSlots) {
+      // Calculate priority for all candidates (lower hfProj + lower ETA = higher priority)
+      const candidatesWithPriority = candidatesToQueue.map(c => {
+        const priority = c.hfProjected + (c.etaSec / 100); // Simple priority: hfProj + normalized ETA
+        return { candidate: c, priority };
+      });
+      
+      // Sort by priority (lower = higher priority)
+      candidatesWithPriority.sort((a, b) => a.priority - b.priority);
+      
+      // Keep only top candidates that fit
+      const keptCount = Math.min(availableSlots, candidatesWithPriority.length);
+      const evictedCount = candidatesWithPriority.length - keptCount;
+      
+      console.log(
+        `[predictive-queue] capacity limit: ` +
+        `current=${currentQueueSize} max=${config.predictiveQueueSafetyMax} ` +
+        `candidates=${candidatesToQueue.length} keeping=${keptCount} evicting=${evictedCount}`
+      );
+      
+      // Replace candidatesToQueue with top-K
+      candidatesToQueue.length = 0;
+      for (let i = 0; i < keptCount; i++) {
+        candidatesToQueue.push(candidatesWithPriority[i].candidate);
+      }
+    }
+    
+    // Queue the candidates that passed all gates
+    for (const candidate of candidatesToQueue) {
+      const normalized = normalizeAddress(candidate.address);
       
       // Calculate priority score: (1/etaSec) * (hfCurrent - hfProjected) * log(totalDebtUsd + 1)
       const hfCurrent = candidate.hfCurrent ?? 1.0;
@@ -4057,20 +4154,32 @@ export class RealTimeHFService extends EventEmitter {
       const priority = hfDelta * etaFactor * debtFactor;
       
       // Add to pre-sim queue with predictive_scenario reason
-      const normalized = normalizeAddress(candidate.address);
-      
       this.preSimQueue.set(normalized, {
         user: normalized,
         projectedHf: candidate.hfProjected,
         debtUsd: candidate.totalDebtUsd,
-        timestamp: Date.now()
+        timestamp: now
       });
+      
+      // Update tracking maps
+      this.userLastQueuedTimestamp.set(normalized, now);
+      if (candidate.hfCurrent !== undefined) {
+        this.userLastHfSnapshot.set(normalized, candidate.hfCurrent);
+      }
+      
+      // Update metrics
+      predictiveQueueSizeGauge.set(this.preSimQueue.size);
+      const isNearBand = candidate.hfProjected >= config.hfPredCritical && 
+                        candidate.hfProjected <= (config.hfPredCritical + config.predictiveHfBufferBps / 10000);
+      if (isNearBand) {
+        predictiveQueueNearBandGauge.inc();
+      }
       
       // Log ingested candidate
       console.log(
-        `[predictive-ingest] queued user=${normalized.slice(0, 10)}... ` +
+        `[predictive-queue] added user=${normalized.slice(0, 10)}... ` +
         `scenario=${candidate.scenario} priority=${priority.toFixed(4)} etaSec=${candidate.etaSec} ` +
-        `hfProj=${candidate.hfProjected.toFixed(4)}`
+        `hfProj=${candidate.hfProjected.toFixed(4)} queueSize=${this.preSimQueue.size}`
       );
       
       // Notify liquidation audit service of predictive candidate (for race classification)
@@ -4126,7 +4235,7 @@ export class RealTimeHFService extends EventEmitter {
             `[predictive-prestage] skipped: user=${normalized.slice(0, 10)}... ` +
             `scenario=${candidate.scenario} reason=already_prestaged_this_cycle`
           );
-          return;
+          continue;
         }
         
         // Mark as prestaged in cache
