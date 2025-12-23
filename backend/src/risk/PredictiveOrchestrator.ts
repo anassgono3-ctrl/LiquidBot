@@ -33,7 +33,8 @@ import {
   predictiveCandidatesFilteredTotal,
   predictiveEtaDistributionSec,
   predictiveEvaluationDurationMs,
-  predictiveEnqueuesSkippedByBand
+  predictiveEnqueuesSkippedByBand,
+  predictiveQueueDroppedEtaGateTotal
 } from '../metrics/index.js';
 
 export interface PredictiveOrchestratorConfig {
@@ -450,11 +451,31 @@ export class PredictiveOrchestrator {
       this.config.microVerifyEnabled && 
       candidate.hfProjected < thresholdHf;
     
+    // Prestage gating: Only prestage if:
+    // 1. Queue is enabled
+    // 2. hfProjected < prestageThreshold
+    // 3. debt >= minDebtUsd
+    // 4. STRICT: In near-liquidation band (already checked above, but double-check for safety)
+    // 5. ETA gate: If FASTPATH_PREDICTIVE_ETA_CAP_SEC is set, only queue if ETA <= cap
     const prestageThreshold = config.prestageHfBps / 10000;
+    const etaGatePassed = this.config.fastpathEtaCapSec > 0 
+      ? candidate.etaSec <= this.config.fastpathEtaCapSec 
+      : true; // If not set, allow all ETAs
+    
+    // Check ETA gate and log if failed
+    if (!etaGatePassed) {
+      predictiveQueueDroppedEtaGateTotal.inc({ scenario: candidate.scenario });
+      console.log(
+        `[predictive-skip] user=${candidate.address.slice(0, 10)}... scenario=${candidate.scenario} ` +
+        `etaSec=${candidate.etaSec} cap=${this.config.fastpathEtaCapSec} reason=eta_gate_failed`
+      );
+    }
+    
     const shouldPrestage = 
       this.config.queueEnabled && 
       candidate.hfProjected < prestageThreshold &&
-      candidate.totalDebtUsd >= config.minDebtUsd;
+      candidate.totalDebtUsd >= config.minDebtUsd &&
+      etaGatePassed; // Add ETA gate enforcement
     
     const shouldFlagFastpath = 
       this.config.fastpathEnabled && 

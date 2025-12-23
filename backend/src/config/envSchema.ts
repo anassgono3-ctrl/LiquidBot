@@ -466,6 +466,10 @@ export const rawEnvSchema = z.object({
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE: z.string().optional(),
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE: z.string().optional(),
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME: z.string().optional(),
+  // Predictive queue management
+  PREDICTIVE_QUEUE_SAFETY_MAX: z.string().optional(),
+  USER_COOLDOWN_SEC: z.string().optional(),
+  PER_USER_BLOCK_DEBOUNCE: z.string().optional(),
   
   // ==== MICRO-VERIFICATION FAST PATH ====
   // Enable micro-verification for immediate single-user HF checks
@@ -1072,6 +1076,9 @@ export const env = (() => {
     predictivePriorityScenarioWeightBaseline: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE || 1.0),
     predictivePriorityScenarioWeightAdverse: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE || 1.15),
     predictivePriorityScenarioWeightExtreme: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME || 1.3),
+    predictiveQueueSafetyMax: Number(parsed.PREDICTIVE_QUEUE_SAFETY_MAX || 120),
+    userCooldownSec: Number(parsed.USER_COOLDOWN_SEC || 60),
+    perUserBlockDebounce: Number(parsed.PER_USER_BLOCK_DEBOUNCE || 5),
     
     // ==== MICRO-VERIFICATION FAST PATH ====
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',

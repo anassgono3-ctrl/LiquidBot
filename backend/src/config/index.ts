@@ -468,6 +468,9 @@ export const config = {
   get predictivePriorityScenarioWeightBaseline() { return env.predictivePriorityScenarioWeightBaseline; },
   get predictivePriorityScenarioWeightAdverse() { return env.predictivePriorityScenarioWeightAdverse; },
   get predictivePriorityScenarioWeightExtreme() { return env.predictivePriorityScenarioWeightExtreme; },
+  get predictiveQueueSafetyMax() { return env.predictiveQueueSafetyMax; },
+  get userCooldownSec() { return env.userCooldownSec; },
+  get perUserBlockDebounce() { return env.perUserBlockDebounce; },
   
   // Micro-Verification Fast Path
   get microVerifyEnabled() { return env.microVerifyEnabled; },
