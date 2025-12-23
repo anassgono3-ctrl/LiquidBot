@@ -183,11 +183,16 @@ export class PredictiveMicroVerify {
       return [];
     }
 
-    // For demo purposes, we'll simulate HF reads
-    // In production, this would construct Aave Pool getUserAccountData calls
-    // and batch them via Multicall3.aggregate3
-    
-    // TODO: Implement actual Aave Pool calls
+    // ⚠️ IMPLEMENTATION STUB - Foundation only
+    // This is a placeholder that simulates verification using current HF values.
+    // Full implementation requires Aave Pool contract integration.
+    // 
+    // Production implementation should:
+    // 1. Encode getUserAccountData calls for each candidate
+    // 2. Batch calls via Multicall3.aggregate3
+    // 3. Decode results and extract health factors
+    // 4. Handle failures gracefully (allowFailure: true)
+    //
     // Example structure:
     // const poolAbi = ['function getUserAccountData(address user) view returns (...)'];
     // const calls = candidates.map(c => ({

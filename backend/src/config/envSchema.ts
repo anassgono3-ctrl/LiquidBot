@@ -1088,7 +1088,7 @@ export const env = (() => {
     // Predictive signal gating
     predictiveSignalMode: parsed.PREDICTIVE_SIGNAL_MODE || 'pyth_twap_or_chainlink',
     predictiveMinDebtUsd: Number(parsed.PREDICTIVE_MIN_DEBT_USD || parsed.MIN_DEBT_USD || 1),
-    pythDeltaPct: Number(parsed.PYTH_DELTA_PCT || 0.5), // 0.5% Pyth delta threshold
+    pythDeltaPct: Number(parsed.PYTH_DELTA_PCT || 0.5), // 0.5 percentage points (0.5%)
     // Predictive queue budgets and safety limits
     predictiveQueueBudgetCallsPerBlock: Number(parsed.PREDICTIVE_QUEUE_BUDGET_CALLS_PER_BLOCK || 200),
     predictiveQueueMaxCandidatesPerBlock: Number(parsed.PREDICTIVE_QUEUE_MAX_CANDIDATES_PER_BLOCK || 60),

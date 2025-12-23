@@ -205,7 +205,7 @@ export class PredictiveQueueManager {
     const keysToRemove: string[] = [];
     
     for (const key of this.queue.keys()) {
-      if (key.startsWith(normalizedUser + ':')) {
+      if (key.startsWith(normalizedUser + '|')) {
         keysToRemove.push(key);
       }
     }
@@ -276,9 +276,10 @@ export class PredictiveQueueManager {
 
   /**
    * Make a queue key from user and scenario
+   * Uses pipe separator to avoid collision with colon in scenario names
    */
   private makeKey(user: string, scenario: string): string {
-    return `${user.toLowerCase()}:${scenario}`;
+    return `${user.toLowerCase()}|${scenario}`;
   }
 
   /**
