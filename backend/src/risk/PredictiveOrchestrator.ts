@@ -21,6 +21,8 @@ import { HFCalculator, type UserSnapshot } from './HFCalculator.js';
 import type { PredictiveCandidate } from './models/PredictiveCandidate.js';
 import { FallbackOrchestrator } from '../predictive/FallbackOrchestrator.js';
 import { NearBandFilter } from '../predictive/NearBandFilter.js';
+import { PredictiveSignalGate } from '../services/predictive/PredictiveSignalGate.js';
+import { PredictiveQueueManager } from '../services/predictive/PredictiveQueueManager.js';
 import {
   predictiveIngestedTotal,
   predictiveQueueEntriesTotal,
@@ -95,6 +97,8 @@ export class PredictiveOrchestrator {
   private readonly priceWindows: Map<string, PriceWindow> = new Map();
   private readonly fallbackOrchestrator: FallbackOrchestrator;
   private readonly nearBandFilter: NearBandFilter;
+  private readonly signalGate: PredictiveSignalGate;
+  private readonly queueManager: PredictiveQueueManager;
   
   // Periodic fallback evaluation state
   private lastEvaluationBlock = 0;
@@ -125,8 +129,14 @@ export class PredictiveOrchestrator {
     };
 
     this.engine = new PredictiveEngine();
-    this.nearBandFilter = new NearBandFilter();
+    // Use NEAR_THRESHOLD_BAND_BPS for consistent band threshold across micro-verify and predictive
+    this.nearBandFilter = new NearBandFilter({ nearBandBps: config.nearThresholdBandBps });
     this.fallbackOrchestrator = new FallbackOrchestrator(undefined, this.nearBandFilter);
+    this.signalGate = new PredictiveSignalGate({
+      nearBandBps: config.nearThresholdBandBps, // Use NEAR_THRESHOLD_BAND_BPS, not PREDICTIVE_NEAR_BAND_BPS
+      etaCapSec: this.config.fastpathEtaCapSec
+    });
+    this.queueManager = new PredictiveQueueManager();
 
     if (this.config.enabled) {
       console.log(
@@ -136,7 +146,8 @@ export class PredictiveOrchestrator {
         `fastpath=${this.config.fastpathEnabled}, ` +
         `dynamicBuffer=${this.config.dynamicBufferEnabled}, ` +
         `fallbackBlocks=${this.config.fallbackIntervalBlocks}, ` +
-        `fallbackMs=${this.config.fallbackIntervalMs}`
+        `fallbackMs=${this.config.fallbackIntervalMs}, ` +
+        `nearThresholdBandBps=${config.nearThresholdBandBps}`
       );
     }
   }
@@ -269,6 +280,9 @@ export class PredictiveOrchestrator {
       return;
     }
 
+    // Advance queue manager to new block (resets per-block counters)
+    this.queueManager.advanceBlock(blockNumber);
+
     // Check if we need to trigger fallback based on blocks
     const blocksSinceLastEval = blockNumber - this.lastEvaluationBlock;
     if (blocksSinceLastEval >= this.config.fallbackIntervalBlocks && this.userProvider) {
@@ -322,6 +336,52 @@ export class PredictiveOrchestrator {
     this.fallbackOrchestrator.recordPriceShock({
       asset,
       dropBps,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Record a Chainlink NewTransmission signal for predictive gating
+   */
+  public recordChainlinkSignal(asset: string, deltaBps: number, txHash?: string): void {
+    if (!this.config.enabled) {
+      return;
+    }
+
+    this.signalGate.recordChainlinkSignal({
+      asset,
+      deltaBps,
+      timestamp: Date.now(),
+      txHash
+    });
+  }
+
+  /**
+   * Record a Pyth price signal for predictive gating
+   */
+  public recordPythSignal(asset: string, deltaPct: number): void {
+    if (!this.config.enabled) {
+      return;
+    }
+
+    this.signalGate.recordPythSignal({
+      asset,
+      deltaPct,
+      timestamp: Date.now()
+    });
+  }
+
+  /**
+   * Record a TWAP signal for predictive gating
+   */
+  public recordTwapSignal(asset: string, deltaPct: number): void {
+    if (!this.config.enabled) {
+      return;
+    }
+
+    this.signalGate.recordTwapSignal({
+      asset,
+      deltaPct,
       timestamp: Date.now()
     });
   }
@@ -407,17 +467,49 @@ export class PredictiveOrchestrator {
     effectiveBufferBps: number,
     currentBlock: number
   ): Promise<void> {
-    // PREDICTIVE NEAR-BAND ONLY: Filter candidates to only process near-band users
-    // This reduces RPC load by skipping clearly safe users (e.g., HF ~1.17)
+    // STEP 1: Signal gating - check if predictive should activate for this user
+    const signalGateResult = this.signalGate.shouldActivatePredictive({
+      address: candidate.address,
+      hfCurrent: candidate.hfCurrent ?? 1.0,
+      hfProjected: candidate.hfProjected,
+      etaSec: candidate.etaSec,
+      debtUsd: candidate.totalDebtUsd
+    });
+
+    if (!signalGateResult.shouldActivate) {
+      predictiveCandidatesFilteredTotal.inc({ filter: 'no_signal' });
+      console.log(
+        `[predictive-skip] user=${candidate.address.slice(0, 10)}... scenario=${candidate.scenario} ` +
+        `reason=${signalGateResult.reason}`
+      );
+      return;
+    }
+
+    // STEP 2: Queue management - check dedupe and budget enforcement
+    const queueCheck = this.queueManager.shouldEvaluate(
+      candidate.address,
+      candidate.scenario,
+      currentBlock
+    );
+
+    if (!queueCheck.shouldEvaluate) {
+      predictiveCandidatesFilteredTotal.inc({ filter: 'dedupe_or_budget' });
+      console.log(
+        `[predictive-skip] user=${candidate.address.slice(0, 10)}... scenario=${candidate.scenario} ` +
+        `reason=${queueCheck.reason}`
+      );
+      return;
+    }
+
+    // STEP 3: PREDICTIVE NEAR-BAND ONLY: Filter candidates using NEAR_THRESHOLD_BAND_BPS
+    // This reduces RPC load by skipping clearly safe users
     // Only enforce if PREDICTIVE_NEAR_ONLY is enabled (default: true)
     if (config.predictiveNearOnly && !this.isInNearLiquidationBand(candidate)) {
-      // Track filtered candidates with both metrics
       predictiveCandidatesFilteredTotal.inc({ 
         filter: 'not_near_band'
       });
       predictiveEnqueuesSkippedByBand.inc({ scenario: candidate.scenario });
       
-      // Log skip reason concisely
       console.log(
         `[predictive-skip] user=${candidate.address.slice(0, 10)}... scenario=${candidate.scenario} ` +
         `hfCurrent=${candidate.hfCurrent?.toFixed(4) ?? 'N/A'} hfProjected=${candidate.hfProjected.toFixed(4)} ` +
@@ -425,6 +517,17 @@ export class PredictiveOrchestrator {
       );
       return;
     }
+
+    // Mark as evaluated in queue
+    this.queueManager.markEvaluated({
+      user: candidate.address,
+      scenario: candidate.scenario,
+      lastEvaluatedBlock: currentBlock,
+      lastEvaluatedMs: Date.now(),
+      hf: candidate.hfProjected,
+      debtUsd: candidate.totalDebtUsd,
+      priority: 0 // Will be calculated below
+    });
 
     // Track ingestion metric
     predictiveIngestedTotal.inc({ scenario: candidate.scenario });
@@ -445,10 +548,11 @@ export class PredictiveOrchestrator {
     const priority = this.calculatePriority(candidate, scenarioWeight);
 
     // Determine actions based on configuration and thresholds
-    const thresholdHf = 1.0 + effectiveBufferBps / 10000;
+    // Use NEAR_THRESHOLD_BAND_BPS for micro-verify threshold (not effectiveBufferBps)
+    const microVerifyThreshold = 1.0 + config.nearThresholdBandBps / 10000;
     const shouldMicroVerify = 
       this.config.microVerifyEnabled && 
-      candidate.hfProjected < thresholdHf;
+      candidate.hfProjected < microVerifyThreshold;
     
     const prestageThreshold = config.prestageHfBps / 10000;
     const shouldPrestage = 
@@ -471,10 +575,8 @@ export class PredictiveOrchestrator {
       shouldFlagFastpath
     };
 
-    // Update metrics
-    if (shouldMicroVerify) {
-      predictiveMicroVerifyScheduledTotal.inc({ scenario: candidate.scenario });
-    }
+    // Update metrics (note: actual micro-verify scheduling happens in listener)
+    // Don't increment predictiveMicroVerifyScheduledTotal here - let listener do it
     if (shouldPrestage) {
       predictivePrestagedTotal.inc({ scenario: candidate.scenario });
     }
@@ -536,31 +638,32 @@ export class PredictiveOrchestrator {
   /**
    * Check if a candidate is in the near liquidation band
    * 
-   * Near-band definition:
+   * Near-band definition using NEAR_THRESHOLD_BAND_BPS (single source of truth):
    * - Lower bound: HF_PRED_CRITICAL (1.0008 default) OR EXECUTION_HF_THRESHOLD_BPS - 2%
-   * - Upper bound: 1.0 + PREDICTIVE_NEAR_BAND_BPS (default 30 bps = 1.003)
+   * - Upper bound: 1.0 + NEAR_THRESHOLD_BAND_BPS (default 30 bps = 1.003)
    * 
    * This ensures predictive only processes users close to liquidation threshold,
    * filtering out clearly safe users (e.g., HF ~1.17) to reduce RPC load.
    * 
    * Users are included if:
-   * - hfCurrent <= 1.0 + PREDICTIVE_NEAR_BAND_BPS, OR
+   * - hfCurrent <= 1.0 + NEAR_THRESHOLD_BAND_BPS, OR
    * - hfProjected <= HF_PRED_CRITICAL
    */
   private isInNearLiquidationBand(candidate: PredictiveCandidate): boolean {
     const executionThreshold = config.executionHfThresholdBps / 10000; // 0.98 default
-    const nearBandBps = config.predictiveNearBandBps; // 30 bps default (0.30%)
+    const nearBandBps = config.nearThresholdBandBps; // Use NEAR_THRESHOLD_BAND_BPS, not PREDICTIVE_NEAR_BAND_BPS
     const hfPredCritical = config.hfPredCritical; // 1.0008 default
     
-    // Upper bound for current HF: 1.0 + PREDICTIVE_NEAR_BAND_BPS
+    // Upper bound for current HF: 1.0 + NEAR_THRESHOLD_BAND_BPS
     const nearBandUpperBound = 1.0 + nearBandBps / 10000;
     
     // Lower bound: HF_PRED_CRITICAL or execution threshold minus buffer
     const nearBandLowerBound = hfPredCritical ?? (executionThreshold - 0.02);
     const effectiveHfPredCritical = hfPredCritical ?? 1.0008;
     
-    // Check if current HF is in near band
-    if (candidate.hfCurrent !== undefined && candidate.hfCurrent <= nearBandUpperBound) {
+    // Check if current HF is in near band [1.0, nearBandUpperBound]
+    // NOTE: Only include users >= 1.0 in current HF check to avoid far-below-1.0 users
+    if (candidate.hfCurrent !== undefined && candidate.hfCurrent >= 1.0 && candidate.hfCurrent <= nearBandUpperBound) {
       return true;
     }
     

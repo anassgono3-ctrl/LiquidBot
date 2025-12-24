@@ -1199,7 +1199,7 @@ export const predictiveQueueEntriesTotal = new Counter({
 export const predictiveMicroVerifyScheduledTotal = new Counter({
   name: 'liquidbot_predictive_micro_verify_scheduled_total',
   help: 'Total micro-verifications scheduled from predictive scenarios',
-  labelNames: ['scenario'],
+  labelNames: ['scenario', 'trigger'], // Add trigger label for source tracking (orchestrator vs ingest)
   registers: [metricsRegistry]
 });
 
