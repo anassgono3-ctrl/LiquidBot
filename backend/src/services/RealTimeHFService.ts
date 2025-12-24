@@ -698,12 +698,15 @@ export class RealTimeHFService extends EventEmitter {
     this.aavePool = new Contract(config.aavePool, AAVE_POOL_ABI, this.provider);
     
     // Initialize MicroVerifier for fast-path verification
-    if (config.microVerifyEnabled) {
+    // Enable if MICRO_VERIFY_ENABLED=true OR PREDICTIVE_MICRO_VERIFY_ENABLED=true (predictive-only mode)
+    if (config.microVerifyEnabled || config.predictiveMicroVerifyEnabled) {
       const { MicroVerifier } = await import('./MicroVerifier.js');
       this.microVerifier = new MicroVerifier(this.aavePool, this.microVerifyCache);
       // eslint-disable-next-line no-console
       console.log(
-        `[realtime-hf] MicroVerifier enabled: maxPerBlock=${config.microVerifyMaxPerBlock} ` +
+        `[realtime-hf] MicroVerifier enabled: ` +
+        `microVerify=${config.microVerifyEnabled} predictiveMicroVerify=${config.predictiveMicroVerifyEnabled} ` +
+        `maxPerBlock=${config.microVerifyMaxPerBlock} ` +
         `intervalMs=${config.microVerifyIntervalMs} nearThresholdBandBps=${config.nearThresholdBandBps} ` +
         `cacheTtlMs=${config.microVerifyCacheTtlMs}`
       );
@@ -4076,14 +4079,14 @@ export class RealTimeHFService extends EventEmitter {
 
       // Schedule micro-verify if PREDICTIVE_MICRO_VERIFY_ENABLED and hfProjected < 1.0 + buffer
       if (config.predictiveMicroVerifyEnabled && this.microVerifier) {
-        const microVerifyBuffer = config.nearThresholdBandBps / 10000; // Use near-threshold band as buffer
+        const microVerifyBuffer = config.nearThresholdBandBps / 10000; // Use NEAR_THRESHOLD_BAND_BPS as buffer
         const microVerifyThreshold = 1.0 + microVerifyBuffer;
         
         if (candidate.hfProjected < microVerifyThreshold) {
           // Respect per-block caps via canVerify
           if (this.microVerifier.canVerify(normalized)) {
-            // Increment metric before scheduling (not after success)
-            predictiveMicroVerifyScheduledTotal.inc({ scenario: candidate.scenario });
+            // Increment metric with trigger="predictive" before scheduling
+            predictiveMicroVerifyScheduledTotal.inc({ trigger: 'predictive', scenario: candidate.scenario });
             
             // Fire-and-forget to avoid blocking ingestion
             this.microVerifier.verify({
@@ -4102,6 +4105,12 @@ export class RealTimeHFService extends EventEmitter {
               console.error(`[predictive-micro-verify] Error:`, err);
               pendingVerifyErrorsTotal.inc();
             });
+          } else {
+            // Log skip reason (cap reached, interval, or dedupe)
+            console.log(
+              `[predictive-micro-verify] skipped: user=${normalized.slice(0, 10)}... ` +
+              `scenario=${candidate.scenario} reason=cap_or_cooldown`
+            );
           }
         }
       }
@@ -4118,7 +4127,7 @@ export class RealTimeHFService extends EventEmitter {
             `[predictive-prestage] skipped: user=${normalized.slice(0, 10)}... ` +
             `scenario=${candidate.scenario} reason=already_prestaged_this_cycle`
           );
-          return;
+          continue; // Use continue instead of return to skip only this candidate
         }
         
         // Mark as prestaged in cache
@@ -4144,6 +4153,13 @@ export class RealTimeHFService extends EventEmitter {
         }).catch(err => {
           console.error(`[predictive-prestage] Error:`, err);
         });
+      } else if (config.sprinterEnabled) {
+        // Log why prestage was skipped
+        console.log(
+          `[predictive-prestage] skipped: user=${normalized.slice(0, 10)}... ` +
+          `scenario=${candidate.scenario} reason=hf_above_prestage_threshold ` +
+          `hfProj=${candidate.hfProjected.toFixed(4)} threshold=${(config.prestageHfBps / 10000).toFixed(4)}`
+        );
       }
     }
   }
