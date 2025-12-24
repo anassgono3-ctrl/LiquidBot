@@ -468,6 +468,17 @@ export const config = {
   get predictivePriorityScenarioWeightBaseline() { return env.predictivePriorityScenarioWeightBaseline; },
   get predictivePriorityScenarioWeightAdverse() { return env.predictivePriorityScenarioWeightAdverse; },
   get predictivePriorityScenarioWeightExtreme() { return env.predictivePriorityScenarioWeightExtreme; },
+  // Predictive RPC Optimization
+  get predictiveSignalGateEnabled() { return env.predictiveSignalGateEnabled; },
+  get predictivePythDeltaPct() { return env.predictivePythDeltaPct; },
+  get predictiveMaxTicksPerMin() { return env.predictiveMaxTicksPerMin; },
+  get predictiveRpcBudgetUsdPerHour() { return env.predictiveRpcBudgetUsdPerHour; },
+  get predictiveMaxUsersPerSignalPerAsset() { return env.predictiveMaxUsersPerSignalPerAsset; },
+  get predictiveDedupCacheTtlSec() { return env.predictiveDedupCacheTtlSec; },
+  get predictiveDedupCacheMaxSize() { return env.predictiveDedupCacheMaxSize; },
+  get perUserBlockDebounce() { return env.perUserBlockDebounce; },
+  get indexJumpPredictionEnabled() { return env.indexJumpPredictionEnabled; },
+  get indexJumpMinBps() { return env.indexJumpMinBps; },
   
   // Micro-Verification Fast Path
   get microVerifyEnabled() { return env.microVerifyEnabled; },
