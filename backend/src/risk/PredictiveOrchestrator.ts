@@ -21,6 +21,9 @@ import { HFCalculator, type UserSnapshot } from './HFCalculator.js';
 import type { PredictiveCandidate } from './models/PredictiveCandidate.js';
 import { FallbackOrchestrator } from '../predictive/FallbackOrchestrator.js';
 import { NearBandFilter } from '../predictive/NearBandFilter.js';
+import { PredictiveSignalGate, type PriceSignal } from '../predictive/PredictiveSignalGate.js';
+import { PredictiveBudgetTracker } from '../predictive/PredictiveBudgetTracker.js';
+import { PredictiveDedupCache } from '../predictive/PredictiveDedupCache.js';
 import {
   predictiveIngestedTotal,
   predictiveQueueEntriesTotal,
@@ -33,7 +36,9 @@ import {
   predictiveCandidatesFilteredTotal,
   predictiveEtaDistributionSec,
   predictiveEvaluationDurationMs,
-  predictiveEnqueuesSkippedByBand
+  predictiveEnqueuesSkippedByBand,
+  predictiveEnqueuedTotal,
+  predictiveDroppedBudgetTotal
 } from '../metrics/index.js';
 
 export interface PredictiveOrchestratorConfig {
@@ -53,6 +58,7 @@ export interface PredictiveOrchestratorConfig {
   priorityScenarioWeightBaseline: number;
   priorityScenarioWeightAdverse: number;
   priorityScenarioWeightExtreme: number;
+  signalGateEnabled: boolean; // NEW: gate predictive behind signals
 }
 
 export interface PredictiveScenarioEvent {
@@ -95,6 +101,9 @@ export class PredictiveOrchestrator {
   private readonly priceWindows: Map<string, PriceWindow> = new Map();
   private readonly fallbackOrchestrator: FallbackOrchestrator;
   private readonly nearBandFilter: NearBandFilter;
+  private readonly signalGate: PredictiveSignalGate;
+  private readonly budgetTracker: PredictiveBudgetTracker;
+  private readonly dedupCache: PredictiveDedupCache;
   
   // Periodic fallback evaluation state
   private lastEvaluationBlock = 0;
@@ -121,12 +130,16 @@ export class PredictiveOrchestrator {
       priorityDebtWeight: configOverride?.priorityDebtWeight ?? config.predictivePriorityDebtWeight,
       priorityScenarioWeightBaseline: configOverride?.priorityScenarioWeightBaseline ?? config.predictivePriorityScenarioWeightBaseline,
       priorityScenarioWeightAdverse: configOverride?.priorityScenarioWeightAdverse ?? config.predictivePriorityScenarioWeightAdverse,
-      priorityScenarioWeightExtreme: configOverride?.priorityScenarioWeightExtreme ?? config.predictivePriorityScenarioWeightExtreme
+      priorityScenarioWeightExtreme: configOverride?.priorityScenarioWeightExtreme ?? config.predictivePriorityScenarioWeightExtreme,
+      signalGateEnabled: configOverride?.signalGateEnabled ?? config.predictiveSignalGateEnabled
     };
 
     this.engine = new PredictiveEngine();
     this.nearBandFilter = new NearBandFilter();
     this.fallbackOrchestrator = new FallbackOrchestrator(undefined, this.nearBandFilter);
+    this.signalGate = new PredictiveSignalGate();
+    this.budgetTracker = new PredictiveBudgetTracker();
+    this.dedupCache = new PredictiveDedupCache();
 
     if (this.config.enabled) {
       console.log(
@@ -135,6 +148,7 @@ export class PredictiveOrchestrator {
         `microVerify=${this.config.microVerifyEnabled}, ` +
         `fastpath=${this.config.fastpathEnabled}, ` +
         `dynamicBuffer=${this.config.dynamicBufferEnabled}, ` +
+        `signalGate=${this.config.signalGateEnabled}, ` +
         `fallbackBlocks=${this.config.fallbackIntervalBlocks}, ` +
         `fallbackMs=${this.config.fallbackIntervalMs}`
       );
@@ -171,8 +185,25 @@ export class PredictiveOrchestrator {
 
   /**
    * Start periodic fallback evaluation timer
+   * Only starts if fallback is enabled AND signal gate is disabled OR no signal sources active
    */
   public startFallbackTimer(): void {
+    // Don't start fallback timer if signal gating is enabled and has active sources
+    if (this.config.signalGateEnabled && this.signalGate.isAnySourceEnabled()) {
+      console.log(
+        '[predictive-orchestrator] Fallback timer NOT started: signal gating enabled with active sources'
+      );
+      return;
+    }
+
+    // Only start if fallback explicitly enabled
+    if (!config.predictiveFallbackEnabled) {
+      console.log(
+        '[predictive-orchestrator] Fallback timer NOT started: PREDICTIVE_FALLBACK_ENABLED=false'
+      );
+      return;
+    }
+
     if (!this.config.enabled || this.fallbackTimer) {
       return;
     }
@@ -331,6 +362,98 @@ export class PredictiveOrchestrator {
    */
   public async evaluate(users: UserSnapshot[], currentBlock: number): Promise<void> {
     return this.evaluateWithReason(users, currentBlock, 'event');
+  }
+
+  /**
+   * Evaluate users triggered by a price signal (NEW)
+   * Applies signal gating, budget enforcement, and deduplication
+   */
+  public async evaluateOnSignal(
+    signal: PriceSignal,
+    users: UserSnapshot[],
+    currentBlock: number
+  ): Promise<void> {
+    if (!this.config.enabled) {
+      return;
+    }
+
+    // Check if signal should trigger evaluation
+    if (this.config.signalGateEnabled && !this.signalGate.shouldTrigger(signal)) {
+      console.log(
+        `[predictive-orchestrator] Signal rejected: ` +
+        `source=${signal.source}, asset=${signal.symbol}, ` +
+        `reason=debounce_or_disabled`
+      );
+      return;
+    }
+
+    // Start budget tracking for this tick
+    this.budgetTracker.startTick(signal.symbol);
+
+    // Filter users by deduplication cache
+    const signalStrength = signal.delta ?? 0;
+    const filteredUsers = users.filter(u => {
+      // Extract asset from user's reserves (use primary collateral/debt asset)
+      // For simplicity, we'll use the signal asset directly
+      return this.dedupCache.shouldEvaluate(u.address, signal.symbol, signalStrength, currentBlock);
+    });
+
+    if (filteredUsers.length < users.length) {
+      console.log(
+        `[predictive-orchestrator] Deduplication filtered ${users.length - filteredUsers.length} users ` +
+        `(signal=${signal.symbol}, remaining=${filteredUsers.length})`
+      );
+    }
+
+    // Apply budget constraints (downsample if necessary)
+    const budgetedUsers = this.budgetTracker.downsampleToFit(filteredUsers, signal.symbol);
+
+    if (budgetedUsers.length < filteredUsers.length) {
+      predictiveDroppedBudgetTotal.inc({ reason: 'budget_cap' }, filteredUsers.length - budgetedUsers.length);
+      console.log(
+        `[predictive-orchestrator] Budget downsampling: ${filteredUsers.length} → ${budgetedUsers.length} users ` +
+        `(signal=${signal.symbol})`
+      );
+    }
+
+    if (budgetedUsers.length === 0) {
+      console.log(
+        `[predictive-orchestrator] No users to evaluate after filters ` +
+        `(signal=${signal.symbol})`
+      );
+      return;
+    }
+
+    // Track enqueued users
+    predictiveEnqueuedTotal.inc({ asset: signal.symbol }, budgetedUsers.length);
+
+    // Log signal-triggered evaluation
+    console.log(
+      `[predictive-orchestrator] Signal-triggered evaluation: ` +
+      `source=${signal.source}, asset=${signal.symbol}, ` +
+      `price=${signal.price}, delta=${(signalStrength * 100).toFixed(2)}%, ` +
+      `users=${budgetedUsers.length}/${users.length}`
+    );
+
+    // Run evaluation
+    await this.evaluateWithReason(budgetedUsers, currentBlock, 'event');
+
+    // Record evaluated users in dedup cache
+    for (const user of budgetedUsers) {
+      this.dedupCache.recordEvaluation(
+        user.address,
+        signal.symbol,
+        signalStrength,
+        currentBlock
+      );
+    }
+
+    // Record budget usage
+    this.budgetTracker.recordUsersEvaluated(
+      budgetedUsers.length,
+      'bulk_scan',
+      signal.symbol
+    );
   }
 
   /**
