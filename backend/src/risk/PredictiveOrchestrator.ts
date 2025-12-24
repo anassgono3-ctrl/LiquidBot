@@ -405,18 +405,25 @@ export class PredictiveOrchestrator {
       );
     }
 
-    // Apply budget constraints (downsample if necessary)
-    const budgetedUsers = this.budgetTracker.downsampleToFit(filteredUsers, signal.symbol);
+    // Calculate HF for budget downsampling (needed for risk scoring)
+    const usersWithHf = filteredUsers.map(u => ({
+      ...u,
+      hf: HFCalculator.calculateHF(u),
+      debtUsd: u.reserves.reduce((sum, r) => sum + r.debtUsd, 0)
+    }));
 
-    if (budgetedUsers.length < filteredUsers.length) {
-      predictiveDroppedBudgetTotal.inc({ reason: 'budget_cap' }, filteredUsers.length - budgetedUsers.length);
+    // Apply budget constraints (downsample if necessary)
+    const budgetedUsersWithHf = this.budgetTracker.downsampleToFit(usersWithHf, signal.symbol);
+
+    if (budgetedUsersWithHf.length < usersWithHf.length) {
+      predictiveDroppedBudgetTotal.inc({ reason: 'budget_cap' }, usersWithHf.length - budgetedUsersWithHf.length);
       console.log(
-        `[predictive-orchestrator] Budget downsampling: ${filteredUsers.length} → ${budgetedUsers.length} users ` +
+        `[predictive-orchestrator] Budget downsampling: ${usersWithHf.length} → ${budgetedUsersWithHf.length} users ` +
         `(signal=${signal.symbol})`
       );
     }
 
-    if (budgetedUsers.length === 0) {
+    if (budgetedUsersWithHf.length === 0) {
       console.log(
         `[predictive-orchestrator] No users to evaluate after filters ` +
         `(signal=${signal.symbol})`
@@ -425,17 +432,18 @@ export class PredictiveOrchestrator {
     }
 
     // Track enqueued users
-    predictiveEnqueuedTotal.inc({ asset: signal.symbol }, budgetedUsers.length);
+    predictiveEnqueuedTotal.inc({ asset: signal.symbol }, budgetedUsersWithHf.length);
 
     // Log signal-triggered evaluation
     console.log(
       `[predictive-orchestrator] Signal-triggered evaluation: ` +
       `source=${signal.source}, asset=${signal.symbol}, ` +
       `price=${signal.price}, delta=${(signalStrength * 100).toFixed(2)}%, ` +
-      `users=${budgetedUsers.length}/${users.length}`
+      `users=${budgetedUsersWithHf.length}/${users.length}`
     );
 
-    // Run evaluation
+    // Run evaluation (convert back to UserSnapshot format without hf/debtUsd properties)
+    const budgetedUsers: UserSnapshot[] = budgetedUsersWithHf.map(({ hf, debtUsd, ...user }) => user as UserSnapshot);
     await this.evaluateWithReason(budgetedUsers, currentBlock, 'event');
 
     // Record evaluated users in dedup cache
