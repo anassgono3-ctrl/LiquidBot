@@ -1325,3 +1325,72 @@ export const predictiveEvaluationDurationMs = new Histogram({
   buckets: [10, 25, 50, 100, 250, 500, 1000, 2000],
   registers: [metricsRegistry]
 });
+
+// ==== PREDICTIVE RPC OPTIMIZATION METRICS ====
+
+// Signal-based triggering metrics
+export const predictiveSignalsTotal = new Counter({
+  name: 'liquidbot_predictive_signals_total',
+  help: 'Total predictive signals received by source',
+  labelNames: ['source', 'symbol'],
+  registers: [metricsRegistry]
+});
+
+export const predictiveSignalsDebounced = new Counter({
+  name: 'liquidbot_predictive_signals_debounced_total',
+  help: 'Predictive signals dropped due to debounce window',
+  labelNames: ['source', 'symbol'],
+  registers: [metricsRegistry]
+});
+
+// Enqueue and budget metrics
+export const predictiveEnqueuedTotal = new Counter({
+  name: 'liquidbot_predictive_enqueued_total',
+  help: 'Total predictive candidates enqueued for evaluation',
+  labelNames: ['asset'],
+  registers: [metricsRegistry]
+});
+
+export const predictiveDroppedBudgetTotal = new Counter({
+  name: 'liquidbot_predictive_dropped_budget_total',
+  help: 'Predictive candidates dropped due to budget limits',
+  labelNames: ['reason'],
+  registers: [metricsRegistry]
+});
+
+// Deduplication metrics
+export const predictiveDedupHitsTotal = new Counter({
+  name: 'liquidbot_predictive_dedup_hits_total',
+  help: 'Cache hits for predictive deduplication',
+  labelNames: ['asset'],
+  registers: [metricsRegistry]
+});
+
+// RPC spend tracking
+export const predictiveHfReadsTotal = new Counter({
+  name: 'liquidbot_predictive_hf_reads_total',
+  help: 'Total HF reads performed by predictive pipeline',
+  labelNames: ['type'],
+  registers: [metricsRegistry]
+});
+
+export const predictiveRpcUsdSpendEstimate = new Gauge({
+  name: 'liquidbot_predictive_rpc_usd_spend_estimate',
+  help: 'Estimated RPC spend in USD for predictive operations',
+  labelNames: ['window'],
+  registers: [metricsRegistry]
+});
+
+// Rate limiting metrics
+export const predictiveTicksExecuted = new Counter({
+  name: 'liquidbot_predictive_ticks_executed_total',
+  help: 'Total predictive evaluation ticks executed',
+  registers: [metricsRegistry]
+});
+
+export const predictiveTicksRateLimited = new Counter({
+  name: 'liquidbot_predictive_ticks_rate_limited_total',
+  help: 'Predictive ticks skipped due to rate limiting',
+  labelNames: ['reason'],
+  registers: [metricsRegistry]
+});

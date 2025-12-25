@@ -466,6 +466,23 @@ export const rawEnvSchema = z.object({
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE: z.string().optional(),
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE: z.string().optional(),
   PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME: z.string().optional(),
+  // ==== PREDICTIVE RPC OPTIMIZATION (PR #181) ====
+  // Signal-based gating (default: disabled to prevent unsignaled runs)
+  PREDICTIVE_SIGNAL_GATE_ENABLED: z.string().optional(),
+  // Pyth delta threshold for triggering predictive (default: 0.01 = 1%)
+  PREDICTIVE_PYTH_DELTA_PCT: z.string().optional(),
+  // Budget enforcement
+  PREDICTIVE_MAX_TICKS_PER_MIN: z.string().optional(),
+  PREDICTIVE_RPC_BUDGET_USD_PER_HOUR: z.string().optional(),
+  PREDICTIVE_MAX_USERS_PER_SIGNAL_PER_ASSET: z.string().optional(),
+  // Deduplication
+  PREDICTIVE_DEDUP_CACHE_TTL_SEC: z.string().optional(),
+  PREDICTIVE_DEDUP_CACHE_MAX_SIZE: z.string().optional(),
+  // Per-user debounce
+  PER_USER_BLOCK_DEBOUNCE: z.string().optional(),
+  // Index jump gating
+  INDEX_JUMP_PREDICTION_ENABLED: z.string().optional(),
+  INDEX_JUMP_MIN_BPS: z.string().optional(),
   
   // ==== MICRO-VERIFICATION FAST PATH ====
   // Enable micro-verification for immediate single-user HF checks
@@ -1063,7 +1080,7 @@ export const env = (() => {
     predictiveVolatilityBpsScaleMax: Number(parsed.PREDICTIVE_VOLATILITY_BPS_SCALE_MAX || 100), // 1.00%
     predictiveFallbackIntervalBlocks: Number(parsed.PREDICTIVE_FALLBACK_INTERVAL_BLOCKS || 20),
     predictiveFallbackIntervalMs: Number(parsed.PREDICTIVE_FALLBACK_INTERVAL_MS || 30000), // 30 seconds
-    predictiveFallbackEnabled: (parsed.PREDICTIVE_FALLBACK_ENABLED || 'true').toLowerCase() === 'true',
+    predictiveFallbackEnabled: (parsed.PREDICTIVE_FALLBACK_ENABLED || 'false').toLowerCase() === 'true',
     predictiveFallbackNearOnly: (parsed.PREDICTIVE_FALLBACK_NEAR_ONLY || 'true').toLowerCase() === 'true',
     fastpathPredictiveEtaCapSec: Number(parsed.FASTPATH_PREDICTIVE_ETA_CAP_SEC || 45), // 45 seconds
     predictivePriorityHfWeight: Number(parsed.PREDICTIVE_PRIORITY_HF_WEIGHT || 1.0),
@@ -1072,6 +1089,17 @@ export const env = (() => {
     predictivePriorityScenarioWeightBaseline: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_BASELINE || 1.0),
     predictivePriorityScenarioWeightAdverse: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_ADVERSE || 1.15),
     predictivePriorityScenarioWeightExtreme: Number(parsed.PREDICTIVE_PRIORITY_SCENARIO_WEIGHT_EXTREME || 1.3),
+    // Predictive RPC Optimization (PR #181)
+    predictiveSignalGateEnabled: (parsed.PREDICTIVE_SIGNAL_GATE_ENABLED || 'true').toLowerCase() === 'true',
+    predictivePythDeltaPct: Number(parsed.PREDICTIVE_PYTH_DELTA_PCT || 0.01),
+    predictiveMaxTicksPerMin: Number(parsed.PREDICTIVE_MAX_TICKS_PER_MIN || 6),
+    predictiveRpcBudgetUsdPerHour: Number(parsed.PREDICTIVE_RPC_BUDGET_USD_PER_HOUR || 1.5),
+    predictiveMaxUsersPerSignalPerAsset: Number(parsed.PREDICTIVE_MAX_USERS_PER_SIGNAL_PER_ASSET || 60),
+    predictiveDedupCacheTtlSec: Number(parsed.PREDICTIVE_DEDUP_CACHE_TTL_SEC || 120),
+    predictiveDedupCacheMaxSize: Number(parsed.PREDICTIVE_DEDUP_CACHE_MAX_SIZE || 1000),
+    perUserBlockDebounce: Number(parsed.PER_USER_BLOCK_DEBOUNCE || 3),
+    indexJumpPredictionEnabled: (parsed.INDEX_JUMP_PREDICTION_ENABLED || 'false').toLowerCase() === 'true',
+    indexJumpMinBps: Number(parsed.INDEX_JUMP_MIN_BPS || 6),
     
     // ==== MICRO-VERIFICATION FAST PATH ====
     microVerifyEnabled: (parsed.MICRO_VERIFY_ENABLED || 'true').toLowerCase() === 'true',

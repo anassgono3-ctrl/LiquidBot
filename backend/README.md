@@ -93,11 +93,81 @@ MIN_DEBT_USD=5
 The **FallbackOrchestrator** implements conditional predictive evaluation based on system health:
 
 ```bash
-# Enable predictive fallback (default: true)
-PREDICTIVE_FALLBACK_ENABLED=true
+# Enable predictive fallback (default: false)
+# When false, predictive ONLY runs on validated price signals
+PREDICTIVE_FALLBACK_ENABLED=false
 
 # Only evaluate near-band users when healthy (default: true)
 PREDICTIVE_FALLBACK_NEAR_ONLY=true
+```
+
+**Signal-Based Gating (NEW in PR #181):**
+
+Predictive evaluation is now gated behind validated price signals to prevent wasteful evaluations:
+
+```bash
+# Enable signal-based gating (default: true)
+# When true, predictive only runs on validated price signals, not every block
+PREDICTIVE_SIGNAL_GATE_ENABLED=true
+
+# Pyth price delta threshold for triggering (default: 0.01 = 1%)
+PREDICTIVE_PYTH_DELTA_PCT=0.01
+
+# Maximum predictive ticks per minute (default: 6)
+PREDICTIVE_MAX_TICKS_PER_MIN=6
+
+# Hourly RPC budget in USD (default: 1.5)
+# Stops predictive for remainder of hour if budget exceeded
+PREDICTIVE_RPC_BUDGET_USD_PER_HOUR=1.5
+
+# Maximum users per signal per asset (default: 60)
+PREDICTIVE_MAX_USERS_PER_SIGNAL_PER_ASSET=60
+```
+
+**Deduplication Cache:**
+
+LRU cache with TTL prevents re-evaluating same users within time window:
+
+```bash
+# Deduplication cache TTL in seconds (default: 120)
+PREDICTIVE_DEDUP_CACHE_TTL_SEC=120
+
+# Cache maximum size (default: 1000)
+PREDICTIVE_DEDUP_CACHE_MAX_SIZE=1000
+
+# Per-user block debounce (default: 3 blocks)
+PER_USER_BLOCK_DEBOUNCE=3
+```
+
+**How Signal Gating Works:**
+
+1. **Pyth Signals**: When enabled (`PYTH_ENABLED=true`), predictive evaluates when:
+   - Pyth price delta ≥ `PREDICTIVE_PYTH_DELTA_PCT` (default 1%)
+   - TWAP sanity check passes (if `TWAP_ENABLED=true`)
+   - Debounce window has elapsed
+
+2. **Chainlink Signals**: When `PRICE_TRIGGER_ENABLED=true`, predictive evaluates on:
+   - NewTransmission events from monitored price feeds
+   - Per-asset debounce windows respected (`PRICE_TRIGGER_DEBOUNCE_BY_ASSET`)
+
+3. **Fallback Mode**: When `PREDICTIVE_FALLBACK_ENABLED=true`:
+   - Runs periodic evaluations even without signals
+   - Only activates if signal gating disabled OR no signal sources active
+
+**Budget Enforcement:**
+
+Three layers of budget control prevent RPC cost runaway:
+
+1. **Per-Block Cap**: Max users evaluated per tick (`PREDICTIVE_MAX_USERS_PER_TICK`)
+2. **Per-Minute Rate Limit**: Max evaluation ticks per minute (`PREDICTIVE_MAX_TICKS_PER_MIN`)
+3. **Hourly Budget**: Estimated USD spend tracked; stops when exceeded
+
+**Impact:**
+
+- **Idle Mode**: With Pyth+TWAP disabled and no price-trigger, predictive remains idle (0 RPC spend)
+- **Quiet Markets**: In stable periods, predictive RPC spend stays below $1.50/hour
+- **Volatile Markets**: Budget caps prevent runaway costs even during high signal frequency
+- **Deduplication**: Cache prevents re-prestaging same user across consecutive blocks
 
 # Maximum users evaluated per tick (default: 100)
 MAX_TARGET_USERS_PER_TICK=100
